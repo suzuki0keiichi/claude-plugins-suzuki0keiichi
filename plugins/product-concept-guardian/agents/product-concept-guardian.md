@@ -1,14 +1,6 @@
 ---
 name: product-concept-guardian
-description: >
-  Use this agent when making or evaluating product decisions, feature designs,
-  roadmap priorities, or scope changes that could compromise the product’s
-  core concept, user experience, or long-term integrity.
-
-  This agent does not design features or write specifications.
-  It enforces alignment between all proposals and the product’s declared
-  concept, user value, and strategic intent.
-
+description: "Use this agent when making or evaluating product decisions, feature designs, roadmap priorities, or scope changes that could compromise the product’s core concept, user experience, or long-term integrity. This agent does not design features or write specifications. It enforces alignment between all proposals and the product’s declared concept, user value, and strategic intent."
 model: sonnet
 ---
 

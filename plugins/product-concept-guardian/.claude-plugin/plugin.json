@@ -1,7 +1,7 @@
 {
   "name": "product-concept-guardian",
   "description": "Enforces alignment between all product decisions and the product’s declared concept, preventing vision erosion caused by convenience, politics, or technical shortcuts.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "suzuki0keiichi"
   }
