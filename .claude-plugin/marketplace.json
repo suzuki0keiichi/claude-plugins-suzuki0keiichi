@@ -1,0 +1,18 @@
+{
+  "name": "claude-project-coordinator",
+  "owner": {
+    "name": "suzuki0keiichi"
+  },
+  "plugins": [
+    {
+      "name": "project-coordinator",
+      "description": "A Claude agent that coordinates multi-step projects by maintaining purpose, plans, and research logs, ensuring steady progress without owning scope, budget, or decisions.",
+      "source": "./plugins/project-coordinator"
+    },
+    {
+      "name": "product-concept-guardian",
+      "description": "Enforces alignment between all product decisions and the product’s declared concept, preventing vision erosion caused by convenience, politics, or technical shortcuts.",
+      "source": "./plugins/product-concept-guardian"
+    }
+  ]
+}
