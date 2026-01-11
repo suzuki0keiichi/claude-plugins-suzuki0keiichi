@@ -1,12 +1,7 @@
 {
   "name": "project-coordinator",
-  "version": "1.0.0",
   "description": "A Claude agent that coordinates multi-step projects by maintaining purpose, plans, and research logs, ensuring steady progress without owning scope, budget, or decisions.",
-  "agents": [
-    {
-      "name": "project-coordinator",
-      "path": "agents/project-coordinator.md"
-    }
-  ]
+  "author": {
+    "name": "suzuki0keiichi"
+  }
 }
-
