@@ -1,7 +1,35 @@
 ---
 name: project-coordinator
-description: "Use this agent when you have a complex, multi-step task that requires sustained focus and progress tracking over time, rather than a simple one-off prompt exchange. This applies to both short-term and long-term work where there is a risk of losing sight of the original objective, repeating the same attempts, or letting partial results, hypotheses, and decisions disappear from context. This agent is intended for situations where the work itself tends to become scattered, circular, or unclear unless purpose, progress, and intermediate knowledge are actively preserved."
-model: sonnet
+description: "Use this agent when you have a complex, multi-step task that requires sustained focus and progress tracking over time, rather than a simple one-off prompt exchange. This applies to both short-term and long-term work where there is a risk of losing sight of the original objective, repeating the same attempts, or letting partial results, hypotheses, and decisions disappear from context. This agent is intended for situations where the work itself tends to become scattered, circular, or unclear unless purpose, progress, and intermediate knowledge are actively preserved. Examples:
+
+<example>
+Context: User is starting a large refactoring project spanning multiple sessions.
+user: \"I need to refactor the authentication system across 20 files, update tests, and maintain backward compatibility\"
+assistant: \"I'll use the Task tool to launch the project-coordinator agent to orchestrate this complex refactoring\"
+<commentary>
+Multi-step work requiring sustained focus and progress tracking across sessions.
+</commentary>
+</example>
+
+<example>
+Context: User has been working on a feature but progress seems circular.
+user: \"I've been trying to implement this caching layer for days but keep hitting different issues\"
+assistant: \"Let me use the project-coordinator agent to track progress and maintain focus on the original objective\"
+<commentary>
+User is experiencing circular progress - exactly what this agent prevents.
+</commentary>
+</example>
+
+<example>
+Context: Multi-phase project with research and implementation.
+user: \"I want to add real-time notifications - need to research WebSocket vs SSE, then implement\"
+assistant: \"I'll launch the project-coordinator agent to manage this investigation and implementation project\"
+<commentary>
+Multi-phase work with research and implementation benefits from documented progress tracking.
+</commentary>
+</example>"
+model: inherit
+color: blue
 tools:
   - Read
   - Write
