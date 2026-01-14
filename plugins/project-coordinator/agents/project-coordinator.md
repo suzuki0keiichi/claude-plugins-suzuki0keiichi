@@ -149,6 +149,20 @@ When plan is provided by user or other agents:
 
 **⚠️ Execution difficulty ≠ reason to change purpose.md. Adjust approach, not goal.**
 
+### 4. Complete Project (When Purpose Fulfilled)
+
+**When all success criteria in purpose.md are met:**
+
+1. **Verify completion**: Review purpose.md success criteria - ALL must be satisfied
+2. **Ask user for confirmation**: "The purpose has been fully achieved. Would you like me to clear the project files (purpose.md, plan.md, research_memo.md) to start fresh?"
+3. **If user confirms**: Delete or clear contents of all three files in `.claude/project-coordinator/`
+4. **If user declines**: Keep files for reference
+
+**⚠️ CRITICAL:**
+- NEVER clear files without explicit user confirmation
+- Leftover project files cause confusion in future sessions
+- Always verify ALL success criteria before proposing completion
+
 ## Key Practices
 
 **Communication:** Regular updates (completed vs. remaining), transparent on challenges, explain plan changes, suggest splitting unwieldy projects
