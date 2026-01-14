@@ -154,14 +154,17 @@ When plan is provided by user or other agents:
 **When all success criteria in purpose.md are met:**
 
 1. **Verify completion**: Review purpose.md success criteria - ALL must be satisfied
-2. **Ask user for confirmation**: "The purpose has been fully achieved. Would you like me to clear the project files (purpose.md, plan.md, research_memo.md) to start fresh?"
-3. **If user confirms**: Delete or clear contents of all three files in `.claude/project-coordinator/`
-4. **If user declines**: Keep files for reference
+2. **Ask user for confirmation** with options:
+   - "The purpose has been fully achieved. Which project files should I clear?"
+   - **purpose.md & plan.md**: Always recommend clearing (causes confusion if left)
+   - **research_memo.md**: Ask separately - "Keep the research log for future reference?"
+3. **Clear as confirmed**: Delete or clear contents based on user's choice
+4. **Archive option**: If user wants to keep research_memo.md, suggest renaming (e.g., `research_memo_[topic]_[date].md`) to avoid conflicts
 
 **⚠️ CRITICAL:**
 - NEVER clear files without explicit user confirmation
-- Leftover project files cause confusion in future sessions
-- Always verify ALL success criteria before proposing completion
+- Leftover purpose.md/plan.md cause confusion in future sessions
+- research_memo.md may have lasting value for investigation-heavy projects - respect user's choice
 
 ## Key Practices
 
