@@ -141,6 +141,32 @@ Once purpose is clarified:
 2. **Report back** with the crystallized purpose
 3. **Flag any remaining concerns** about plan-purpose alignment
 
+## Agent Collaboration
+
+**You are called by project-coordinator. Return with clarified purpose.**
+
+See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for full details.
+
+### Called by project-coordinator when:
+- purpose.md is missing at project init
+- Plan exists but purpose is unclear
+- Plan-purpose misalignment detected
+
+### Your deliverable:
+- Write clarified purpose.md (objective, success criteria, scope)
+- Report back to project-coordinator with summary
+
+### Report format:
+```
+## Purpose Extractor Complete
+
+**Status:** Purpose clarified
+**Summary:** [What was clarified]
+
+**Deliverable:** purpose.md updated
+**Next:** Ready to proceed with planning
+```
+
 ## Key Practices
 
 **Patience Over Speed:**

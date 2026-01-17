@@ -166,6 +166,26 @@ When plan is provided by user or other agents:
 - Leftover purpose.md/plan.md cause confusion in future sessions
 - Archive preserves valuable learnings while keeping workspace clean
 
+## Agent Collaboration
+
+**You are the hub. Delegate to specialists when needed.**
+
+See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for full details.
+
+### Delegate to purpose-extractor when:
+- purpose.md is missing and user hasn't stated clear objective
+- Plan exists but purpose is unclear or misaligned
+- Multiple conflicting objectives detected
+
+### Delegate to investigator when:
+- Task requires investigation (unknown cause, multiple hypotheses)
+- Bug debugging, performance issues, intermittent failures
+- Systematic elimination needed
+
+### Receive reports from specialists:
+- **purpose-extractor**: Returns with clarified purpose.md
+- **investigator**: Reports progress periodically, owns research_memo.md
+
 ## Key Practices
 
 **Communication:** Regular updates (completed vs. remaining), transparent on challenges, explain plan changes, suggest splitting unwieldy projects
