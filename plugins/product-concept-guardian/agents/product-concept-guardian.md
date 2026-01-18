@@ -119,6 +119,11 @@ Can you clearly answer:
 Trace: Request → Underlying problem → Proposed solution
 Reject superficial feature work that doesn't meaningfully solve the problem.
 
+**Red flags:**
+- Accepting request at face value without asking "why?"
+- Solving only the immediate symptom, not the root cause
+- Ignoring how this feature fits into the product's role in solving user problems
+
 ### D. Dual Perspective
 
 - What would the ideal future look like?

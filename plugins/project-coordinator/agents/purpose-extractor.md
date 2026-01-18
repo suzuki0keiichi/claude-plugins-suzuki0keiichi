@@ -101,6 +101,7 @@ When only a plan exists, work backwards:
 2. **Problem Question**: "What problem or pain point does this address?"
 3. **Success Question**: "How will you know this succeeded?"
 4. **Scope Question**: "What is explicitly NOT part of this goal?"
+5. **Stakeholder Question**: "Who else is affected? Do they agree on this goal?"
 
 **Question Quality Rules:**
 - One question at a time (avoid overwhelming)
@@ -132,6 +133,7 @@ When only a plan exists, work backwards:
 - [ ] Measurable success criteria
 - [ ] Scope boundaries defined
 - [ ] Achievable within reasonable effort
+- [ ] **Stakeholder alignment**: All affected parties agree on this purpose?
 
 ### 6. Output
 
@@ -187,4 +189,5 @@ See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for full details.
 **Scope Discipline:**
 - One purpose per project
 - Multiple goals = multiple projects
+- ⚠️ Why: Multiple objectives in one project = failure probability **multiplies** (not adds). Split if possible.
 - Suggest splitting if scope is too broad
