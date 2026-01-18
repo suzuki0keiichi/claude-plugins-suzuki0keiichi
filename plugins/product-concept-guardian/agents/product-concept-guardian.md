@@ -16,6 +16,7 @@ description: "**MANDATORY TRIGGER**: Call this agent whenever there is ANY chang
 - Pure internal refactoring (zero UX change)
 - Bug fix that restores original intended behavior exactly
 - Changes invisible to users
+- **Implementing changes that this agent already approved or suggested** (no re-check needed)
 
 Examples:
 
