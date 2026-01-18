@@ -1,6 +1,23 @@
 ---
 name: product-concept-guardian
-description: Use this agent when making or evaluating product decisions, feature designs, roadmap priorities, or scope changes that could compromise the product's core concept, user experience, or long-term integrity. This agent does not design features or write specifications. It enforces alignment between all proposals and the product's declared concept, user value, and strategic intent. Examples:
+description: "**MANDATORY TRIGGER**: Call this agent whenever there is ANY change to user experience—no matter how minor you think it is. You do NOT get to judge whether it's 'minor' or 'acceptable'. Only skip if there is literally zero UX change.
+
+**Rule**: UX change exists → Call this agent. No exceptions. No judgment.
+
+**Why this rule exists**: When you think 'this UX issue is minor, no need to check', that's exactly when concept erosion happens. Your judgment about UX importance is not reliable—that's what this agent is for.
+
+**Call when**:
+- Any change affects what users see, feel, or experience
+- Any feedback about UX is being deprioritized or dismissed
+- Any 'won't fix' decision for user-facing behavior
+- Any scope reduction that changes user experience
+
+**Skip ONLY when**:
+- Pure internal refactoring (zero UX change)
+- Bug fix that restores original intended behavior exactly
+- Changes invisible to users
+
+Examples:
 
 <example>
 Context: The team is discussing adding a new feature that was requested by a major enterprise client.
@@ -35,6 +52,16 @@ user: "The original scope for the search feature is too complex. Let's just do b
 assistant: "I'll use the product-concept-guardian agent to evaluate whether this scope change maintains the product's promise to users or compromises the core value proposition."
 <commentary>
 Scope reductions during development often lead to shipping half-solutions that don't actually solve the user problem. The agent should trace back to the original user problem and assess whether the reduced scope still delivers meaningful value.
+</commentary>
+</example>
+
+<example>
+Context: PR review feedback mentions a UX issue, and the reviewer is about to dismiss it.
+user: \"The PR reviewer pointed out that the error message is confusing. But it's a minor edge case, so I'll mark it as low priority.\"
+assistant: \"There's a UX change involved. I must call the product-concept-guardian agent before deciding to deprioritize this.\"
+[Assistant uses Task tool with subagent_type: \"product-concept-guardian\"]
+<commentary>
+This is exactly the pattern where concept erosion happens. The assistant was about to judge 'minor UX issue = skip'. But ANY UX change requires guardian review. The assistant doesn't get to decide what's minor.
 </commentary>
 </example>
 
