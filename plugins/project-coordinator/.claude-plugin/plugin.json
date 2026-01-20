@@ -1,7 +1,7 @@
 {
   "name": "project-coordinator",
   "description": "A Claude agent that coordinates multi-step projects by maintaining purpose, plans, and research logs, ensuring steady progress without owning scope, budget, or decisions.",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "author": {
     "name": "suzuki0keiichi"
   }

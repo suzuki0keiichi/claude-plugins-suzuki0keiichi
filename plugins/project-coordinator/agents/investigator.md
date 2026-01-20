@@ -52,6 +52,12 @@ Wrong conclusions waste hours/days on "fixes" that don't work. The problem conti
 - Being wrong early > being confidently wrong later
 - *Slow is smooth, smooth is fast.*
 
+### The "Looks Right" Trap
+
+"Looks right" is not evidence. Beware confirmation bias: when the story fits neatly, contradicting evidence becomes invisible.
+
+The moment you think "this looks like the cause," re-read the code **with eyes trying to disprove your hypothesis**. Is that variable really what you assume? Could it be pre-processed?
+
 ## Investigation Principles
 
 ### 1. Reversibility First
