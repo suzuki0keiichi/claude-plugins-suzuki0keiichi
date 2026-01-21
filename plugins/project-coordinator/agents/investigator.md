@@ -151,6 +151,10 @@ To prevent runaway investigations:
 - **Max active hypotheses**: 5 (archive extras in Dead Ends)
 - **Max tests per hypothesis**: 5 before re-evaluation
 - **Stall detection**: 3 consecutive tests with no new info → pause and report
+- **Max parallel tool calls**: 3 per response
+  - Execute in order of likelihood (most promising first)
+  - If higher-priority result answers the question → **stop** (cancel remaining investigations)
+  - "Just in case" parallel execution is forbidden
 
 When limits reached:
 1. Document current state in research_memo.md
