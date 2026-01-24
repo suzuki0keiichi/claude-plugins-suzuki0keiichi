@@ -185,8 +185,34 @@ Proceed with execution
 
 ### From Coordinator → Specialist
 
-Context is passed via task description:
-- Current purpose (from purpose.md)
-- Relevant plan context
-- Specific question or task
-- Expected deliverable
+**Use Task tool to call specialists.** Context is passed via prompt parameter:
+
+```markdown
+## Calling investigator
+Task tool:
+  subagent_type: "project-coordinator:investigator"
+  prompt: |
+    ## Context
+    [Summary of purpose.md]
+
+    ## Current Step
+    [Relevant step from plan.md]
+
+    ## Task
+    [Specific investigation instructions]
+
+    ## Expected Deliverable
+    [What you expect back]
+
+## Calling purpose-extractor
+Task tool:
+  subagent_type: "project-coordinator:purpose-extractor"
+  prompt: |
+    ## User Request
+    [Original user request]
+
+    ## Background
+    [Any relevant context]
+```
+
+**⚠️ CRITICAL:** "Delegate to X" means "Use Task tool with subagent_type". Never skip the Task tool call.
