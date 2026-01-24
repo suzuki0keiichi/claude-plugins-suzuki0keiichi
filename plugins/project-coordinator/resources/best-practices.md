@@ -42,6 +42,18 @@ These are distilled from years of experience. At each breakpoint, systematically
     - Too frequent → noise and distraction
     - Right level → stakeholders informed, decisions timely
 
+## Context Degradation
+
+**You cannot detect your own degradation.** As context grows:
+- Attention to initial rules weakens
+- You may drift from guidelines without noticing
+- "I'm still following the rules" feeling is unreliable
+
+**Mitigation:**
+- Keep sessions short (return after each step)
+- Write to external files before context compresses
+- Trust the return conditions, not your judgment of "I can continue"
+
 ## Quick Check
 
 Before proceeding, can you answer:

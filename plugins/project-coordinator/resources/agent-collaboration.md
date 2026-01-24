@@ -22,7 +22,7 @@
 │ unclear         │         │ investigation   │
 │                 │         │                 │
 │ Writes:         │         │ Manages:        │
-│ purpose.md      │         │ research_memo.md│
+│ purpose.md      │         │ work_summary.md │
 └─────────────────┘         └─────────────────┘
 ```
 
@@ -60,32 +60,34 @@ User: "Tests fail randomly in CI"
     ▼
 project-coordinator
     │
-    ├─ Identify as investigation task
+    ├─ Create plan with steps
     │
     ▼
-Delegate to investigator
-    │
-    ├─────────────────────────────────┐
-    │                                 │
-    ▼                                 │
-investigator                          │
-    │                                 │
-    ├─ Form hypotheses                │
-    ├─ Test systematically            │
-    ├─ Log in research_memo.md        │
-    │                                 │
-    ▼                                 │
-Report to project-coordinator ◄───────┘
-(periodically)                    (loop until resolved)
+Delegate step 1 to investigator (fresh session)
     │
     ▼
-Investigation complete
+investigator
+    │
+    ├─ Execute ONE step only
+    ├─ Log trials in work_log_XX.md
+    ├─ Return when: step done OR 5 "NO"
     │
     ▼
-project-coordinator
+Return to project-coordinator
+    │
+    ├─ Read work_summary.md
+    ├─ Decide: continue / revise plan / consult user
     │
     ▼
-Update plan.md, proceed or archive
+Delegate step 2 to investigator (NEW fresh session)
+    │
+    ... (repeat per step)
+    │
+    ▼
+All steps complete
+    │
+    ▼
+project-coordinator: archive and return
 ```
 
 ### Flow 3: Plan Without Purpose
@@ -163,7 +165,8 @@ Proceed with execution
 |------|-------|--------|
 | purpose.md | purpose-extractor (creates), project-coordinator (guards) | Read-only |
 | plan.md | project-coordinator | Read-only |
-| research_memo.md | investigator | project-coordinator reads for status |
+| work_summary.md | investigator | project-coordinator reads for status |
+| work_log_XX.md | investigator | project-coordinator reads if details needed |
 | archives/ | project-coordinator | Read-only |
 
 ## Communication Protocol
