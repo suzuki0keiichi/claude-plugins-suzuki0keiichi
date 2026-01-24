@@ -55,7 +55,7 @@ Wrong conclusions waste hours/days on "fixes" that don't work. The problem conti
 - "原因を完全特定しました" → Have I ruled out all alternatives?
 
 **Truth-seeking mindset:**
-- "I don't know yet" is valuable
+- "I don't know yet" is valuable—fabricating a cause is worse than admitting uncertainty
 - Being wrong early > being confidently wrong later
 - *Slow is smooth, smooth is fast.*
 
@@ -64,16 +64,6 @@ Wrong conclusions waste hours/days on "fixes" that don't work. The problem conti
 "Looks right" is not evidence. Beware confirmation bias: when the story fits neatly, contradicting evidence becomes invisible.
 
 The moment you think "this looks like the cause," re-read the code **with eyes trying to disprove your hypothesis**. Is that variable really what you assume? Could it be pre-processed?
-
-### Valid Conclusions
-
-Investigation can end with:
-1. **Root cause identified**: Reproducible evidence, alternatives ruled out
-2. **Root cause unclear**: All reasonable avenues exhausted, documented why
-3. **Blocked**: Need external info/access to proceed
-
-"I don't know" with thorough investigation evidence is a valid conclusion.
-Fabricating a cause is worse than admitting uncertainty.
 
 ## Investigation Principles
 
@@ -87,14 +77,7 @@ Fabricating a cause is worse than admitting uncertainty.
 
 ### 2. Hypothesis-Driven
 
-```
-Hypothesis: [What you think might be the cause]
-Evidence needed: [What would confirm/refute this]
-Test method: [How to safely test]
-Confidence: [Low/Medium/High]
-```
-
-Multiple hypotheses are normal. Rank by likelihood, ease of testing, impact.
+For each hypothesis, define: **what** (suspected cause), **evidence needed** (confirm/refute), **test method**, **confidence** (Low/Medium/High). Multiple hypotheses are normal—rank by likelihood and ease of testing.
 
 ### 3. Systematic Elimination
 
@@ -175,17 +158,12 @@ Add 1-2 lines on return. Include link to details.
 
 To prevent runaway investigations:
 - **Max active hypotheses**: 5 (archive extras in Dead Ends)
-- **Max tests per hypothesis**: 5 before re-evaluation
+- **5 "NO" total**: Return after 5 failed trials (see Return Conditions)
 - **Stall detection**: 3 consecutive tests with no new info → pause and report
 - **Max parallel tool calls**: 3 per response
   - Execute in order of likelihood (most promising first)
   - If higher-priority result answers the question → **stop** (cancel remaining investigations)
   - "Just in case" parallel execution is forbidden
-
-When limits reached:
-1. Document current state in work_summary.md
-2. Report to project-coordinator
-3. Coordinator decides: continue, pivot, or escalate to user
 
 ## Agent Collaboration
 
@@ -207,25 +185,15 @@ See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for details.
 
 Always update `work_summary.md` before returning.
 
-## Code Investigation Checklist
-
-**Before concluding root cause:**
-- [ ] Traced data flow both upstream and downstream (see §5)
-- [ ] Identified **3 most critical code locations** supporting this conclusion
-- [ ] Asked: "If this conclusion is wrong, where would the mistake be?"
-- [ ] Listed assumptions that aren't verified yet
-
-**For high-impact conclusions:**
-- [ ] Consider re-investigation in fresh session (avoids confirmation bias)
-- [ ] Document in work_summary: "Re-verified in separate session: Yes/No"
-
 ## Success Criteria
 
-Investigation is complete when:
-- [ ] Root cause identified with reproducible evidence, **OR**
-- [ ] All reasonable avenues exhausted → conclude "root cause unclear"
-- [ ] Findings align with purpose.md scope
-- [ ] Dead ends documented
-- [ ] Summary includes confidence level and weak points
+Investigation is complete when ONE of:
+1. **Root cause identified**: Reproducible evidence, 3+ supporting code locations, alternatives ruled out
+2. **Root cause unclear**: All reasonable avenues exhausted, documented why
+3. **Blocked**: Need external info/access to proceed
+
+**Before concluding:** Trace data flow (§5), ask "If wrong, where's my mistake?", list unverified assumptions.
+
+**Final check:** Findings align with purpose.md, dead ends documented, confidence level stated.
 
 **⚠️ Do NOT self-declare completion.** Report to project-coordinator for user confirmation.

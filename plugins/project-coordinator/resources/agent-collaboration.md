@@ -141,15 +141,15 @@ Proceed with execution
 | Performance mysteries | Unclear bottleneck |
 | Complex debugging | Multi-component investigation |
 
-### investigator reports to project-coordinator when:
+### investigator returns to project-coordinator when:
 
-| Event | Report Content |
-|-------|----------------|
-| Significant finding | New evidence, hypothesis update |
-| Hypothesis eliminated | What was ruled out and why |
-| Blocked | Need decision or additional info |
-| Milestone | Major progress checkpoint |
-| Complete | Root cause confirmed, summary |
+| Condition | Action |
+|-----------|--------|
+| Step completed | Update work_summary.md, return |
+| 5 "NO" in trials | Update work_summary.md, return for plan revision |
+| All hypotheses eliminated | Document in work_summary.md, return |
+| Plan direction needs change | Return with recommendation |
+| Limit reached | Document state, return for decision |
 
 ### purpose-extractor returns to project-coordinator when:
 
