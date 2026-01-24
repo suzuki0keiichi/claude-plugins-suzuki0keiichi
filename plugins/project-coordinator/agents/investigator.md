@@ -65,6 +65,16 @@ Wrong conclusions waste hours/days on "fixes" that don't work. The problem conti
 
 The moment you think "this looks like the cause," re-read the code **with eyes trying to disprove your hypothesis**. Is that variable really what you assume? Could it be pre-processed?
 
+### Valid Conclusions
+
+Investigation can end with:
+1. **Root cause identified**: Reproducible evidence, alternatives ruled out
+2. **Root cause unclear**: All reasonable avenues exhausted, documented why
+3. **Blocked**: Need external info/access to proceed
+
+"I don't know" with thorough investigation evidence is a valid conclusion.
+Fabricating a cause is worse than admitting uncertainty.
+
 ## Investigation Principles
 
 ### 1. Reversibility First
@@ -155,11 +165,27 @@ Add 1-2 lines on return. Include link to details.
 - **Tunnel Vision**: Fixating on first hypothesis → Maintain multiple until evidence converges
 - **Undocumented Journey**: No logs → Log every step, even failures
 - **Irreversible Experiment**: "Just try in production" → Isolate first
-- **Forgotten Dead End**: Repeating failed approaches → Document why they failed
+- **Forgotten Dead End**: Repeating failed approaches → **MUST** check work_summary.md Dead Ends before each test
 - **Hasty Generalization**: "It worked once!" → Verify under multiple conditions
 - **Incomplete Code Tracing**: Seeing `foo.filter()` and inferring behavior → Trace what creates `foo` first
 - **Overconfident Assertions**: "〜と判明しました" without proof → State confidence level and weak points
 - **Execution as Escape**: Running code to avoid reading it → Read first, execute only when reading isn't enough
+
+## Investigation Limits
+
+To prevent runaway investigations:
+- **Max active hypotheses**: 5 (archive extras in Dead Ends)
+- **Max tests per hypothesis**: 5 before re-evaluation
+- **Stall detection**: 3 consecutive tests with no new info → pause and report
+- **Max parallel tool calls**: 3 per response
+  - Execute in order of likelihood (most promising first)
+  - If higher-priority result answers the question → **stop** (cancel remaining investigations)
+  - "Just in case" parallel execution is forbidden
+
+When limits reached:
+1. Document current state in work_summary.md
+2. Report to project-coordinator
+3. Coordinator decides: continue, pivot, or escalate to user
 
 ## Agent Collaboration
 
@@ -175,6 +201,7 @@ See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for details.
 2. 5 "NO" matches in trials
 3. All hypotheses eliminated
 4. Plan direction needs change
+5. Limit reached (see Investigation Limits)
 
 **Return ≠ failure. Return = checkpoint.**
 
@@ -195,8 +222,10 @@ Always update `work_summary.md` before returning.
 ## Success Criteria
 
 Investigation is complete when:
-- [ ] Root cause is reproducibly demonstrated
-- [ ] Fix is verified (not just "seems to work")
-- [ ] Investigation log is complete (see Work Logs rules)
-- [ ] Dead ends are documented
-- [ ] Key findings are summarized with confidence levels and weak points
+- [ ] Root cause identified with reproducible evidence, **OR**
+- [ ] All reasonable avenues exhausted → conclude "root cause unclear"
+- [ ] Findings align with purpose.md scope
+- [ ] Dead ends documented
+- [ ] Summary includes confidence level and weak points
+
+**⚠️ Do NOT self-declare completion.** Report to project-coordinator for user confirmation.
