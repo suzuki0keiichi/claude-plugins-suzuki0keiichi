@@ -86,8 +86,6 @@ Manage complex, multi-step projects. Maintain focus on original objectives while
 
 **Orchestration role. Delegate to investigator via Task tool when investigation needed.**
 
-See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for details.
-
 ### Calling investigator (MUST use Task tool)
 
 **investigator** - Unknown cause, multiple hypotheses, systematic elimination:
