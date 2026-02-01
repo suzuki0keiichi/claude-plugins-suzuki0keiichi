@@ -4,11 +4,12 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    project-coordinator                       │
-│                   (Orchestrator / Hub)                       │
+│          Main Agent + project-management skill              │
+│                   (Orchestrator / Hub)                      │
 │                                                             │
 │  Manages: purpose.md, plan.md                               │
 │  Role: Overall coordination, progress tracking, archiving   │
+│  Reports: Directly to user (visibility)                     │
 └──────────────────────┬──────────────────────────────────────┘
                        │
          ┌─────────────┴─────────────┐
@@ -26,6 +27,19 @@
 └─────────────────┘         └─────────────────┘
 ```
 
+## Why This Architecture
+
+### Main Agent as Orchestrator (with Skill)
+
+- **User visibility**: Main agent reports directly to user
+- **Compaction resilience**: Rules trigger skill reload after compaction
+- **Stable orchestration**: Avoids "waiting" issues of sub-agent orchestrators
+
+### Specialists as Agents
+
+- **Context separation**: Investigation consumes large context; keep it isolated
+- **Single-task fit**: "Investigate and return" matches sub-agent pattern well
+
 ## Collaboration Flows
 
 ### Flow 1: Standard Project
@@ -34,7 +48,7 @@
 User Request
     │
     ▼
-project-coordinator
+Main Agent (reads project-management skill)
     │
     ├─ purpose.md exists & clear? ─── YES ──→ Create/update plan.md
     │                                              │
@@ -42,14 +56,14 @@ project-coordinator
     │                                         Execute plan
     ▼                                              │
 purpose-extractor                                  ▼
-    │                                         Complete
+    │                                    Report progress to user
     ├─ Clarify with user                           │
     │                                              ▼
-    ▼                                    project-coordinator
-Write purpose.md                              (Archive)
-    │
-    ▼
-Return to project-coordinator
+    ▼                                         Complete
+Write purpose.md                                   │
+    │                                              ▼
+    ▼                                    Main Agent (Archive)
+Return to Main Agent
 ```
 
 ### Flow 2: Investigation Task
@@ -58,9 +72,10 @@ Return to project-coordinator
 User: "Tests fail randomly in CI"
     │
     ▼
-project-coordinator
+Main Agent (with skill)
     │
     ├─ Create plan with steps
+    ├─ Report plan to user
     │
     ▼
 Delegate step 1 to investigator (fresh session)
@@ -73,9 +88,10 @@ investigator
     ├─ Return when: step done OR 5 "NO"
     │
     ▼
-Return to project-coordinator
+Return to Main Agent
     │
     ├─ Read work_summary.md
+    ├─ Report progress to user
     ├─ Decide: continue / revise plan / consult user
     │
     ▼
@@ -87,7 +103,7 @@ Delegate step 2 to investigator (NEW fresh session)
 All steps complete
     │
     ▼
-project-coordinator: archive and return
+Main Agent: report completion, archive if requested
 ```
 
 ### Flow 3: Plan Without Purpose
@@ -96,7 +112,7 @@ project-coordinator: archive and return
 User provides plan (or uses Plan Mode)
     │
     ▼
-project-coordinator
+Main Agent (with skill)
     │
     ├─ purpose.md missing or plan-purpose mismatch?
     │
@@ -113,15 +129,15 @@ purpose-extractor
 Write purpose.md
     │
     ▼
-Return to project-coordinator
+Return to Main Agent
     │
     ▼
-Proceed with execution
+Proceed with execution, report to user
 ```
 
 ## When to Call Each Agent
 
-### project-coordinator calls purpose-extractor when:
+### Main Agent calls purpose-extractor when:
 
 | Situation | Trigger |
 |-----------|---------|
@@ -131,7 +147,7 @@ Proceed with execution
 | Multiple objectives | Need to split or clarify scope |
 | Plan Mode output | External plan needs purpose grounding |
 
-### project-coordinator calls investigator when:
+### Main Agent calls investigator when:
 
 | Situation | Trigger |
 |-----------|---------|
@@ -141,7 +157,7 @@ Proceed with execution
 | Performance mysteries | Unclear bottleneck |
 | Complex debugging | Multi-component investigation |
 
-### investigator returns to project-coordinator when:
+### investigator returns to Main Agent when:
 
 | Condition | Action |
 |-----------|--------|
@@ -151,7 +167,7 @@ Proceed with execution
 | Plan direction needs change | Return with recommendation |
 | Limit reached | Document state, return for decision |
 
-### purpose-extractor returns to project-coordinator when:
+### purpose-extractor returns to Main Agent when:
 
 | Event | Deliverable |
 |-------|-------------|
@@ -163,15 +179,15 @@ Proceed with execution
 
 | File | Owner | Others |
 |------|-------|--------|
-| purpose.md | purpose-extractor (creates), project-coordinator (guards) | Read-only |
-| plan.md | project-coordinator | Read-only |
-| work_summary.md | investigator | project-coordinator reads for status |
-| work_log_XX.md | investigator | project-coordinator reads if details needed |
-| archives/ | project-coordinator | Read-only |
+| purpose.md | purpose-extractor (creates), Main Agent (guards) | Read-only |
+| plan.md | Main Agent (with skill) | Read-only |
+| work_summary.md | investigator | Main Agent reads for status |
+| work_log_XX.md | investigator | Main Agent reads if details needed |
+| archives/ | Main Agent | Read-only |
 
 ## Communication Protocol
 
-### From Specialist → Coordinator
+### From Specialist → Main Agent
 
 ```markdown
 ## [Agent] Update
@@ -180,10 +196,10 @@ Proceed with execution
 **Summary:** [1-2 sentences]
 
 **Deliverable:** [What was produced]
-**Next:** [Recommendation for coordinator]
+**Next:** [Recommendation for Main Agent]
 ```
 
-### From Coordinator → Specialist
+### From Main Agent → Specialist
 
 **Use Task tool to call specialists.** Context is passed via prompt parameter:
 
@@ -216,3 +232,16 @@ Task tool:
 ```
 
 **⚠️ CRITICAL:** "Delegate to X" means "Use Task tool with subagent_type". Never skip the Task tool call.
+
+## User Reporting (Key Responsibility)
+
+Main Agent must report to user at these points:
+
+| Timing | Content |
+|--------|---------|
+| After planning | Plan overview, steps, risks |
+| After each step | What completed, next step, progress % |
+| On obstacles | What happened, how to handle |
+| On plan revision | Why, what changed |
+| On delegation | What's being investigated |
+| On completion | Summary of outcomes |
