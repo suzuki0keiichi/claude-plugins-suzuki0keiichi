@@ -4,45 +4,45 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│          Main Agent + project-management skill              │
-│                   (Orchestrator / Hub)                      │
+│   Main Agent + project-management & purpose-extraction      │
+│                      (Orchestrator)                         │
 │                                                             │
+│  Skills: project-management.md, purpose-extraction.md       │
 │  Manages: purpose.md, plan.md                               │
-│  Role: Overall coordination, progress tracking, archiving   │
 │  Reports: Directly to user (visibility)                     │
 └──────────────────────┬──────────────────────────────────────┘
                        │
-         ┌─────────────┴─────────────┐
-         │                           │
-         ▼                           ▼
-┌─────────────────┐         ┌─────────────────┐
-│purpose-extractor│         │   investigator  │
-│                 │         │                 │
-│ When: Purpose   │         │ When: Unknown   │
-│ is missing or   │         │ cause, complex  │
-│ unclear         │         │ investigation   │
-│                 │         │                 │
-│ Writes:         │         │ Manages:        │
-│ purpose.md      │         │ work_summary.md │
-└─────────────────┘         └─────────────────┘
+                       ▼
+              ┌─────────────────┐
+              │   investigator  │
+              │                 │
+              │ When: Unknown   │
+              │ cause, complex  │
+              │ investigation   │
+              │                 │
+              │ Manages:        │
+              │ work_summary.md │
+              └─────────────────┘
 ```
 
 ## Why This Architecture
 
-### Main Agent as Orchestrator (with Skill)
+### Main Agent as Orchestrator (with Skills)
 
 - **User visibility**: Main agent reports directly to user
 - **Compaction resilience**: Rules trigger skill reload after compaction
 - **Stable orchestration**: Avoids "waiting" issues of sub-agent orchestrators
+- **Interactive tasks**: Purpose extraction requires frequent user dialogue
 
-### Specialists as Agents
+### investigator as Agent
 
 - **Context separation**: Investigation consumes large context; keep it isolated
 - **Single-task fit**: "Investigate and return" matches sub-agent pattern well
+- **Deep focus**: Needs to "dig" without distraction
 
-## Collaboration Flows
+## Collaboration Flow
 
-### Flow 1: Standard Project
+### Standard Project Flow
 
 ```
 User Request
@@ -55,18 +55,18 @@ Main Agent (reads project-management skill)
     NO                                             ▼
     │                                         Execute plan
     ▼                                              │
-purpose-extractor                                  ▼
+Read purpose-extraction skill                      ▼
     │                                    Report progress to user
-    ├─ Clarify with user                           │
+    ├─ Clarify with user (direct dialogue)         │
     │                                              ▼
     ▼                                         Complete
 Write purpose.md                                   │
     │                                              ▼
     ▼                                    Main Agent (Archive)
-Return to Main Agent
+Continue with plan
 ```
 
-### Flow 2: Investigation Task
+### Investigation Flow
 
 ```
 User: "Tests fail randomly in CI"
@@ -106,38 +106,9 @@ All steps complete
 Main Agent: report completion, archive if requested
 ```
 
-### Flow 3: Plan Without Purpose
+## When to Use Each Component
 
-```
-User provides plan (or uses Plan Mode)
-    │
-    ▼
-Main Agent (with skill)
-    │
-    ├─ purpose.md missing or plan-purpose mismatch?
-    │
-    YES
-    │
-    ▼
-purpose-extractor
-    │
-    ├─ Reverse-engineer purpose from plan
-    ├─ Detect misalignments
-    ├─ Clarify with user (AskUserQuestion)
-    │
-    ▼
-Write purpose.md
-    │
-    ▼
-Return to Main Agent
-    │
-    ▼
-Proceed with execution, report to user
-```
-
-## When to Call Each Agent
-
-### Main Agent calls purpose-extractor when:
+### Main Agent applies purpose-extraction skill when:
 
 | Situation | Trigger |
 |-----------|---------|
@@ -145,9 +116,8 @@ Proceed with execution, report to user
 | Plan-purpose mismatch | Plan steps don't align with stated goal |
 | Vague objective | "Improve X" without specifics |
 | Multiple objectives | Need to split or clarify scope |
-| Plan Mode output | External plan needs purpose grounding |
 
-### Main Agent calls investigator when:
+### Main Agent delegates to investigator when:
 
 | Situation | Trigger |
 |-----------|---------|
@@ -165,21 +135,12 @@ Proceed with execution, report to user
 | 5 "NO" in trials | Update work_summary.md, return for plan revision |
 | All hypotheses eliminated | Document in work_summary.md, return |
 | Plan direction needs change | Return with recommendation |
-| Limit reached | Document state, return for decision |
-
-### purpose-extractor returns to Main Agent when:
-
-| Event | Deliverable |
-|-------|-------------|
-| Purpose clarified | Updated purpose.md |
-| Scope defined | Success criteria documented |
-| Misalignment resolved | Plan-purpose now aligned |
 
 ## Data Ownership
 
 | File | Owner | Others |
 |------|-------|--------|
-| purpose.md | purpose-extractor (creates), Main Agent (guards) | Read-only |
+| purpose.md | Main Agent (with skill) | Read-only |
 | plan.md | Main Agent (with skill) | Read-only |
 | work_summary.md | investigator | Main Agent reads for status |
 | work_log_XX.md | investigator | Main Agent reads if details needed |
@@ -187,10 +148,10 @@ Proceed with execution, report to user
 
 ## Communication Protocol
 
-### From Specialist → Main Agent
+### From investigator → Main Agent
 
 ```markdown
-## [Agent] Update
+## investigator Update
 
 **Status:** [Working/Blocked/Complete]
 **Summary:** [1-2 sentences]
@@ -199,12 +160,11 @@ Proceed with execution, report to user
 **Next:** [Recommendation for Main Agent]
 ```
 
-### From Main Agent → Specialist
+### From Main Agent → investigator
 
-**Use Task tool to call specialists.** Context is passed via prompt parameter:
+Use Task tool to delegate:
 
 ```markdown
-## Calling investigator
 Task tool:
   subagent_type: "project-coordinator:investigator"
   prompt: |
@@ -219,19 +179,9 @@ Task tool:
 
     ## Expected Deliverable
     [What you expect back]
-
-## Calling purpose-extractor
-Task tool:
-  subagent_type: "project-coordinator:purpose-extractor"
-  prompt: |
-    ## User Request
-    [Original user request]
-
-    ## Background
-    [Any relevant context]
 ```
 
-**⚠️ CRITICAL:** "Delegate to X" means "Use Task tool with subagent_type". Never skip the Task tool call.
+**⚠️ CRITICAL:** "Delegate to investigator" means "Use Task tool". Never skip the Task tool call.
 
 ## User Reporting (Key Responsibility)
 

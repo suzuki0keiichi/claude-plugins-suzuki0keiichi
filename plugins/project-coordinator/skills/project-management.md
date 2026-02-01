@@ -1,146 +1,138 @@
 # Project Management Skill
 
-複雑なマルチステップタスクを管理するためのスキル。目的を見失わず、計画を適応させながら進行を追跡する。
+Manage complex multi-step tasks. Maintain focus on objectives while adapting plans.
 
-## このスキルを使う場面
+## When to Use
 
-- 3ステップ以上の複雑なタスク
-- 不確実性が高い作業（解決策が不明、複数の試行が予想される）
-- 進捗を見失いやすい作業
-- `.claude/project-coordinator/` にファイルが存在する（進行中のプロジェクト）
+- Tasks with 3+ steps
+- High uncertainty work (unclear solution, multiple retries expected)
+- Work where progress tends to get lost
+- `.claude/project-coordinator/` directory exists (ongoing project)
 
-## 核となる原則
+## Core Principles
 
-**自律的に計画・実行する。ただし目的は守る。**
+**Execute autonomously. But guard the purpose.**
 
-- 目的定義 → ユーザーとの協働（必須のやりとり）
-- 計画・実行 → 自律的に進める
-- **ユーザーへの報告** → 各ステップ完了時、障害発生時に必ず報告
-- エスカレーション → 目的が不明確、または矛盾が生じた時のみ
+- Purpose definition → Collaborate with user (required interaction)
+- Planning & execution → Autonomous
+- **User reporting** → Report at each step completion, on obstacles
+- Escalation → Only when purpose is unclear or contradicted
 
-## ドキュメント管理 (`.claude/project-coordinator/`)
+## Document Management (`.claude/project-coordinator/`)
 
-### 1. purpose.md - 不変の北極星
+### 1. purpose.md - The Immutable North Star
 
-**内容:** 元の目的、背景、成功基準、スコープ
+**Content:** Original objective, context, success criteria, scope
 
-**⚠️ 重要:** 更新するのは以下の場合のみ
-- ユーザーが要請した時
-- 前提が無効化された時
-- 技術的に不可能と判明した時
+**⚠️ CRITICAL:** Update ONLY when:
+- User requests
+- Assumptions invalidated
+- Technically impossible
 
-**実装の困難さは目的変更の理由にならない** → plan.mdを調整する
+**Implementation difficulty ≠ reason to change purpose** → Adjust plan.md instead
 
-### 2. plan.md - プロジェクト計画
+### 2. plan.md - Project Plan
 
-**内容:** 進捗率、ステップと完了基準、依存関係、リスク、Plan B、完了ログ
+**Content:** Progress %, steps with criteria, dependencies, risks, Plan B, completed log
 
-**更新タイミング:**
-- ステップ完了後
-- 障害発生時
-- 新情報で実現可能性が変わった時
+**Update when:**
+- Step completed
+- Obstacle encountered
+- New info changes feasibility
 
-### 3. work_summary.md / work_log_XX.md (investigator管理)
+### 3. work_summary.md / work_log_XX.md (investigator managed)
 
-**オーナー:** investigatorエージェント
+**Owner:** investigator agent
 
-**このスキルでの役割:** work_summary.mdを読んで状況確認。詳細が必要ならwork_log_XX.mdを参照。
+**This skill's role:** Read work_summary.md for status. Refer to work_log_XX.md for details.
 
-## 実行フロー
+## Execution Flow
 
-### 1. 初期化
+### 1. Initialize
 
-1. `.claude/project-coordinator/` の既存ドキュメントを確認
-2. **purpose.mdを最優先で確認:**
-   - 存在して明確 → plan.md作成へ
-   - 不在または不明確 → purpose-extractorに委譲
-3. plan.mdを自律的に作成
-4. **ユーザーに計画を報告**
+1. Check `.claude/project-coordinator/` for existing docs
+2. **purpose.md first:**
+   - Exists and clear → Proceed to plan.md
+   - Missing or unclear → Read `purpose-extraction.md` skill and apply it
+3. Create plan.md autonomously
+4. **Report plan to user**
 
-### 2. 実行と追跡
+### 2. Execute and Track
 
-1. ステップを実行し、チェックポイントでplan.mdを更新
-2. **調査タスク:** investigatorに委譲（後述）
-   - investigatorが5回"NO"で戻ってきた場合: 計画修正またはユーザーに相談
-3. **各ステップ完了時:** ユーザーに進捗を報告
-4. 行き詰まった時: 全ドキュメントを再確認し、purpose.mdに照らして再評価
+1. Execute steps, update plan.md at checkpoints
+2. **Investigation tasks:** Delegate to investigator (see below)
+   - If investigator returns with 5 "NO": Revise plan or consult user
+3. **On each step completion:** Report progress to user
+4. When stuck: Review all docs, re-evaluate against purpose.md
 
-### 3. 計画修正
+### 3. Revise Plan
 
-**計画は柔軟に。目的は不変。**
+**Plans are flexible. Purpose is NOT.**
 
-1. 修正のトリガーを明記
-2. purpose.mdの変更が必要か判断:
-   - NO → plan.mdを更新
-   - YES → **停止** - ユーザーに相談（スコープ変更）
-3. **計画修正をユーザーに報告**
+1. State revision trigger
+2. Does this require changing purpose.md?
+   - NO → Update plan.md
+   - YES → **STOP** - Consult user (scope change)
+3. **Report plan revision to user**
 
-### 4. プロジェクト完了
+### 4. Complete Project
 
-1. purpose.mdの全成功基準が満たされているか検証
-2. ユーザーに確認: 「アーカイブを作成してからクリアしますか？」
-3. YESの場合: `archives/[topic]_[YYYYMMDD].md` を作成
-4. purpose.md, plan.md, work_summary.md, work_log_*.md をクリア
+1. Verify ALL purpose.md success criteria satisfied
+2. Ask user: "Create an archive summary before clearing?"
+3. If yes: Create `archives/[topic]_[YYYYMMDD].md`
+4. Clear purpose.md, plan.md, work_summary.md, work_log_*.md
 
-**⚠️ ユーザー確認なしにファイルをクリアしない**
+**⚠️ NEVER clear files without user confirmation**
 
-## エージェント委譲
+## Agent Delegation
 
-Task toolを使って専門エージェントに委譲する。
+Use Task tool to delegate to specialist agents.
 
-### purpose-extractor - 目的が不明確な時
+### investigator - When investigation needed
 
-```
-Task tool:
-  subagent_type: "project-coordinator:purpose-extractor"
-  prompt: "[ユーザーのリクエストと背景情報]"
-```
-
-### investigator - 調査が必要な時
-
-原因不明、複数の仮説がある、体系的な排除が必要な場合に使用。
+Use when: Unknown cause, multiple hypotheses, systematic elimination required.
 
 ```
 Task tool:
   subagent_type: "project-coordinator:investigator"
   prompt: |
     ## Context
-    [目的の要約]
+    [Summary of purpose]
 
     ## Current Step
-    [plan.mdの該当ステップ]
+    [Relevant step from plan.md]
 
     ## Task
-    [調査の詳細指示]
+    [Investigation details]
 ```
 
-**⚠️ 重要:** 「Xに委譲する」と考えたら、必ずTask toolを実行する。
+**⚠️ CRITICAL:** "Delegate to X" means "Use Task tool". Never skip the Task tool call.
 
-## ユーザーへの報告（重要）
+## User Reporting (Critical)
 
-**このスキルの核心的な価値は可視性の提供。**
+**Core value of this skill: visibility.**
 
-以下のタイミングで必ずユーザーに報告する:
+Report to user at these timings:
 
-| タイミング | 報告内容 |
-|-----------|---------|
-| 計画作成後 | 全体計画の概要、ステップ数、予想されるリスク |
-| 各ステップ完了時 | 完了したこと、次のステップ、進捗率 |
-| 障害発生時 | 何が起きたか、どう対処するか |
-| 計画修正時 | 修正理由、変更内容 |
-| investigator委譲時 | 調査中であること、何を調べているか |
-| プロジェクト完了時 | 成果のサマリー |
+| Timing | Content |
+|--------|---------|
+| After planning | Plan overview, step count, expected risks |
+| After each step | What completed, next step, progress % |
+| On obstacle | What happened, how to handle |
+| On plan revision | Reason, what changed |
+| On investigator delegation | What's being investigated |
+| On project completion | Summary of outcomes |
 
-## TodoWriteとの使い分け
+## TodoWrite vs plan.md
 
-- **TodoWrite**: 予測可能なタスクに使用
-- **plan.md**: 不確実で頻繁な修正が必要な作業に使用
-- 両者は独立しており、同期は不要
+- **TodoWrite**: For predictable tasks
+- **plan.md**: For uncertain work requiring frequent revision
+- Independent; no sync needed
 
-## 終了条件
+## Exit Conditions
 
-以下の場合にこのスキルの適用を終了:
+End this skill's application when:
 
-1. 計画が完了した（全ステップ完了）
-2. 目的の修正が必要（ユーザーに相談後）
-3. 計画修正を繰り返しても進まない
+1. Plan completed (all steps done)
+2. Purpose needs revision (after user consultation)
+3. Stuck despite repeated plan revisions
