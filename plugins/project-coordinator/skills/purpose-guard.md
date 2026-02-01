@@ -1,4 +1,4 @@
-# Project Management Skill
+# Purpose Guard Skill
 
 Manage complex, multi-step projects. Maintain focus on original objectives while adapting plans.
 

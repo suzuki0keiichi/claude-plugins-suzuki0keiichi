@@ -7,7 +7,7 @@ Manage complex, uncertain tasks. Provide visibility and prevent losing track of 
 ```
 plugins/project-coordinator/
 ├── skills/
-│   ├── project-management.md   ← Main orchestration skill
+│   ├── purpose-guard.md        ← Main orchestration skill
 │   └── purpose-extraction.md   ← Purpose clarification skill
 ├── agents/
 │   └── investigator.md         ← Investigation specialist agent
@@ -33,7 +33,7 @@ Or via Claude Code marketplace if available.
 Create `~/.claude/rules/project-coordinator-trigger.md`:
 
 ```markdown
-Read and follow `plugins/project-coordinator/skills/project-management.md` when:
+Read and follow `plugins/project-coordinator/skills/purpose-guard.md` when:
 
 1. **Starting complex tasks**
    - Tasks with 3+ steps
@@ -61,7 +61,7 @@ Read and follow `plugins/project-coordinator/skills/project-management.md` when:
 
 | Component | Type | Reason |
 |-----------|------|--------|
-| project-management | Skill | User visibility, compaction resilience |
+| purpose-guard | Skill | User visibility, compaction resilience |
 | purpose-extraction | Skill | Requires frequent user dialogue |
 | investigator | Agent | Deep focus, context isolation, "dig and return" pattern |
 
