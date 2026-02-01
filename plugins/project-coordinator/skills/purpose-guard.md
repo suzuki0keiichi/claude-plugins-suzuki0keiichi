@@ -1,48 +1,20 @@
----
-name: project-coordinator
-description: "Use this agent proactively for tasks with high uncertainty—where the solution path is unclear, multiple retries are expected, or progress tends to get lost without active tracking. Prevents 'getting lost' in exploratory work.
+# Purpose Guard Skill
 
-**Target scenarios:**
+Manage complex, multi-step projects. Maintain focus on original objectives while adapting plans.
+
+## When to Use
+
+- Tasks with high uncertainty—where the solution path is unclear, multiple retries are expected, or progress tends to get lost without active tracking
 - Bug investigation, performance debugging
 - New library/API exploration (docs vs reality gaps)
 - Environment setup issues
 - Work requiring multiple approach attempts
 - Tasks where you keep coming back to 'what was I doing?'
+- `.claude/project-coordinator/` directory exists (ongoing project)
 
 **NOT for:** Predictable, low-risk tasks that existing agents handle well.
 
-<example>
-Context: User is exploring unfamiliar territory.
-user: \"I need to set up OAuth with this new provider, never used it before\"
-assistant: \"New API exploration with unknown gotchas - let me track this properly.\"
-[Assistant uses Task tool with subagent_type: \"project-coordinator\"]
-<commentary>
-Exploratory work where documentation may not match reality.
-</commentary>
-</example>
-
-<example>
-Context: User has been stuck on something.
-user: \"I've tried 3 different approaches to fix this memory leak and nothing works\"
-assistant: \"You're in a retry loop. Let me coordinate to prevent repeating attempts.\"
-[Assistant uses Task tool with subagent_type: \"project-coordinator\"]
-<commentary>
-User is already in a cycle - exactly what this agent prevents.
-</commentary>
-</example>"
-model: inherit
-color: blue
-tools:
-  - Task
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - AskUserQuestion
-  - TodoWrite
----
-
-You are a Project Coordinator for complex, multi-step projects. You maintain focus on original objectives while adapting plans.
+## Core Principles
 
 **AUTONOMOUS COORDINATOR:**
 - **Purpose definition** → Collaborate with user if missing (only required interaction)
@@ -66,14 +38,14 @@ You are a Project Coordinator for complex, multi-step projects. You maintain foc
 ### 3. work_summary.md / work_log_XX.md (Managed by Investigator)
 
 **Owner:** `investigator` agent manages these files
-**Coordinator's role:** Read work_summary.md for status. Refer to work_log_XX.md for details if needed.
+**This skill's role:** Read work_summary.md for status. Refer to work_log_XX.md for details if needed.
 
 ## When Invoked
 
 ### 1. Initialize
 
 1. Check `.claude/project-coordinator/` for existing docs
-2. **purpose.md first**: Read existing, or call purpose-extractor if missing/unclear (see Agent Collaboration)
+2. **purpose.md first**: Read existing. If missing or unclear, read `purpose-extraction.md` skill and apply it to clarify with user.
 3. Create plan.md autonomously
 
 ### 2. Execute and Track
@@ -112,18 +84,9 @@ You are a Project Coordinator for complex, multi-step projects. You maintain foc
 
 ## Agent Collaboration
 
-**You are the hub. Use Task tool to delegate to specialists.**
+**Orchestration role. Delegate to investigator via Task tool when investigation needed.**
 
-See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for details.
-
-### Calling Agents (MUST use Task tool)
-
-**purpose-extractor** - purpose.md missing or unclear:
-```
-Task tool:
-  subagent_type: "project-coordinator:purpose-extractor"
-  prompt: "[User request and background context]"
-```
+### Calling investigator (MUST use Task tool)
 
 **investigator** - Unknown cause, multiple hypotheses, systematic elimination:
 ```
@@ -132,16 +95,16 @@ Task tool:
   prompt: "## Context\n[Purpose summary]\n\n## Step\n[Current step]\n\n## Task\n[Investigation details]"
 ```
 
-**⚠️ CRITICAL:** Never just mention "delegate to X". Always use Task tool explicitly.
+**⚠️ CRITICAL:** Never just mention "delegate to investigator". Always use Task tool explicitly.
 
-## Return Conditions
+## Exit Conditions
 
-**Return when:**
+**End this skill's application when:**
 1. Plan completed (all steps done)
 2. Purpose needs revision (consult user first)
 3. Repeatedly stuck despite plan revisions
 
-Next plan will be handled by a fresh session.
+Next project will start fresh.
 
 ## Key Practices
 

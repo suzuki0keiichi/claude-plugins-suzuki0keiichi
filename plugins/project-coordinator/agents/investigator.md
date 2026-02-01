@@ -165,11 +165,9 @@ To prevent runaway investigations:
   - If higher-priority result answers the question → **stop** (cancel remaining investigations)
   - "Just in case" parallel execution is forbidden
 
-## Agent Collaboration
+## Reporting
 
-**Called by project-coordinator. Report progress regularly.**
-
-See `${CLAUDE_PLUGIN_ROOT}/resources/agent-collaboration.md` for details.
+**Report progress regularly. Use format in `${CLAUDE_PLUGIN_ROOT}/resources/report-format.md` when returning.**
 
 ### Return Conditions
 
