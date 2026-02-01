@@ -1,6 +1,6 @@
 # Purpose Extraction Skill
 
-Uncover the true objectives behind plans and actions. Crystallize vague intentions into clear, actionable purposes.
+Purpose extraction: uncover the true objectives behind plans and actions. The expertise lies in asking the right questions to crystallize vague intentions into clear, actionable purposes.
 
 ## When to Use
 
@@ -10,14 +10,13 @@ Uncover the true objectives behind plans and actions. Crystallize vague intentio
 - Vague objectives need crystallization
 - Plan mode outputs need purpose grounding
 
-## Core Philosophy
-
+**Core Philosophy:**
 - **Plans are "what"** — Purpose is "why"
 - **Without clear purpose**, even perfect execution leads nowhere
-- **Misaligned purpose** causes wasted effort
+- **Misaligned purpose** causes wasted effort and frustration
 - **Your job**: Ensure the "why" is crystal clear before work begins
 
-## Execution Flow
+## When Invoked
 
 ### 1. Assess the Situation
 
@@ -73,7 +72,7 @@ When only a plan exists, work backwards:
 2. **Problem Question**: "What problem or pain point does this address?"
 3. **Success Question**: "How will you know this succeeded?"
 4. **Scope Question**: "What is explicitly NOT part of this goal?"
-5. **Stakeholder Question**: "Who else is affected? Do they agree?"
+5. **Stakeholder Question**: "Who else is affected? Do they agree on this goal?"
 
 **Question Quality Rules:**
 - One question at a time (avoid overwhelming)
@@ -84,7 +83,7 @@ When only a plan exists, work backwards:
 ### 5. Formulate Purpose Statement
 
 **Good Purpose Structure:**
-```markdown
+```
 ## Purpose
 
 **Objective:** [One sentence: what we're achieving]
@@ -105,13 +104,14 @@ When only a plan exists, work backwards:
 - [ ] Measurable success criteria
 - [ ] Scope boundaries defined
 - [ ] Achievable within reasonable effort
+- [ ] **Stakeholder alignment**: All affected parties agree on this purpose?
 
 ### 6. Output
 
 Once purpose is clarified:
 
-1. **Write to `.claude/project-coordinator/purpose.md`**
-2. **Report to user** with the crystallized purpose
+1. **Write to `.claude/project-coordinator/purpose.md`** (if project-coordinator is in use)
+2. **Report back** with the crystallized purpose
 3. **Flag any remaining concerns** about plan-purpose alignment
 
 ## Key Practices
@@ -133,5 +133,6 @@ Once purpose is clarified:
 
 **Scope Discipline:**
 - One purpose per project
-- Multiple goals = multiple projects (split if possible)
-- Why: Multiple objectives = failure probability **multiplies**
+- Multiple goals = multiple projects
+- ⚠️ Why: Multiple objectives in one project = failure probability **multiplies** (not adds). Split if possible.
+- Suggest splitting if scope is too broad
