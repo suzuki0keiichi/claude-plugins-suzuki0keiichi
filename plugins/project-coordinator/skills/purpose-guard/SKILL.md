@@ -1,5 +1,5 @@
 ---
-name: Purpose Guard
+name: purpose-guard
 description: This skill should be used when the user asks to "manage this complex task", "track this project", "coordinate this work", "I keep losing track", "investigate this bug", "このタスクを管理して", "進捗を追跡して", "迷子になってきた", "このバグを調査して", or mentions project coordination, purpose tracking, or plan management. Provides orchestration for complex, uncertain tasks while maintaining focus on original objectives.
 ---
 
@@ -50,7 +50,7 @@ Manage complex, multi-step projects. Maintain focus on original objectives while
 ### 1. Initialize
 
 1. Check `.claude/project-coordinator/` for existing docs
-2. **purpose.md first**: Read existing. If missing or unclear, read `purpose-extraction.md` skill and apply it to clarify with user.
+2. **purpose.md first**: Read existing. If missing or unclear, read `purpose-extraction` skill and apply it to clarify with user.
 3. Create plan.md autonomously
 
 ### 2. Execute and Track
