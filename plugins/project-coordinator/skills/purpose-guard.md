@@ -1,3 +1,8 @@
+---
+name: Purpose Guard
+description: This skill should be used when the user asks to "manage this complex task", "track this project", "coordinate this work", "I keep losing track", "investigate this bug", "このタスクを管理して", "進捗を追跡して", "迷子になってきた", "このバグを調査して", or mentions project coordination, purpose tracking, or plan management. Provides orchestration for complex, uncertain tasks while maintaining focus on original objectives.
+---
+
 # Purpose Guard Skill
 
 Manage complex, multi-step projects. Maintain focus on original objectives while adapting plans.

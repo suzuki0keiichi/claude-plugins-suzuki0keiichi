@@ -1,3 +1,8 @@
+---
+name: Purpose Extraction
+description: This skill should be used when the user asks to "clarify the goal", "what's the purpose", "why are we doing this", "extract the purpose", "目的を明確にして", "なぜこれをやるの", "ゴールは何", or mentions purpose clarification, goal alignment, or plan-purpose mismatch. Helps crystallize vague intentions into clear, actionable objectives.
+---
+
 # Purpose Extraction Skill
 
 Purpose extraction: uncover the true objectives behind plans and actions. The expertise lies in asking the right questions to crystallize vague intentions into clear, actionable purposes.
