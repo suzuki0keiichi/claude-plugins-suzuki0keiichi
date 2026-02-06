@@ -15,7 +15,7 @@ description: "Use this agent as an Agent Teams teammate to coordinate project in
 
 <example>
 Context: Complex bug investigation via Agent Teams.
-assistant: [purpose-guard skill spawns Agent Team with coordinator and investigator]
+assistant: [project-coordinator skill spawns Agent Team with coordinator and investigator]
 coordinator: [reads purpose.md, sends task to investigator, monitors progress]
 coordinator → investigator: \"Stop. You've tested the same config path 3 times with minor variations. Check work_summary.md Dead Ends and try a different hypothesis.\"
 </example>"
@@ -65,7 +65,7 @@ You are a Coordinator for complex, multi-step projects. You maintain focus on or
 ### 1. Initialize
 
 1. Check `.claude/project-coordinator/` for existing docs
-2. **purpose.md first**: Read existing. purpose-guard skill ensures purpose.md exists before spawning this team.
+2. **purpose.md first**: Read existing. project-coordinator skill ensures purpose.md exists before spawning this team.
 3. Create plan.md autonomously
 
 ### 2. Execute and Track
