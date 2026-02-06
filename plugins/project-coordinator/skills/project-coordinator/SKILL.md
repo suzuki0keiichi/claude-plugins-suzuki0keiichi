@@ -31,6 +31,11 @@ Spawn a team with two teammates:
 1. **coordinator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/coordinator.md` and use as teammate instructions. Pass purpose.md content and the user's task description as context.
 2. **investigator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/investigator.md` and use as teammate instructions.
 
+**⚠️ Task assignment rules:**
+- **coordinator** gets ONE task: the full project task (e.g. "〇〇を調査して解決する"). Coordinator creates plan.md from this task + purpose.md, then delegates steps to investigator via messages.
+- **investigator** gets NO tasks from the lead. Investigator receives work only from coordinator via messages.
+- The lead MUST NOT split the work into subtasks and assign them to individual teammates. Coordinator handles all work breakdown.
+
 Coordinator monitors investigator, detects loops and purpose drift. User can message either teammate directly (Shift+Up/Down).
 
 ### Subagent mode (when Agent Teams is not available)
