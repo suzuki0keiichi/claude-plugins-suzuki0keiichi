@@ -169,6 +169,13 @@ To prevent runaway investigations:
 
 **Report progress regularly. Use format in `${CLAUDE_PLUGIN_ROOT}/resources/report-format.md` when returning.**
 
+### Agent Teams Communication
+
+When operating as an Agent Teams teammate with a coordinator:
+- **Progress requests**: When coordinator asks for status, respond immediately with: current hypothesis, latest trial result, and next planned action.
+- **Stop/redirect messages**: When coordinator says stop or redirect, comply. Update work_summary.md and acknowledge.
+- Continue writing work_log files as normal — these survive across sessions.
+
 ### Return Conditions
 
 **Return immediately when:**

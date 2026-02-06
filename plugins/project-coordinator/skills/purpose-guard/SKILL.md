@@ -56,7 +56,9 @@ Manage complex, multi-step projects. Maintain focus on original objectives while
 ### 2. Execute and Track
 
 1. Execute steps, update plan.md at checkpoints
-2. **Investigation tasks:** Use Task tool (see Agent Collaboration). One step per call, wait for return.
+2. **Investigation tasks:** Delegate (see Agent Collaboration).
+   - **Agent Teams:** Spawn team with coordinator + investigator. Coordinator handles monitoring.
+   - **Subagent fallback:** Use Task tool. One step per call, wait for return.
    - If investigator returns with 5 "NO": Revise plan or consult user
 3. **At breakpoints:** Read `${CLAUDE_PLUGIN_ROOT}/resources/best-practices.md`
 4. When stuck: Review all docs, re-evaluate vs purpose.md
@@ -89,9 +91,20 @@ Manage complex, multi-step projects. Maintain focus on original objectives while
 
 ## Agent Collaboration
 
-**Orchestration role. Delegate to investigator via Task tool when investigation needed.**
+**Orchestration role. Delegate investigation to agents.**
 
-### Calling investigator (MUST use Task tool)
+### Agent Teams mode (when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is available)
+
+Spawn a team with two teammates:
+
+1. **coordinator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/coordinator.md` and use as teammate instructions. Pass purpose.md and plan.md content as context.
+2. **investigator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/investigator.md` and use as teammate instructions. Pass current step details.
+
+Coordinator monitors investigator, detects loops and purpose drift. User can message either teammate directly (Shift+Up/Down).
+
+After coordinator reports completion or issues, update plan.md and decide next action from this session.
+
+### Subagent mode (when Agent Teams is not available)
 
 **investigator** - Unknown cause, multiple hypotheses, systematic elimination:
 ```
