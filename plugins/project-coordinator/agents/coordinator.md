@@ -65,7 +65,7 @@ You are a Coordinator for complex, multi-step projects. You maintain focus on or
 ### 1. Initialize
 
 1. Check `.claude/project-coordinator/` for existing docs
-2. **purpose.md first**: Read existing. If missing or unclear, message lead — purpose-extraction is needed before proceeding.
+2. **purpose.md first**: Read existing. purpose-guard skill ensures purpose.md exists before spawning this team.
 3. Create plan.md autonomously
 
 ### 2. Execute and Track
