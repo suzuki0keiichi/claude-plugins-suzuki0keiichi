@@ -28,8 +28,8 @@ Launch project coordination for complex, uncertain tasks.
 
 Spawn a team with two teammates:
 
-1. **coordinator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/coordinator.md` and use as teammate instructions. Pass purpose.md and plan.md content as context.
-2. **investigator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/investigator.md` and use as teammate instructions. Pass current step details.
+1. **coordinator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/coordinator.md` and use as teammate instructions. Pass purpose.md content and the user's task description as context.
+2. **investigator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/investigator.md` and use as teammate instructions.
 
 Coordinator monitors investigator, detects loops and purpose drift. User can message either teammate directly (Shift+Up/Down).
 
