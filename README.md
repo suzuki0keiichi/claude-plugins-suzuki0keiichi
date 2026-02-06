@@ -81,6 +81,26 @@ Claude のモデルや公式エージェントは今後確実に進化してい�
 
 ---
 
+### Agent Teams（実験的機能）
+
+`project-coordinator` プラグインは **Agent Teams** に対応しています。
+coordinator と investigator がチームメイトとして並行動作し、直接メッセージをやり取りできます。
+
+Agent Teams は実験的機能のため、デフォルトでは無効です。
+有効にするには `settings.json` に以下を追加してください：
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+無効の場合は従来のサブエージェント方式にフォールバックします。
+
+---
+
 ### 最後に
 
 これは「完成されたフレームワーク」ではありません。  
@@ -167,6 +187,26 @@ Specifically:
 - Technical and organizational convenience dominates decisions
 
 These agents serve as **temporary guardrails** to prevent that.
+
+---
+
+### Agent Teams (Experimental)
+
+The `project-coordinator` plugin supports **Agent Teams**.
+The coordinator and investigator run as teammates, communicating directly via messages.
+
+Agent Teams is experimental and disabled by default.
+To enable, add the following to your `settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+When disabled, the plugin falls back to the traditional subagent approach.
 
 ---
 
