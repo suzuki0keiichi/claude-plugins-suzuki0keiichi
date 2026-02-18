@@ -26,17 +26,79 @@ Launch project coordination for complex, uncertain tasks.
 
 ### Agent Teams mode (when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is available)
 
-Spawn a team with two teammates:
+Execute the following steps **exactly in order**. Do not skip, reorder, or improvise.
 
-1. **coordinator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/coordinator.md` and use as teammate instructions. Pass purpose.md content and the user's task description as context.
-2. **investigator**: Read `${CLAUDE_PLUGIN_ROOT}/agents/investigator.md` and use as teammate instructions.
+**⚠️ Critical rules — violating ANY of these breaks the workflow:**
+- coordinator gets **ONE task**: the full project objective
+- investigator gets **ZERO tasks** from the lead
+- The lead **MUST NOT** split work into subtasks — coordinator handles all breakdown
+- The lead **MUST NOT** assign tasks to investigator — coordinator does this via SendMessage
 
-**⚠️ Task assignment rules:**
-- **coordinator** gets ONE task: the full project task (e.g. "〇〇を調査して解決する"). Coordinator creates plan.md from this task + purpose.md, then delegates steps to investigator via messages.
-- **investigator** gets NO tasks from the lead. Investigator receives work only from coordinator via messages.
-- The lead MUST NOT split the work into subtasks and assign them to individual teammates. Coordinator handles all work breakdown.
+#### Step 1: TeamCreate
 
-Coordinator monitors investigator, detects loops and purpose drift. User can message either teammate directly (Shift+Up/Down).
+```
+TeamCreate(
+  team_name: "project-coordinator",
+  description: "<1-line summary from purpose.md>"
+)
+```
+
+#### Step 2: TaskCreate — ONE project task
+
+Create exactly one task. This is the **entire project objective**, not a subtask.
+
+```
+TaskCreate(
+  subject: "<user's task in imperative form>",
+  description: "## Purpose\n<purpose.md content>\n\n## Task\n<user's original request>",
+  activeForm: "<present continuous form of the task>"
+)
+```
+
+Record the returned **task ID** for Step 4.
+
+#### Step 3: Spawn teammates — two Task calls in a single message (parallel)
+
+```
+Task(
+  subagent_type: "project-coordinator:coordinator",
+  name: "coordinator",
+  team_name: "project-coordinator",
+  description: "Coordinate project investigation",
+  prompt: "You are the coordinator for this team.\nYour teammate is \"investigator\" — send investigation tasks via SendMessage.\nCheck TaskList, claim your task, read purpose.md, create plan.md, then begin."
+)
+
+Task(
+  subagent_type: "project-coordinator:investigator",
+  name: "investigator",
+  team_name: "project-coordinator",
+  description: "Investigate on coordinator direction",
+  prompt: "You are the investigator for this team.\nWait for coordinator to send you tasks via messages.\nDo NOT start working until coordinator gives you a specific task."
+)
+```
+
+#### Step 4: TaskUpdate — assign to coordinator
+
+```
+TaskUpdate(
+  taskId: <task ID from Step 2>,
+  owner: "coordinator"
+)
+```
+
+Do NOT set `status: "in_progress"` — coordinator does this when it claims the task.
+
+#### Step 5: Lead is done
+
+After Step 4, the lead's launch work is complete.
+
+- **Coordinator** reads TaskList, claims the task, creates plan.md, delegates investigation steps to investigator via SendMessage
+- **Investigator** waits idle until coordinator sends a message, then begins work
+- **Coordinator** enters monitoring loop (Sleep → check-in → evaluate → act)
+- **Coordinator** messages the lead when: step complete, plan revision needed, or 5 "NO" threshold hit
+
+The lead should **wait for coordinator's reports**. Do not poll or micromanage.
+User can message either teammate directly (Shift+Up/Down in terminal).
 
 ### Subagent mode (when Agent Teams is not available)
 
