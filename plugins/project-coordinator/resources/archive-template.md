@@ -27,7 +27,7 @@
 ### What Didn't Work
 - [Failed attempts and why - important for future reference]
 
-## Key Findings (from research_memo.md)
+## Key Findings (from work_summary.md)
 
 [Condensed insights - focus on discoveries that have lasting value]
 
