@@ -25,8 +25,9 @@ ssh-operator/
 | Skill | `skills/ssh-operator/SKILL.md` | `/ssh-operator <host> [task]` のエントリーポイント。メインエージェントに SSH 操作手順を注入 |
 | Script | `scripts/ssh-op.sh` | SSH接続・出力制限(200行)・チルダ展開修正・エラー報告 |
 
-スキルが呼び出されると、メインエージェントが直接 `ssh-op.sh` を使ってリモート操作を行う。
-スクリプトパスは `${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh` でスキルテキスト内に展開される。
+スキルが呼び出されると、まず `${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh` をプロジェクト内の `.claude/ssh-op.sh` にコピーし、
+以降はプロジェクト内パスでメインエージェントが直接リモート操作を行う。
+プロジェクト内パスを使うことで「Always allow」のパーミッションパターンが安定する。
 
 ### ssh-op.sh の使い方
 
@@ -52,7 +53,7 @@ EOF
 | 操作範囲 | ローカル同等 | Read/Write/Edit/Grep/Glob/Bash相当をSSH越しで |
 | トークン削減 | 出力200行制限 | 大出力によるトークン浪費を防止 |
 | SSH接続 | ~/.ssh/config依存 | プラグインに接続情報を持たない |
-| パス解決 | `${CLAUDE_PLUGIN_ROOT}` テンプレート展開 | スキルテキストにロード時点で実パスが注入される |
+| パス解決 | プロジェクト内コピー `.claude/ssh-op.sh` | キャッシュパスはプロジェクト外のため `jwR` チェックで Always allow が効かない ([#11380](https://github.com/anthropics/claude-code/issues/11380))。プロジェクト内にコピーして回避 |
 
 ### サブエージェント方式を廃止した経緯
 

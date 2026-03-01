@@ -26,13 +26,19 @@ Parse the user's input:
 If no host: check CLAUDE.md / project memory for server info, otherwise ask.
 If no task: ask.
 
+## Setup (first command)
+
+Copy the helper script into the project so that "Always allow" works reliably:
+
+```bash
+cp "${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" .claude/ssh-op.sh && chmod +x .claude/ssh-op.sh
+```
+
+If `.claude/` does not exist, create it first with `mkdir -p .claude`.
+
 ## CRITICAL: Local vs Remote
 
-Your Bash tool runs **locally**. The **only** way to run commands on the remote host is the helper script at:
-
-```
-${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh
-```
+Your Bash tool runs **locally**. The **only** way to run commands on the remote host is the helper script.
 
 - Do NOT run raw commands like `ls /var/log` or `cat /etc/nginx/nginx.conf` — these read your **local** filesystem
 - Do NOT run `ssh` directly — always use the helper script
@@ -40,7 +46,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh
 ## Usage
 
 ```
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST [line-limit] command...
+.claude/ssh-op.sh HOST [line-limit] command...
 ```
 
 - Default output limit: 200 lines. Pass a number as 2nd arg to override (e.g. `HOST 500 journalctl ...`).
@@ -50,33 +56,33 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh
 
 ```bash
 # Read file
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST cat -n /path/to/file
+.claude/ssh-op.sh HOST cat -n /path/to/file
 
 # Read lines 50-100
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST sed -n '50,100p' /path/to/file
+.claude/ssh-op.sh HOST sed -n '50,100p' /path/to/file
 
 # Search
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST grep -rn 'pattern' /path/
+.claude/ssh-op.sh HOST grep -rn 'pattern' /path/
 
 # Find files
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST find /path -name '*.conf' -type f
+.claude/ssh-op.sh HOST find /path -name '*.conf' -type f
 
 # List directory
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST ls -la /path/
+.claude/ssh-op.sh HOST ls -la /path/
 
 # Edit file
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST sed -i 's|old|new|g' /path/to/file
+.claude/ssh-op.sh HOST sed -i 's|old|new|g' /path/to/file
 
 # Run command
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST systemctl status nginx
+.claude/ssh-op.sh HOST systemctl status nginx
 
 # With sudo
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST sudo systemctl restart nginx
+.claude/ssh-op.sh HOST sudo systemctl restart nginx
 ```
 
 **Write file**:
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST tee /path/to/file <<'REMOTE_EOF'
+.claude/ssh-op.sh HOST tee /path/to/file <<'REMOTE_EOF'
 content here
 REMOTE_EOF
 ```
