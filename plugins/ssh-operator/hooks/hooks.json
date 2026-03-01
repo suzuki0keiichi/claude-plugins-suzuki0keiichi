@@ -1,0 +1,12 @@
+[
+  {
+    "event": "SessionStart",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "mkdir -p \"${CLAUDE_PROJECT_DIR}/.claude\" && cp \"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh\" \"${CLAUDE_PROJECT_DIR}/.claude/ssh-op.sh\" && chmod +x \"${CLAUDE_PROJECT_DIR}/.claude/ssh-op.sh\"",
+        "timeout": 5
+      }
+    ]
+  }
+]

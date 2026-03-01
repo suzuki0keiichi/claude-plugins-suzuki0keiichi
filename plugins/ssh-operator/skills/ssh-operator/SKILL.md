@@ -26,16 +26,6 @@ Parse the user's input:
 If no host: check CLAUDE.md / project memory for server info, otherwise ask.
 If no task: ask.
 
-## Setup (first command)
-
-Copy the helper script into the project so that "Always allow" works reliably:
-
-```bash
-cp "${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" .claude/ssh-op.sh && chmod +x .claude/ssh-op.sh
-```
-
-If `.claude/` does not exist, create it first with `mkdir -p .claude`.
-
 ## CRITICAL: Local vs Remote
 
 Your Bash tool runs **locally**. The **only** way to run commands on the remote host is the helper script.
