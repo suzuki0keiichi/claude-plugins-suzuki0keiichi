@@ -23,11 +23,11 @@ ssh-operator/
 
 | 層 | ファイル | 役割 |
 |----|---------|------|
-| Hook | `hooks/hooks.json` | SessionStart時に `scripts/ssh-op.sh` → `.claude/ssh-op.sh` へ自動コピー |
+| Hook | `hooks/hooks.json` | SessionStart時に `scripts/ssh-op.sh` → `.claude/ssh-operator/ssh-op.sh` へ自動コピー |
 | Skill | `skills/ssh-operator/SKILL.md` | `/ssh-operator <host> [task]` のエントリーポイント。メインエージェントに SSH 操作手順を注入 |
 | Script | `scripts/ssh-op.sh` | SSH接続・出力制限(200行)・チルダ展開修正・エラー報告 |
 
-SessionStart フックが `${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh` をプロジェクト内の `.claude/ssh-op.sh` に自動コピーする。
+SessionStart フックが `${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh` をプロジェクト内の `.claude/ssh-operator/ssh-op.sh` に自動コピーする。
 スキルとメインエージェントはプロジェクト内パスのみを参照し、直接リモート操作を行う。
 プロジェクト内パスを使うことで「Always allow」のパーミッションパターンが安定する。
 
@@ -55,7 +55,7 @@ EOF
 | 操作範囲 | ローカル同等 | Read/Write/Edit/Grep/Glob/Bash相当をSSH越しで |
 | トークン削減 | 出力200行制限 | 大出力によるトークン浪費を防止 |
 | SSH接続 | ~/.ssh/config依存 | プラグインに接続情報を持たない |
-| パス解決 | SessionStart フックで `.claude/ssh-op.sh` に自動コピー | キャッシュパスはプロジェクト外のため Always allow が効かない ([#11380](https://github.com/anthropics/claude-code/issues/11380))。フックなら `${CLAUDE_PLUGIN_ROOT}` が確実に展開される |
+| パス解決 | SessionStart フックで `.claude/ssh-operator/ssh-op.sh` に自動コピー | キャッシュパスはプロジェクト外のため Always allow が効かない ([#11380](https://github.com/anthropics/claude-code/issues/11380))。フックなら `${CLAUDE_PLUGIN_ROOT}` が確実に展開される |
 
 ### サブエージェント方式を廃止した経緯
 

@@ -36,7 +36,7 @@ Your Bash tool runs **locally**. The **only** way to run commands on the remote 
 ## Usage
 
 ```
-.claude/ssh-op.sh HOST [line-limit] command...
+.claude/ssh-operator/ssh-op.sh HOST [line-limit] command...
 ```
 
 - Default output limit: 200 lines. Pass a number as 2nd arg to override (e.g. `HOST 500 journalctl ...`).
@@ -46,33 +46,33 @@ Your Bash tool runs **locally**. The **only** way to run commands on the remote 
 
 ```bash
 # Read file
-.claude/ssh-op.sh HOST cat -n /path/to/file
+.claude/ssh-operator/ssh-op.sh HOST cat -n /path/to/file
 
 # Read lines 50-100
-.claude/ssh-op.sh HOST sed -n '50,100p' /path/to/file
+.claude/ssh-operator/ssh-op.sh HOST sed -n '50,100p' /path/to/file
 
 # Search
-.claude/ssh-op.sh HOST grep -rn 'pattern' /path/
+.claude/ssh-operator/ssh-op.sh HOST grep -rn 'pattern' /path/
 
 # Find files
-.claude/ssh-op.sh HOST find /path -name '*.conf' -type f
+.claude/ssh-operator/ssh-op.sh HOST find /path -name '*.conf' -type f
 
 # List directory
-.claude/ssh-op.sh HOST ls -la /path/
+.claude/ssh-operator/ssh-op.sh HOST ls -la /path/
 
 # Edit file
-.claude/ssh-op.sh HOST sed -i 's|old|new|g' /path/to/file
+.claude/ssh-operator/ssh-op.sh HOST sed -i 's|old|new|g' /path/to/file
 
 # Run command
-.claude/ssh-op.sh HOST systemctl status nginx
+.claude/ssh-operator/ssh-op.sh HOST systemctl status nginx
 
 # With sudo
-.claude/ssh-op.sh HOST sudo systemctl restart nginx
+.claude/ssh-operator/ssh-op.sh HOST sudo systemctl restart nginx
 ```
 
 **Write file**:
 ```bash
-.claude/ssh-op.sh HOST tee /path/to/file <<'REMOTE_EOF'
+.claude/ssh-operator/ssh-op.sh HOST tee /path/to/file <<'REMOTE_EOF'
 content here
 REMOTE_EOF
 ```
