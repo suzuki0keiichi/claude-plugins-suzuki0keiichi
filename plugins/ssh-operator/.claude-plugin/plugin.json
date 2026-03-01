@@ -1,6 +1,6 @@
 {
   "name": "ssh-operator",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Operate remote machines via SSH",
   "author": {
     "name": "suzuki0keiichi"
