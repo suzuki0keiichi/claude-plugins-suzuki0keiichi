@@ -36,7 +36,7 @@ Spawn the `ssh-operator` agent using the Agent tool:
 
 ```
 Agent tool:
-  subagent_type: "ssh-operator"
+  subagent_type: "ssh-operator:ssh-operator"
   description: "SSH operation on <host>"
   prompt: |
     HOST=<host>
