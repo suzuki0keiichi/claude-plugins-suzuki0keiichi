@@ -59,6 +59,13 @@ This returns the absolute path (e.g. `/Users/k/.claude/plugins/cache/.../ssh-op.
 
 If the script is not found, report the error to the user and stop.
 
+**CRITICAL: Command format rules**
+- Always use the **literal script path** directly in every command. Do NOT assign it to a shell variable (e.g. `SCRIPT=...`).
+- Always use the **literal host** directly. Do NOT assign it to a variable (e.g. `HOST=...`).
+- Each command must start with `"<SCRIPT>" HOST` so that the user can set up a permission pattern to allow all commands with this prefix.
+- Bad: `SCRIPT="/path/to/ssh-op.sh"; HOST="myhost"; "$SCRIPT" "$HOST" ls /`
+- Good: `"/path/to/ssh-op.sh" myhost ls /`
+
 ## Connection
 
 - **Host**: Provided in your task prompt as HOST=<hostname>
