@@ -13,6 +13,11 @@
       "name": "product-concept-guardian",
       "description": "Enforces alignment between all product decisions and the product’s declared concept, preventing vision erosion caused by convenience, politics, or technical shortcuts.",
       "source": "./plugins/product-concept-guardian"
+    },
+    {
+      "name": "ssh-operator",
+      "description": "Operate remote machines via SSH through a subagent. Maintains security by keeping authentication local-only while enabling full remote operations (file read/write/edit, command execution, log inspection) with token-efficient output limiting.",
+      "source": "./plugins/ssh-operator"
     }
   ]
 }
