@@ -32,7 +32,7 @@ If no task is provided, ask the user what they want to do.
 
 ## Execution
 
-Spawn the `ssh-operator` agent using the Agent tool:
+Spawn the agent using the Agent tool with `subagent_type: "ssh-operator:ssh-operator"`:
 
 ```
 Agent tool:

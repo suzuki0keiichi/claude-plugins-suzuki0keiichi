@@ -1,6 +1,6 @@
 {
   "name": "ssh-operator",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Operate remote machines via SSH through a subagent",
   "author": {
     "name": "suzuki0keiichi"
