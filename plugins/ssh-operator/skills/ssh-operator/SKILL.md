@@ -11,43 +11,80 @@ description: >
   If CLAUDE.md or project memory contains host names or server information,
   use that to determine the target host without asking the user.
 argument-hint: <host> [task description]
-allowed-tools: Agent
 ---
 
 # SSH Operator
 
-Operate a remote machine via SSH through a dedicated subagent.
+Operate a remote machine via SSH.
 
-## When Invoked
+## Input
 
 Parse the user's input:
-- **Host**: The first argument (`$1`) — an SSH host name from `~/.ssh/config`
-- **Task**: The remaining arguments — what to do on the remote machine
+- **Host**: First argument — SSH host name from `~/.ssh/config`
+- **Task**: Remaining arguments — what to do on the remote machine
 
-If no host is provided:
-- Check if CLAUDE.md or project memory mentions server host names and use the appropriate one
-- Otherwise, ask the user which host to connect to
+If no host: check CLAUDE.md / project memory for server info, otherwise ask.
+If no task: ask.
 
-If no task is provided, ask the user what they want to do.
+## CRITICAL: Local vs Remote
 
-## Execution
-
-Spawn the agent using the Agent tool with `subagent_type: "ssh-operator:ssh-operator"`:
+Your Bash tool runs **locally**. The **only** way to run commands on the remote host is the helper script at:
 
 ```
-Agent tool:
-  subagent_type: "ssh-operator:ssh-operator"
-  description: "SSH operation on <host>"
-  prompt: |
-    HOST=<host>
-
-    ## Task
-    <task description from user>
-
-    Connect to the remote host using the helper script and complete the task.
-    Report what you found and what you changed.
+${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh
 ```
 
-## After Completion
+- Do NOT run raw commands like `ls /var/log` or `cat /etc/nginx/nginx.conf` — these read your **local** filesystem
+- Do NOT run `ssh` directly — always use the helper script
 
-Report the agent's results to the user concisely. If the agent encountered issues or needs clarification, relay that to the user.
+## Usage
+
+```
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST [line-limit] command...
+```
+
+- Default output limit: 200 lines. Pass a number as 2nd arg to override (e.g. `HOST 500 journalctl ...`).
+- The script handles connection timeouts, tilde expansion, and error reporting.
+
+## Examples
+
+```bash
+# Read file
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST cat -n /path/to/file
+
+# Read lines 50-100
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST sed -n '50,100p' /path/to/file
+
+# Search
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST grep -rn 'pattern' /path/
+
+# Find files
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST find /path -name '*.conf' -type f
+
+# List directory
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST ls -la /path/
+
+# Edit file
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST sed -i 's|old|new|g' /path/to/file
+
+# Run command
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST systemctl status nginx
+
+# With sudo
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST sudo systemctl restart nginx
+```
+
+**Write file**:
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" HOST tee /path/to/file <<'REMOTE_EOF'
+content here
+REMOTE_EOF
+```
+
+## Rules
+
+1. **Always use the helper script** — never raw `ssh`
+2. **Fetch only what you need** — use grep/sed/head/tail to narrow output
+3. **Verify edits** — after writing/editing, read back to confirm
+4. **Report clearly** — summarize findings and changes
+5. **Be cautious with destructive ops** — confirm before deleting files or stopping services
