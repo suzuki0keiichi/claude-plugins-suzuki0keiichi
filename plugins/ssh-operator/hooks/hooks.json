@@ -1,14 +1,15 @@
 {
-  "hooks": [
-    {
-      "event": "SessionStart",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "mkdir -p .claude/ssh-operator && cp ${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh .claude/ssh-operator/ssh-op.sh && chmod +x .claude/ssh-operator/ssh-op.sh",
-          "timeout": 5
-        }
-      ]
-    }
-  ]
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p .claude/ssh-operator && cp ${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh .claude/ssh-operator/ssh-op.sh && chmod +x .claude/ssh-operator/ssh-op.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
 }
