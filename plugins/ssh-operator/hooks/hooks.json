@@ -1,12 +1,14 @@
-[
-  {
-    "event": "SessionStart",
-    "hooks": [
-      {
-        "type": "command",
-        "command": "mkdir -p \"${CLAUDE_PROJECT_DIR}/.claude/ssh-operator\" && cp \"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh\" \"${CLAUDE_PROJECT_DIR}/.claude/ssh-operator/ssh-op.sh\" && chmod +x \"${CLAUDE_PROJECT_DIR}/.claude/ssh-operator/ssh-op.sh\"",
-        "timeout": 5
-      }
-    ]
-  }
-]
+{
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "mkdir -p \"${CLAUDE_PROJECT_DIR}/.claude/ssh-operator\" && cp \"${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh\" \"${CLAUDE_PROJECT_DIR}/.claude/ssh-operator/ssh-op.sh\" && chmod +x \"${CLAUDE_PROJECT_DIR}/.claude/ssh-operator/ssh-op.sh\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
