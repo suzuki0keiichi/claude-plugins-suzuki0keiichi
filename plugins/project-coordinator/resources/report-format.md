@@ -1,6 +1,6 @@
 # Report Format
 
-Format for investigator to report back to Main Agent.
+Format for investigator to report to coordinator (Agent Teams) or lead session (subagent mode).
 
 ## investigator Update
 
@@ -11,5 +11,5 @@ Format for investigator to report back to Main Agent.
 **Summary:** [1-2 sentences]
 
 **Deliverable:** [What was produced]
-**Next:** [Recommendation for Main Agent]
+**Next:** [Recommendation for next action]
 ```

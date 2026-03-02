@@ -7,12 +7,13 @@ Manage complex, uncertain tasks. Provide visibility and prevent losing track of 
 ```
 plugins/project-coordinator/
 ├── skills/
-│   ├── purpose-guard.md        ← Main orchestration skill
-│   └── purpose-extraction.md   ← Purpose clarification skill
+│   ├── project-coordinator/SKILL.md  ← Main orchestration skill
+│   └── purpose-extraction/SKILL.md   ← Purpose clarification skill
 ├── agents/
-│   └── investigator.md         ← Investigation specialist agent
+│   ├── coordinator.md                ← Project coordination, monitoring
+│   └── investigator.md               ← Investigation specialist agent
 └── resources/
-    └── ...                     ← Templates, best practices
+    └── ...                           ← Templates, best practices
 ```
 
 ## Installation
@@ -26,43 +27,46 @@ claude mcp add-json project-coordinator '{
 
 Or via Claude Code marketplace if available.
 
-## Setup
+## Architecture
 
-### Add trigger to rules
+### Agent Teams mode
 
-Create `~/.claude/rules/project-coordinator-trigger.md`:
-
-```markdown
-Read and follow `plugins/project-coordinator/skills/purpose-guard.md` when:
-
-1. **Starting complex tasks**
-   - Tasks with 3+ steps
-   - High uncertainty work (unclear solution, multiple retries expected)
-   - Work where progress tends to get lost
-
-2. **Ongoing project exists**
-   - `.claude/project-coordinator/` directory contains files
-   - MUST check after compaction
+```
+[User] <-> [Lead (main session)]
+                  |
+            TeamCreate + TaskCreate
+                  |
+           ┌──────┴──────┐
+           v              v
+    [coordinator]   [investigator]
+     plan & monitor    investigate
+           |              ^
+           └──SendMessage──┘
 ```
 
-## Architecture
+- **Lead**: Launches team, assigns project task to coordinator, waits for reports
+- **coordinator**: Creates plan.md, delegates investigation to investigator, monitors progress
+- **investigator**: Systematic investigation (hypothesis testing, root cause analysis)
+
+### Subagent mode (fallback)
 
 ```
 [User] <-> [Main Agent + skills]
                     |
+                Task tool
                     v
             [investigator]
 ```
 
-- **Main Agent**: Orchestration, user reporting (with skills)
-- **investigator**: Systematic investigation (hypothesis testing, root cause analysis)
+Main session acts as coordinator directly, calling investigator via Task tool.
 
-### Why Skills + Agent
+### Why Skills + Agents
 
 | Component | Type | Reason |
 |-----------|------|--------|
-| purpose-guard | Skill | User visibility, compaction resilience |
+| project-coordinator | Skill | User visibility, compaction resilience, team launch |
 | purpose-extraction | Skill | Requires frequent user dialogue |
+| coordinator | Agent | Autonomous plan management, monitoring loop |
 | investigator | Agent | Deep focus, context isolation, "dig and return" pattern |
 
 ## Managed Files
@@ -71,7 +75,7 @@ During project execution, `.claude/project-coordinator/` contains:
 
 | File | Owner | Purpose |
 |------|-------|---------|
-| purpose.md | Main (skill) | Immutable objective, success criteria |
-| plan.md | Main (skill) | Plan, progress, risks |
+| purpose.md | Lead (skill) | Immutable objective, success criteria |
+| plan.md | coordinator | Plan, progress, risks |
 | work_summary.md | investigator | Investigation summary |
 | work_log_XX.md | investigator | Detailed investigation logs |
