@@ -1,6 +1,78 @@
 # Archetype Checklists for Review Perspective Generation
 
 When generating review perspectives, use these checklists to ensure completeness.
+
+## Two Types of Perspectives
+
+### Technical Concern Perspectives (Sashiko-style)
+Focus on HOW code behaves. Each perspective examines ALL code through ONE technical lens.
+These are populated with tech-stack-specific patterns from `references/tech-patterns/`.
+
+### Domain Perspectives (Project-specific)
+Focus on WHAT the project cares about. Generated from knowledge-base.
+Examples: community-isolation, api-cost-defense, design-compliance.
+
+Both types coexist. Generate-review produces both, and the orchestrator's
+selection UI (when 8+ perspectives) lets users choose which to run.
+
+---
+
+## Technical Concern Perspectives (Universal)
+
+Generate these for ALL projects. Populate check items from the project's
+detected tech stack using `references/tech-patterns/{stack}.md`.
+
+### 1. Execution Flow
+Does code execute in the intended order? Are all paths reachable?
+- async/await correctness (missing await, unhandled promise)
+- Middleware/interceptor ordering and short-circuit behavior
+- Conditional branch coverage (unreachable code, always-true guards)
+- Framework lifecycle (SSR/CSR boundary, hydration, hook ordering)
+- Error propagation paths (does throw reach the right catch?)
+
+### 2. Resource Management
+Are resources acquired and released correctly?
+- Database connection pool exhaustion
+- Memory leaks (event listeners, closures, global caches)
+- File handle / stream lifecycle (open without close)
+- External API connection reuse and cleanup
+- Timeout enforcement on all external calls
+
+### 3. Concurrency
+Does code behave correctly under simultaneous access?
+- Race conditions (check-then-act without atomicity)
+- Transaction isolation level appropriateness
+- Optimistic locking / retry correctness
+- Deadlock potential (lock ordering)
+- Shared mutable state across requests/workers
+
+### 4. Security
+Are attack vectors closed?
+- Authentication bypass (missing auth checks on routes)
+- Injection (SQL, NoSQL, command, template)
+- Sensitive data exposure (logs, errors, API responses)
+- CSRF / SSRF / open redirect
+- Cryptographic misuse (weak hash, predictable tokens)
+
+### 5. Platform Constraints
+Does code respect the runtime environment's limits?
+- Serverless: cold start, execution timeout, memory limit, no local filesystem
+- Edge Runtime: no Node.js APIs, limited crypto, size limits
+- Container: health check, graceful shutdown, signal handling
+- Browser: bundle size, main thread blocking, CSP
+
+### 6. Implementation Quality
+Is the code maintainable and correct?
+- Type safety (any casts, unchecked type assertions)
+- Error handling completeness (empty catch, missing error paths)
+- Coding convention adherence (from knowledge-base/implementation-principles.md)
+- Dead code and unused imports
+- Test coverage for changed code paths
+
+---
+
+## Domain Perspective Archetypes
+
 Each archetype has REQUIRED perspectives (must always generate) and CONDITIONAL
 perspectives (generate if knowledge-base contains relevant patterns).
 

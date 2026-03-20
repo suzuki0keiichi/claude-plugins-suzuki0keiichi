@@ -18,7 +18,52 @@ description: >
 
 # {project_name} Review Orchestrator
 
+## Step 0: Environment Setup (MUST do first)
+
+1. Read `config.md` to get project information
+2. **All code lives in `workspace/`** — this is a git clone of the project. All git operations and code reading MUST target `workspace/`, NOT the current directory root
+3. Read `knowledge-base/project-context.md` for project background
+
+**IMPORTANT**: The current directory is the review data repository, NOT the project itself. Never run git commands on the current directory root.
+
+## Step 1: Perspective Selection
+
+Count the total number of available perspectives (technical concerns + domain perspectives).
+
+**If 7 or fewer**: Skip selection, use all perspectives.
+
+**If 8 or more**: Present selection UI using AskUserQuestion:
+
+Available perspectives (select by number, preset, or "all"):
+
+Technical:
+  1. execution-flow — {one-line description with project tech stack}
+  2. resource-management — ...
+  3. concurrency — ...
+  4. security — ...
+  5. platform-constraints — ...
+  6. implementation-quality — ...
+
+Domain:
+  7. {domain-perspective-1} — ...
+  ...
+
+Presets:
+  [P] PR Review: {preset_pr_perspectives}
+  [F] Full: all
+  [Q] Quick: security, implementation-quality
+
+Selection:
+
+Wait for user response. Parse selected perspective IDs.
+
 ## Input Analysis
+
+If no review target is specified, ask the user:
+1. PR Review — specify PR number or branch (git operations in `workspace/`)
+2. Code Health Review — specify module/directory (relative to `workspace/`)
+3. Design Review — provide design document
+4. Incident Review — provide incident info
 
 Determine review type from input:
 
@@ -35,10 +80,22 @@ Determine review type from input:
 
 Dispatch each perspective as an Agent:
 {for each perspective}
-- Agent: "{perspective_name}" — Read .claude/skills/perspectives/{perspective_id}/SKILL.md and execute
+- Agent: "{perspective_name}" — Read .claude/skills/{perspective_id}/SKILL.md and execute
 {end for}
 
 Collect all agent results. Each returns findings in unified format.
+
+### Phase 1.5: Cross-Perspective Fact Check
+
+Before contradiction detection, verify findings that appear from only ONE perspective (single-source findings are higher false-positive risk):
+
+1. For each single-source finding with Severity Critical or Important:
+   - Re-read the cited code location in `workspace/`
+   - Confirm the finding's Verification field matches reality
+   - If the code does not match: drop the finding
+   - If mitigating code exists elsewhere: downgrade Severity or drop
+
+Findings detected by multiple perspectives have implicit cross-validation and can skip this step.
 
 ### Phase 2: Contradiction Detection
 
@@ -62,7 +119,49 @@ Output: final review report.
 
 ---
 
-## perspectives/{name}/SKILL.md Template
+## Technical Concern SKILL.md Template
+
+Use this for the 6 technical concern perspectives (execution-flow, resource-management,
+concurrency, security, platform-constraints, implementation-quality).
+
+```
+---
+name: {concern_id}
+description: >
+  Reviews {project_name} code from the {concern_name} perspective.
+  Tech stack: {detected_tech_stack}.
+---
+
+# {concern_name} Review
+
+## What to Check
+
+{Check items from archetype-checklists.md "Technical Concern Perspectives" section,
+filtered to this concern. THEN overlay tech-stack-specific checks from
+references/tech-patterns/{stack}.md for each detected stack.}
+
+## Project-Specific Context
+
+{ONLY the knowledge-base entries relevant to this concern.
+NOT the full knowledge-base. Select entries where:
+- bug-patterns.md mentions issues related to this concern
+- pr-review-patterns.md has reviewer comments about this concern
+- implementation-principles.md has rules that affect this concern}
+
+## Fact Check (MUST do before output)
+{same as domain template}
+
+## Output Format
+{same as domain template}
+```
+
+---
+
+## Domain SKILL.md Template
+
+Use this for project-specific domain perspectives (e.g., community-isolation,
+api-cost-defense). Only generated when knowledge-base reveals domain-specific
+rules that don't map to the 6 technical concerns.
 
 ```
 ---
@@ -91,6 +190,17 @@ description: >
 {Patterns extracted from pr-review-patterns.md and bug-patterns.md
 that are specific to this project, not generic best practices}
 
+## Fact Check (MUST do before output)
+
+For each finding you are about to report, you MUST verify it:
+
+1. **Re-read the actual code** at the location you are about to cite. Do not report from memory.
+2. **Prove the issue exists**: find the specific line(s) that demonstrate the problem. If you cannot point to concrete code, drop the finding.
+3. **Attempt to disprove**: actively look for guards, checks, or handling elsewhere that might already address this issue (other middleware, service layer, caller code, etc.). If found, drop or downgrade the finding.
+4. **Check for false assumptions**: verify your understanding of the framework, library, or pattern being used. If unsure, note uncertainty in Confidence.
+
+Only findings that survive this verification appear in your output.
+
 ## Output Format
 
 For each finding:
@@ -99,9 +209,10 @@ For each finding:
 - **Severity**: Critical / Important / Suggestion
 - **Category**: short-term-detriment / long-term-detriment
 - **Confidence**: 0-100
-- **Location**: file:line
+- **Location**: file:line (exact line numbers, verified by re-reading)
 - **Description**: What is the problem
-- **Evidence**: Why you believe this (reference knowledge-base entries)
+- **Verification**: The specific code you read that proves this issue. Quote the relevant lines. If the issue is an absence (e.g., missing check), state what you searched for and where.
+- **Evidence**: Why you believe this matters for this project (reference knowledge-base entries, bug-patterns, design-principles)
 - **Suggestion**: What should be done
 ```
 
@@ -171,6 +282,7 @@ description: >
 4. Sort by severity (Critical → Important → Suggestion)
 5. Deduplicate remaining overlaps
 6. Generate report
+7. **Save report to file**: Write the report to `reviews/{YYYY-MM-DD}-{type}-{target}.md` (e.g., `reviews/2026-03-20-pr-feature-auth.md`). Create the `reviews/` directory if it does not exist.
 
 ## Report Format
 
@@ -178,22 +290,40 @@ description: >
 
 ## Summary
 - Review type, target, execution date
-- Critical: N, Important: N, Suggestion: N
+- Short-term detriments: Critical N, Important N, Suggestion N
+- Long-term detriments: Critical N, Important N, Suggestion N
+- Findings dropped by fact-check: N
 
-## Critical Findings
-(never omit, show all)
+## Short-term Detriments (bugs, security, performance, cost)
 
-## Important Findings
-(summary + details)
+### Critical
+(each finding in structured format with Verification field. Never omit.)
 
-## Suggestions
+### Important
+(structured format)
+
+### Suggestions
 (list format)
+
+## Long-term Detriments (tech debt, design drift, chaos)
+
+### Critical
+(structured format)
+
+### Important
+(structured format)
+
+### Suggestions
+(list format)
+
+## Fact-Check Log
+(findings that were dropped or downgraded during Phase 1.5, with reason)
 
 ## Debate Notes
 (only if debate occurred)
 
 ## Knowledge Base References
-(which knowledge-base entries were consulted)
+(which knowledge-base entries were consulted, and by which perspectives)
 
 ## Health Score Data
 (if available: relevant trends for reviewed areas)

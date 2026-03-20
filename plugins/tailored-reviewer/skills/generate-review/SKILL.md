@@ -34,9 +34,15 @@ Read ALL files in knowledge-base/:
 
 Note confidence levels. Low-confidence entries (<0.5) should be used cautiously in generated skills.
 
-### Step 2: Determine Project Archetype
+### Step 2: Detect Tech Stack and Project Archetype
 
-Analyze project-context.md and the code in workspace/ to classify:
+**2a: Detect tech stack** from workspace/ (package.json, requirements.txt, Cargo.toml, etc.):
+- Frameworks: Next.js (Pages/App Router), React, Vue, Express, FastAPI, etc.
+- Databases: PostgreSQL, MySQL, MongoDB, Redis, Prisma ORM, etc.
+- Runtime: Node.js, Python, Go, Rust, etc.
+- Infrastructure: Docker, Kubernetes, serverless, edge, etc.
+
+**2b: Classify archetype**:
 
 | Signal | Archetype |
 |--------|-----------|
@@ -49,38 +55,57 @@ Analyze project-context.md and the code in workspace/ to classify:
 
 Projects may match multiple archetypes. Include all that apply.
 
-### Step 3: Select Perspectives
+### Step 3: Generate Technical Concern Perspectives
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/archetype-checklists.md`.
+Read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/archetype-checklists.md` (Technical Concern Perspectives section).
+
+Always generate these 6 perspectives:
+1. execution-flow
+2. resource-management
+3. concurrency
+4. security
+5. platform-constraints
+6. implementation-quality
+
+For each, use the **Technical Concern SKILL.md Template** from skill-templates.md:
+- Populate check items from archetype-checklists.md
+- Overlay tech-stack-specific checks from `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/tech-patterns/{stack}.md` (if exists for detected stack)
+- **Selective knowledge-base injection**: only include knowledge-base entries relevant to this specific concern (NOT the full knowledge-base)
+  - For concurrency: race condition patterns from bug-patterns.md, transaction-related principles
+  - For security: auth-related patterns, data exposure rules
+  - For implementation-quality: coding conventions from implementation-principles.md
+  - etc.
+
+### Step 4: Generate Domain Perspectives
+
+Read archetype-checklists.md (Domain Perspective Archetypes section).
 
 For each matched archetype:
-1. Include all REQUIRED perspectives
+1. Include all REQUIRED domain perspectives
 2. Check CONDITIONAL perspectives against knowledge-base — include if relevant data exists
-3. Always include UNIVERSAL perspectives
+3. DO NOT duplicate what the 6 technical concern perspectives already cover
+   - e.g., if "Authentication & Authorization" is already covered by the security concern, only generate a domain perspective if there are project-specific auth rules beyond standard security checks
 
-Deduplicate across archetypes. Merge overlapping perspectives into single comprehensive ones.
+For each domain perspective, use the **Domain SKILL.md Template**:
+- Fill in project-specific content from knowledge-base
+- Convert bug-patterns.md entries → specific check items
+- Convert pr-review-patterns.md entries → reviewer knowledge
+- Convert design-principles.md → deviation detection rules
 
-### Step 4: Generate SKILL.md Files
+### Step 5: Write All SKILL.md Files
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/skill-templates.md`.
+Write all generated skills to `.claude/skills/{perspective-id}/SKILL.md`.
+Generate orchestrator, debate, and consolidation skills from their templates,
+filling in the FULL perspective list (technical + domain) and project name.
 
-For each perspective:
-1. Start from the template
-2. Fill in project-specific content:
-   - Convert bug-patterns.md entries → specific check items
-   - Convert pr-review-patterns.md entries → reviewer knowledge encoded as instructions
-   - Convert design-principles.md → deviation detection rules
-3. Ensure both short-term and long-term detriment sections are substantive (not just headers)
-4. Write to `.claude/skills/perspectives/{perspective-id}/SKILL.md`
-
-Generate orchestrator, debate, and consolidation skills from their templates, filling in the perspective list and project name.
-
-### Step 5: Completeness Verification
+### Step 6: Completeness Verification
 
 Before finishing, verify:
 
-- [ ] Every archetype's required perspectives are covered
-- [ ] Both short-term and long-term detriments exist in every perspective
+- [ ] All 6 technical concern perspectives are generated
+- [ ] Each technical concern has tech-stack-specific checks (not just generic)
+- [ ] Domain perspectives don't duplicate technical concerns
+- [ ] Knowledge-base injection is selective (each skill only has relevant KB entries)
 - [ ] knowledge-base entries with unique patterns (bug hotspots, reviewer focus areas) are reflected
 - [ ] Generated skills reference specific files/modules from the project, not just generic advice
 - [ ] Orchestrator correctly lists all generated perspectives
