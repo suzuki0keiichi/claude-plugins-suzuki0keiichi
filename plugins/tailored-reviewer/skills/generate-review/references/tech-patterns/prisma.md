@@ -41,3 +41,7 @@
 - **Missing indexes**: Prisma schema `@@index` is easy to forget. Fields used in `where`, `orderBy`, or `groupBy` need explicit indexes. Check slow query logs.
 - **Unused `include`**: Including relations you don't use wastes queries and bandwidth. Audit `include` clauses for actually-used fields.
 - **Date timezone handling**: Prisma stores `DateTime` as UTC. Comparisons with local time strings cause off-by-timezone-offset bugs.
+- **`update` returns the old value by default**: Actually no — `update` returns the NEW value. But `updateMany` returns only `{ count: N }`, not the updated records. Confusing these causes "why is my data stale" bugs.
+- **Soft delete not built-in**: No automatic `WHERE deletedAt IS NULL` filter. Every `findMany`/`findFirst` must manually exclude deleted records, or use middleware. Forgetting one query = showing deleted data.
+- **Relation filter `some`/`every`/`none` semantics**: `where: { posts: { some: { published: true } } }` finds users with AT LEAST ONE published post. `every` means ALL posts are published (including users with NO posts — `every` on empty = true). This is SQL `EXISTS` vs `NOT EXISTS` semantics.
+- **`createMany` doesn't support nested creates**: Unlike `create`, `createMany` can't create related records. Silently ignores `connect` or nested `create`. Use `create` in a loop or `$transaction` instead.

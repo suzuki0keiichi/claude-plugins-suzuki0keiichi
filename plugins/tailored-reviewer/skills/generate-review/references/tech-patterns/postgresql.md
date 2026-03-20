@@ -41,3 +41,9 @@
 - **JSONB vs normalized**: Storing structured data as JSONB avoids schema changes but loses type safety, indexing efficiency, and referential integrity. Use for truly semi-structured data only.
 - **TEXT vs VARCHAR**: In PostgreSQL, `TEXT` and `VARCHAR` have identical performance. `VARCHAR(n)` only adds a length check. Don't use `VARCHAR(255)` as a habit from MySQL.
 - **BIGINT/BIGSERIAL for IDs**: If IDs may exceed 2B, use BIGINT from the start. Migrating INT to BIGINT on a large table requires table rewrite = downtime.
+- **NULL in NOT IN**: `WHERE id NOT IN (1, 2, NULL)` returns ZERO rows. NULL makes the entire NOT IN condition unknown. Use `NOT EXISTS` instead, or filter NULLs from the subquery.
+- **COUNT(*) vs COUNT(column)**: `COUNT(*)` counts all rows. `COUNT(column)` excludes NULLs. Using the wrong one in presence of NULLs gives silently wrong counts.
+- **LIMIT without ORDER BY**: Results are in undefined order. Pagination with LIMIT/OFFSET without deterministic ORDER BY returns duplicate/missing rows across pages.
+- **UPDATE without WHERE**: No warning, no confirmation. Updates every row. Especially dangerous in scripts and migration code.
+- **TRUNCATE vs DELETE**: `TRUNCATE` doesn't fire triggers, doesn't log individual rows, resets sequences. `DELETE FROM table` fires triggers, logs to WAL. Using TRUNCATE when triggers are expected = silent data inconsistency.
+- **Default timezone is server timezone**: `timestamp without time zone` uses server TZ for `now()`. If server TZ changes (deploy to different region), all timestamps shift. Use `timestamp with time zone` always.

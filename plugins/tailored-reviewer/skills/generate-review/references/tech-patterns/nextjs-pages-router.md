@@ -11,6 +11,7 @@
 
 - **Prisma client singleton**: Must use singleton pattern (`global.prisma`) in development to avoid connection pool exhaustion from hot reloading. Production: single instance per process.
 - **API route cold start**: Each API route is a separate serverless function. Heavy imports (Prisma, OpenAI SDK) in every route = slow cold starts. Consider shared module initialization.
+- **`res.end()` doesn't stop execution**: After `res.status(401).end()`, the rest of the handler keeps running. Must `return` explicitly. Common pattern: auth check sends 401 but processing continues below.
 
 ## Concurrency
 
@@ -35,3 +36,7 @@
 - **`pages/` vs `app/` confusion**: Mixing Pages Router and App Router in the same project causes routing conflicts. Files in both `pages/` and `app/` for the same route = undefined behavior.
 - **`_app.tsx` vs layout**: Pages Router uses `_app.tsx` for global layout. Forgetting to wrap providers here means they're missing on every page.
 - **Dynamic import for client-only**: Components using `window` or `document` must use `next/dynamic` with `ssr: false`. Otherwise, SSR crashes.
+- **`getServerSideProps` return type not enforced at runtime**: TypeScript checks the type, but returning extra fields doesn't error — they get serialized to the client. Sensitive server-only data accidentally leaks through props.
+- **API route body parsing limit**: Default body size limit is 1MB. Large file uploads silently fail with no clear error. Need custom config in `next.config.js`.
+- **`router.push` doesn't scroll to top**: Unlike `<Link>`, programmatic `router.push` doesn't reset scroll position. User sees the new page at the old scroll position.
+- **Catch-all routes `[...slug]` vs optional `[[...slug]]`**: `[...slug]` doesn't match the root (e.g., `/` doesn't match `pages/[...slug].tsx`). `[[...slug]]` does. Mixing them up causes 404 on the root path.

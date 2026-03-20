@@ -41,6 +41,10 @@
 ## Implementation Quality
 
 - **Unhandled rejection = crash (Node 15+)**: Unhandled promise rejections terminate the process by default. Every async code path needs error handling.
-- **`console.log` in production**: No structured format, no levels, no correlation IDs. Use a structured logger (pino, winston) with request context.
 - **Error class information loss**: `JSON.stringify(new Error('msg'))` returns `{}`. Errors need explicit serialization for logging/API responses.
 - **ESM/CJS interop**: `require()` of ESM modules fails. `import()` of CJS works but default export handling differs. Check package `type` field and exports map.
+- **`Array.sort()` is in-place AND returns**: `const sorted = arr.sort()` — both `sorted` and `arr` are the same mutated array. Causes bugs when the original order is needed elsewhere.
+- **`parseInt` radix trap**: `parseInt('08')` returns `8` in modern engines, but `parseInt('0x10')` returns `16`. Always pass radix: `parseInt(str, 10)`. Also: `parseInt` stops at first non-numeric char: `parseInt('123abc')` = `123`, no error.
+- **`Date` month is 0-indexed**: `new Date(2026, 3, 20)` is April 20th, not March 20th. One of the most common silent bugs in date handling.
+- **`for...in` iterates prototype properties**: `for (const key in obj)` includes inherited properties. Use `Object.keys()` or `for...of Object.entries()` for own properties.
+- **`===` on objects compares reference**: `{a:1} === {a:1}` is `false`. Deep comparison needs `JSON.stringify`, lodash `isEqual`, or `structuredClone` + compare. Subtle bugs in deduplication logic.
