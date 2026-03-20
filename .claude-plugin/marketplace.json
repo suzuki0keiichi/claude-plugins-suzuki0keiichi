@@ -18,6 +18,11 @@
       "name": "ssh-operator",
       "description": "Operate remote machines via SSH through a subagent. Maintains security by keeping authentication local-only while enabling full remote operations (file read/write/edit, command execution, log inspection) with token-efficient output limiting.",
       "source": "./plugins/ssh-operator"
+    },
+    {
+      "name": "tailored-reviewer",
+      "description": "Generate project-tailored AI review skills by collecting system-specific knowledge. Complements pr-review-toolkit with project-specific review perspectives that detect both short-term bugs and long-term detriments.",
+      "source": "./plugins/tailored-reviewer"
     }
   ]
 }

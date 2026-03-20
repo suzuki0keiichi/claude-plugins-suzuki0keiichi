@@ -1,0 +1,8 @@
+{
+  "name": "tailored-reviewer",
+  "version": "0.1.0",
+  "description": "Generate project-tailored AI review skills by collecting system-specific knowledge. Complements pr-review-toolkit with project-specific review perspectives.",
+  "author": {
+    "name": "suzuki0keiichi"
+  }
+}
