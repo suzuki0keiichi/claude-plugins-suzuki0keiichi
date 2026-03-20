@@ -44,3 +44,9 @@
 - **`==` on floats**: `0.1 + 0.2 == 0.3` is `False`. Use `math.isclose()`.
 - **`dict.get(key)` returns `None` silently**: Can't distinguish "key exists with value None" from "key missing" using `.get()` alone. Use `key in d` when None is a valid value.
 - **`or` for default values gotcha**: `x = val or default` — if `val` is `0`, `""`, `[]`, or `False`, these are falsy and get replaced by default. Use `x = val if val is not None else default` for None-only check.
+- **Modifying dict while iterating**: `for k in d: if cond: del d[k]` raises `RuntimeError`. Use `for k in list(d.keys())` or build a separate list of keys to delete.
+- **Deleting list items while iterating**: `for i, v in enumerate(lst): if cond: lst.pop(i)` skips elements. Indices shift after deletion. Iterate in reverse or use list comprehension.
+- **Loop variable leaks to enclosing scope**: `for x in range(3): pass; print(x)` prints `2`. The loop variable `x` persists after the loop. Name collision with other variables in the same scope.
+- **Enclosing scope assignment causes UnboundLocalError**: `x = 10; def foo(): print(x); x = 20` — `print(x)` raises `UnboundLocalError` because the later `x = 20` makes `x` local in the entire function. Use `nonlocal x`.
+- **`tuple` with one element needs trailing comma**: `x = (1)` is `int`, not `tuple`. Must write `x = (1,)`. Common when constructing SQL parameter tuples.
+- **`__eq__` without `__hash__`**: Defining `__eq__` makes the class unhashable (can't use in sets/dict keys) unless `__hash__` is also defined. Silent failure when adding to a set.

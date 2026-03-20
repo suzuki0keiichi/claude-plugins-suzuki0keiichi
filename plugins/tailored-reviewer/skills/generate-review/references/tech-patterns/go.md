@@ -43,3 +43,12 @@
 - **Ignoring errors with `_`**: `result, _ := riskyFunction()` — compiles, but silently swallows the error. Every `_` for an error return should have a comment explaining why it's safe to ignore.
 - **Slice append gotcha**: `a := []int{1,2,3}; b := append(a[:2], 4)` — modifies `a[2]` because append reuses the underlying array when capacity allows. `b` and `a` share memory. Use `append(a[:2:2], 4)` to force copy.
 - **`init()` function ordering**: `init()` runs on package import, before `main`. Multiple `init()` in one file run top-to-bottom, but across files the order depends on file name alphabetically. Don't rely on cross-file init order.
+- **Nil vs empty slice confusion**: `var s []int` (nil) vs `s := []int{}` (empty). `json.Marshal(nil slice)` returns `null`, `json.Marshal(empty slice)` returns `[]`. API consumers see different behavior.
+- **Integer overflow is silent**: Go doesn't panic on integer overflow. `var x int8 = 127; x++` → `x == -128`. No warning. Use `math.MaxInt` checks or overflow-safe libraries.
+- **`time.After` leaks in loops**: `for { select { case <-time.After(1*time.Second): ... } }` — each iteration creates a new timer that isn't garbage collected until it fires. Use `time.NewTimer` + `Reset`.
+- **Forgetting return after HTTP reply**: `http.Error(w, "not found", 404)` does NOT return from the handler. Code below continues executing, potentially writing a second response. Must `return` after.
+- **`defer` inside a loop**: `for _, f := range files { f := os.Open(f); defer f.Close() }` — deferred calls don't run until the function returns, not loop iteration end. All files stay open until function exit.
+- **JSON unmarshaling existing struct fields**: `json.Unmarshal(data, &existingStruct)` MERGES into existing values, doesn't reset. Absent JSON fields keep their old values. Confusing when reusing structs.
+- **String iteration gives runes not bytes**: `for i, c := range "日本語"` — `i` jumps by multi-byte rune width (0, 3, 6), `c` is `rune`. Using `s[i]` gives bytes, `range s` gives runes. Mixing = wrong index.
+- **Substring holds entire original string memory**: `s := largeString[:10]` — the substring references the original's backing array. `largeString` can't be GC'd. Copy explicitly: `string([]byte(s))`.
+- **`break` in `select` breaks the select, not the for loop**: `for { select { case ...: break } }` — the `break` exits the `select`, not the `for`. Use labeled break: `loop: for { select { case ...: break loop } }`.

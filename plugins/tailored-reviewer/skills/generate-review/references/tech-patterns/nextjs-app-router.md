@@ -40,3 +40,9 @@
 - **Missing `loading.tsx`**: Without it, navigation to a Server Component page shows nothing until the server responds. Users see a frozen screen with no indication of loading.
 - **`error.tsx` must be Client Component**: Error boundaries require `'use client'`. A Server Component `error.tsx` doesn't catch errors. No build warning.
 - **Metadata exports don't work in Client Components**: `export const metadata` or `export function generateMetadata` in a `'use client'` file is silently ignored. SEO tags disappear.
+- **Route Handlers are static (cached) by default for GET**: Unlike Pages Router API Routes, GET Route Handlers are cached at build time. Data doesn't update until next build unless you add `export const dynamic = 'force-dynamic'` or use `cookies()`/`headers()`.
+- **Suspense boundary must wrap FROM ABOVE**: `<Suspense>` inside the async component doing the fetch doesn't work. The boundary must be the PARENT wrapping the async child.
+- **Context providers must be a separate Client Component file**: Wrapping children in a Context.Provider inline in `layout.tsx` (Server Component) fails. Create a separate `providers.tsx` with `'use client'`.
+- **Data revalidation required after Server Action mutation**: After a Server Action inserts/updates data, cached pages don't update automatically. Must call `revalidatePath()` or `revalidateTag()` explicitly.
+- **Middleware auth bypass vulnerability (CVE-2025-29927)**: Middleware can be bypassed entirely. Defense-in-depth: verify auth at every sensitive operation, not just middleware. Treat middleware as optimization, not security boundary.
+- **Layout doesn't re-render on child navigation**: Layouts are rendered once and reused. State in layouts persists across page navigations. `usePathname()` in layout doesn't trigger re-render on child route change.
