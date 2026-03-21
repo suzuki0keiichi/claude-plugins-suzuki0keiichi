@@ -203,7 +203,7 @@ Generated: YYYY-MM-DD
 
 To compute hashes, run: `shasum -a 256 <file> | cut -c1-8`
 
-This file is used by update-review to determine which build inputs changed and target only affected skills for regeneration.
+This file is used by update-skills to determine which build inputs changed and target only affected skills for regeneration.
 
 ## Output
 

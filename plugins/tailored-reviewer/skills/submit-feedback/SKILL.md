@@ -26,7 +26,7 @@ Read all diffs in feedback/veteran-edits/. For each:
 ### Step 2: Classify
 
 - **Project-specific**: The edit adds a check for "our payment gateway's specific error code"
-  → This stays in this project's skills only. Feed to update-review.
+  → This stays in this project's skills only. Feed to update-skills.
 - **Universal improvement**: The edit improves how confidence scoring works, or adds a check
   that any project of this archetype would benefit from
   → This should become a plugin improvement.

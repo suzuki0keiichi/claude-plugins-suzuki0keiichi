@@ -117,7 +117,7 @@ The backtest evaluation (recall/precision analysis) is written separately to `ba
 ## Learning Extraction (backtest後に自動実行)
 
 backtestの結果からMISS/Partialを分析し、`backtest/learnings.md` に構造化して追記する。
-このファイルは `build-skills` と `update-review` が読み込み、スキル生成に反映する。
+このファイルは `build-skills` と `update-skills` が読み込み、スキル生成に反映する。
 
 ### 抽出プロセス
 
@@ -152,7 +152,7 @@ backtestの結果からMISS/Partialを分析し、`backtest/learnings.md` に構
 ### Recall (known bug detection)
 - Detection rate > 70%: good for deployment
 - Detection rate 40-70%: usable but needs skill refinement
-- Detection rate < 40%: skills need significant rework, feed results to update-review
+- Detection rate < 40%: skills need significant rework, feed results to update-skills
 
 ### Precision (forward validation)
 - Validation rate > 50%: excellent — review is finding real issues beyond the known bug

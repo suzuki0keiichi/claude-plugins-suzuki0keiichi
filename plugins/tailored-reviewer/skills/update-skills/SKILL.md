@@ -1,10 +1,11 @@
 ---
-name: update-review
+name: update-skills
 description: >
-  This skill should be used when the user asks to "update review skills",
-  "refresh skills", "apply feedback", "レビュースキルを更新",
-  "フィードバックを反映", or when triggered by knowledge-base changes,
-  new feedback entries, or plugin version updates.
+  This skill should be used when the user asks to "update skills",
+  "update review skills", "refresh skills", "apply feedback",
+  "スキルを更新", "レビュースキルを更新", "フィードバックを反映",
+  or when triggered by knowledge-base changes, new feedback entries,
+  or plugin version updates.
 argument-hint: [--full to update all skills, default: changed only]
 ---
 
