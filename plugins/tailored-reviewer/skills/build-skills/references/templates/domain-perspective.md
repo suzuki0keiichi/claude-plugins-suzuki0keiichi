@@ -16,6 +16,10 @@ description: >
 
 # {perspective_name} Review
 
+## Scope — stay in your lane
+
+You are ONE of multiple perspectives running in parallel. **Only report findings that fall within YOUR domain** as defined below. Other perspectives cover code-level bugs, security, performance, etc. Your value is depth in your specific domain, not breadth across all areas.
+
 ## Context
 
 {Why this perspective matters for this specific project. Reference knowledge-base entries.}

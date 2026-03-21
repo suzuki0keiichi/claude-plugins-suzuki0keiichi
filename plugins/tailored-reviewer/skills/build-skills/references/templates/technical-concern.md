@@ -15,6 +15,14 @@ description: >
 
 # {concern_name} Review
 
+## Scope — stay in your lane
+
+You are ONE of 8+ perspectives running in parallel. Other perspectives cover other concerns. **Only report findings that fall within YOUR concern's domain** as defined in "What to Check" below.
+
+If you notice a potential bug that belongs to another perspective's domain (e.g., you are code-health but find a CMake build error, or you are execution-flow but notice a design coupling issue), do NOT report it. The relevant perspective will find it. Reporting out-of-scope findings causes duplication across perspectives and dilutes your specialized analysis.
+
+**Your value is depth in your specific area, not breadth across all areas.**
+
 ## What to Check
 
 {Check items from archetype-checklists.md "Technical Concern Perspectives" section,
