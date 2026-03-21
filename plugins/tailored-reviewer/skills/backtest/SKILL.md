@@ -56,7 +56,7 @@ For each test case in `backtest/test-cases.md`:
 
 1. **Checkout**: `cd workspace && git checkout {bug_commit}` (the state WITH the bug)
 2. **Generate diff**: `git diff {bug_commit}~1 {bug_commit}` (the buggy change)
-3. **Execute review**: Run the review orchestrator against this diff, with the `--backtest` context flag
+3. **Execute review**: Run the review orchestrator against this diff, with the `--backtest` context flag. The orchestrator's consolidation step will save the review to `reviews/` as usual — backtest does NOT change the review output location.
 4. **Evaluate detection** (recall): Did any finding match the known bug?
    - Match criteria: same file, related description, severity >= Important
    - Partial match: right area but wrong specific issue
@@ -74,7 +74,8 @@ For each test case in `backtest/test-cases.md`:
 
 ### Results
 
-Write to `backtest/results/YYYY-MM-DD.md`:
+The review itself is saved to `reviews/` by the orchestrator (same as any normal review).
+The backtest evaluation (recall/precision analysis) is written separately to `backtest/results/YYYY-MM-DD-{target}.md`:
 
 ```markdown
 # Backtest Results: [date]
