@@ -148,10 +148,10 @@ Merge duplicates across perspectives but keep all perspective names.)
 
 (For each major short-term finding, explain the structural root cause, link to bug-patterns.md if this area is a known hotspot, and propose structural fixes that prevent the entire class of bug.)
 
-## Design Critique
-(purpose-implementation gaps, omissions, alternative approaches)
+## 設計上の懸念
+(目的と実装のギャップ、欠落している考慮事項、代替アプローチの提案)
 
-## Long-term Detriments
+## 長期的な問題
 
 ### Critical
 (structured format)
