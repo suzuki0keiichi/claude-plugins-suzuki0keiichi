@@ -138,9 +138,10 @@ For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/ref
 ### Step 5: Write All SKILL.md Files
 
 Write all generated skills to `.claude/skills/{perspective-id}/SKILL.md`.
-Generate orchestrator, debate, and consolidation skills from their respective templates,
-filling in the FULL perspective list (technical + domain) and project name:
+Generate orchestrator, fact-check, design-critique, debate, and consolidation skills from their respective templates, filling in the FULL perspective list (technical + domain) and project name:
 - Orchestrator: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/orchestrator.md`
+- Fact Check: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/fact-check.md`
+- Design Critique: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/design-critique.md`
 - Debate: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/debate.md`
 - Consolidation: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/consolidation.md`
 
