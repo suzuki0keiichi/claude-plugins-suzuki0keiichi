@@ -50,9 +50,11 @@ Determine review type from input:
 
 ### Phase 1: Parallel Independent Review
 
-Dispatch each perspective as an Agent:
+**Use the Agent tool** to launch each perspective as a separate subagent. Do NOT execute perspectives yourself — each perspective must run in its own Agent to avoid context pollution. Running all perspectives in the orchestrator's context will exceed context limits and degrade quality.
+
+Launch all perspectives in parallel using the Agent tool:
 {for each perspective}
-- Agent: "{perspective_name}" — Read .claude/skills/{perspective_id}/SKILL.md and execute
+- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute it against [review target]. Return findings in the output format specified in the skill."
 {end for}
 
 Collect all agent results. Each returns findings in unified format.
@@ -130,17 +132,19 @@ Scan all findings for:
 - Conflicting suggestions for same issue → contradiction
 - Duplicate findings across perspectives → merge candidates
 
-If contradictions found: dispatch debate agent with contradiction pairs.
+If contradictions found: **use the Agent tool** to launch the debate agent. Agent tool: name="debate", prompt="Read .claude/skills/debate/SKILL.md and resolve these contradictions: [contradiction pairs]"
 If no contradictions: skip to Phase 3.
 
 ### Phase 3: Consolidation
 
-Read `.claude/skills/consolidation/SKILL.md` and follow its instructions. Do NOT skip this step by consolidating results yourself — the consolidation skill contains MANDATORY output instructions (file saving to `reviews/`) that must be executed.
+**Use the Agent tool** to launch consolidation as a separate subagent. Do NOT consolidate results yourself — running consolidation inline pollutes the orchestrator's context and risks losing findings.
+
+Agent tool: name="consolidation", prompt="Read .claude/skills/consolidation/SKILL.md and follow its instructions. Input: [all Phase 1 results + debate results]. The skill contains MANDATORY file output instructions — you MUST write the report to reviews/."
 
 Input to consolidation:
 - All Phase 1 results (preserved separately)
 - Debate results (if any)
 - Health score data (if available at health/scores/)
 
-**MANDATORY**: The final review report MUST be written to `reviews/{YYYY-MM-DD}-{type}-{target}.md`. If this file does not exist after consolidation, the review is incomplete. This instruction is duplicated here because the consolidation skill may not be dispatched as a separate agent.
+**MANDATORY**: The final review report MUST be written to `reviews/{YYYY-MM-DD}-{type}-{target}.md`. If this file does not exist after consolidation, the review is incomplete.
 ```
