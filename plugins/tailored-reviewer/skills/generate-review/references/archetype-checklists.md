@@ -29,6 +29,9 @@ Does code execute in the intended order? Are all paths reachable?
 - Conditional branch coverage (unreachable code, always-true guards)
 - Framework lifecycle (SSR/CSR boundary, hydration, hook ordering)
 - Error propagation paths (does throw reach the right catch?)
+- **Code symmetry**: functions processing the same data set (e.g., markStale/closeExpired, create/delete, serialize/deserialize) must have consistent guard checks — if one skips locked/disabled/archived items, all must
+- **State transition gaps**: when code acts on a condition checked earlier (check-then-act), verify that external state changes between check and act are handled (e.g., label applied → time passes → close, but what if someone commented in between?)
+- **Automation completeness**: if a workflow introduces a new state/label/flag, verify ALL consumers of that entity handle the new state (not just the producer)
 
 ### 2. Resource Management
 Are resources acquired and released correctly?
@@ -37,6 +40,8 @@ Are resources acquired and released correctly?
 - File handle / stream lifecycle (open without close)
 - External API connection reuse and cleanup
 - Timeout enforcement on all external calls
+- **Pagination exhaustion**: API calls that fetch lists must handle pagination or enforce limits — unbounded fetches can OOM or hit rate limits
+- **Cleanup on error path**: if acquisition succeeds but a later step fails, is the resource still released? (try-finally, defer, using/with)
 
 ### 3. Concurrency
 Does code behave correctly under simultaneous access?
@@ -45,6 +50,7 @@ Does code behave correctly under simultaneous access?
 - Optimistic locking / retry correctness
 - Deadlock potential (lock ordering)
 - Shared mutable state across requests/workers
+- **Concurrent workflow interference**: multiple automated processes (cron jobs, webhooks, event handlers) modifying the same entity — does ordering matter? Can they conflict?
 
 ### 4. Security
 Are attack vectors closed?
@@ -68,6 +74,8 @@ Is the code maintainable and correct?
 - Coding convention adherence (from knowledge-base/implementation-principles.md)
 - Dead code and unused imports
 - Test coverage for changed code paths
+- **Silent success on failure**: process wrappers that catch errors and exit 0 (e.g., `main().catch(console.error)`) hide CI failures — top-level error handlers must propagate non-zero exit codes
+- **Scope-limited protections**: guards/thresholds applied to one category but not others where the same logic applies (e.g., upvote protection only for enhancements, not bugs)
 
 ---
 
