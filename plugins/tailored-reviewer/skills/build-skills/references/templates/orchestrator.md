@@ -135,10 +135,12 @@ If no contradictions: skip to Phase 3.
 
 ### Phase 3: Consolidation
 
-Dispatch consolidation agent with:
+Read `.claude/skills/consolidation/SKILL.md` and follow its instructions. Do NOT skip this step by consolidating results yourself — the consolidation skill contains MANDATORY output instructions (file saving to `reviews/`) that must be executed.
+
+Input to consolidation:
 - All Phase 1 results (preserved separately)
 - Debate results (if any)
 - Health score data (if available at health/scores/)
 
-Output: final review report.
+**MANDATORY**: The final review report MUST be written to `reviews/{YYYY-MM-DD}-{type}-{target}.md`. If this file does not exist after consolidation, the review is incomplete. This instruction is duplicated here because the consolidation skill may not be dispatched as a separate agent.
 ```
