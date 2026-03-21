@@ -233,6 +233,7 @@ AI confidently uses APIs, functions, or packages that don't exist.
 #### Semantic Correctness Gaps
 Code that looks correct, runs without errors, but produces wrong results.
 
+- **Misleading naming trust**: AI infers behavior from function/variable/class names without reading the actual implementation. In legacy or poorly-named codebases this causes silent misuse — e.g., `getUserPermissions()` actually returns roles, `isActive` means "not deleted", `OrderService` handles sorting not orders. When reviewing code that calls internal functions, read the callee's implementation to verify the name matches the actual return value, side effects, and error behavior. Especially critical in codebases with inconsistent naming conventions.
 - **Plausible but wrong logic**: conditions that read naturally but are logically inverted or incomplete (e.g., `>=` vs `>`, `&&` vs `||`). These pass casual review because they "look right."
 - **Type coercion traps**: implicit type conversions that silently produce wrong results (JS `==` vs `===`, string/number comparisons, falsy value handling).
 - **Test-code shared blindspot**: when AI generates both code and tests in the same session, tests may validate the bug rather than catching it. Tests that only check the happy path are a signal.
