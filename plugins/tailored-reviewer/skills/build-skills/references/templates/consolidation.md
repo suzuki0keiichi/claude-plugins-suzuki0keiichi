@@ -77,19 +77,19 @@ Calculate two independent scores. Each is 0-100 (higher = better).
 ### Short-term Score (bugs, security, correctness)
 
 Start at 100, deduct:
-- Each Critical finding: -20
-- Each Important finding: -5
+- Each Critical finding: -10
+- Each Important finding: -3
 - Each Suggestion: -1
 - **No minimum** — negative scores are valid and indicate severe issues
 
 ### Long-term Score (maintainability, tech debt, design)
 
 Start at 100, deduct:
-- Each Critical long-term detriment: -20
-- Each Important long-term detriment: -5
+- Each Critical long-term detriment: -10
+- Each Important long-term detriment: -3
 - Each long-term Suggestion: -1
-- Each Design Critique finding: -5
-- Each root-cause finding: -5
+- Each Design Critique finding: -3
+- Each 構造的背景 finding: -3
 - **No minimum** — negative scores are valid
 
 ## Short-term Report Format
@@ -139,13 +139,14 @@ Merge duplicates across perspectives but keep all perspective names.)
 - Perspectives used: N (list)
 - Critical: N, Important: N, Suggestion: N
 - Design critique: N
-- Root cause analysis: N
+- 短期的な問題の構造的背景: N
 - **Per-perspective details**: `reviews/perspectives/{date}-{target}/`
 
-## Root Cause Analysis
-For each major short-term bug, why was it structurally possible?
-Link to bug-patterns.md if this area is a known hotspot.
-(This section bridges short-term bugs to long-term design issues.)
+## 短期的な問題の構造的背景
+
+以下は、short-termレビューで検出されたCritical/Important級の問題について、「なぜこの問題がそもそも起きうる構造になっているのか」を分析したものです。個別のバグ修正はshort-termレポートを参照してください。ここでは、同種の問題が繰り返されないための構造的な改善を提案します。
+
+(For each major short-term finding, explain the structural root cause, link to bug-patterns.md if this area is a known hotspot, and propose structural fixes that prevent the entire class of bug.)
 
 ## Design Critique
 (purpose-implementation gaps, omissions, alternative approaches)
