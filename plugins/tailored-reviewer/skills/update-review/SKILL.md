@@ -53,7 +53,7 @@ Compare `meta/plugin-version-used.md` with `${CLAUDE_PLUGIN_ROOT}/VERSION`:
 ### For Full Updates (--full or version change)
 
 1. Read ALL knowledge-base files
-2. Re-read archetype checklists and templates from build-review-skills references
+2. Re-read archetype checklists and templates from build-skills references
 3. For each existing skill: compare against what would be generated fresh
 4. Apply improvements while preserving project-specific customizations added by veterans
 5. Run debug-review on all skills

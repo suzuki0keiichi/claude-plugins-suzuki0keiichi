@@ -117,7 +117,7 @@ The backtest evaluation (recall/precision analysis) is written separately to `ba
 ## Learning Extraction (backtest後に自動実行)
 
 backtestの結果からMISS/Partialを分析し、`backtest/learnings.md` に構造化して追記する。
-このファイルは `build-review-skills` と `update-review` が読み込み、スキル生成に反映する。
+このファイルは `build-skills` と `update-review` が読み込み、スキル生成に反映する。
 
 ### 抽出プロセス
 

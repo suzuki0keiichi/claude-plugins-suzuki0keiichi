@@ -3,7 +3,7 @@ name: debug-review
 description: >
   This skill should be used when the user asks to "debug review skills",
   "validate generated skills", "check skill quality", "スキルをデバッグ",
-  "生成スキルを検証", or automatically after build-review-skills completes.
+  "生成スキルを検証", or automatically after build-skills completes.
   Validates that generated review skills are structurally correct,
   comprehensive, project-specific, and behaviorally sound.
 ---
@@ -12,7 +12,7 @@ description: >
 
 Validate the quality of generated review skills in .claude/skills/.
 
-**Prerequisites:** Generated skills exist in .claude/skills/ (from build-review-skills).
+**Prerequisites:** Generated skills exist in .claude/skills/ (from build-skills).
 
 ## Validation Checks
 
@@ -86,7 +86,7 @@ Read each skill as if you were an LLM following instructions. Flag if:
 
 ### 8. Template Compliance Validation
 
-Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/templates/` and verify that generated skills include all MANDATORY elements from their corresponding template (orchestrator.md, technical-concern.md, domain-perspective.md, debate.md, consolidation.md).
+Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/` and verify that generated skills include all MANDATORY elements from their corresponding template (orchestrator.md, technical-concern.md, domain-perspective.md, debate.md, consolidation.md).
 
 **Orchestrator MUST have:**
 - [ ] Step 0: Environment Setup (workspace/ instruction, config.md reading)
@@ -108,7 +108,7 @@ Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/referenc
 - [ ] Selective knowledge-base injection (NOT full KB)
 - [ ] Fact Check section
 
-**If ANY mandatory element is missing: FAIL the validation and return to build-review-skills with the specific missing elements listed.**
+**If ANY mandatory element is missing: FAIL the validation and return to build-skills with the specific missing elements listed.**
 
 ### 9. Technical Concern Coverage Validation
 
@@ -146,5 +146,5 @@ Summary:
 - Passed all checks: N
 - Issues found: N (list with severity)
 
-If issues found: return to build-review-skills with specific fix requests.
+If issues found: return to build-skills with specific fix requests.
 If all passed: report success.
