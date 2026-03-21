@@ -168,6 +168,36 @@ If not installed, skip — debug-review provides sufficient validation.
 
 - Write current tailored-reviewer version to `meta/plugin-version-used.md`
 - Update `meta/last-updated.md` with generation timestamp
+- **Record build inputs**: write `meta/build-inputs.md` with the hash (first 8 chars of sha256) of each reference file used during generation:
+
+```markdown
+# Build Inputs
+Generated: YYYY-MM-DD
+
+## Reference File Hashes
+- archetype-checklists.md: {hash}
+- high-impact-patterns.md: {hash}
+- templates/orchestrator.md: {hash}
+- templates/technical-concern.md: {hash}
+- templates/domain-perspective.md: {hash}
+- templates/debate.md: {hash}
+- templates/consolidation.md: {hash}
+- tech-patterns/{stack1}.md: {hash}
+- tech-patterns/{stack2}.md: {hash}
+...
+
+## Knowledge Base Hashes
+- project-context.md: {hash}
+- design-principles.md: {hash}
+...
+
+## Backtest Learnings
+- backtest/learnings.md: {hash} (or "not present")
+```
+
+To compute hashes, run: `shasum -a 256 <file> | cut -c1-8`
+
+This file is used by update-review to determine which build inputs changed and target only affected skills for regeneration.
 
 ## Output
 
