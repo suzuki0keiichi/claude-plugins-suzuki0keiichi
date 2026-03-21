@@ -78,6 +78,22 @@ Is the code maintainable and correct?
 - **Scope-limited protections**: (1) find guards/thresholds that filter by category or type (e.g., `if (isEnhancement)`), (2) ask whether the protection logic applies equally to OTHER categories, (3) if the guard makes sense for all types but is scoped to one, flag it. Example: upvote protection only for enhancements when bugs with 10+ upvotes should also be protected
 - **Parallel function consistency**: for functions in the same file with similar iteration patterns (e.g., both loop over issues), compare their error handling and guard conditions — inconsistencies are likely bugs, not intentional differences
 
+### 7. Code Health
+Does this change make the codebase more or less maintainable over time?
+This perspective evaluates cognitive load and technical debt trajectory — not whether code works, but whether the next person can understand and safely change it.
+
+**Cognitive Load** — can a developer unfamiliar with this PR understand what's happening?
+- **New concept density**: (1) list new abstractions, states, flags, or implicit rules introduced in the diff, (2) if 3+ new concepts are concentrated in one file or function, flag — each concept requires the reader to build a mental model
+- **Implicit state machines**: if code manages state transitions (labels, statuses, lifecycle stages) without an explicit state diagram or enum, the valid transitions and their triggers are invisible to the next developer. Flag undocumented state machines.
+- **Non-obvious control flow**: callbacks, event-driven chains, or conditional dispatch where the reader must jump through 3+ files to trace a single operation. Flag when the "what happens when X" question requires reading more than 2 files.
+- **Magic values and unnamed conditions**: hardcoded numbers, string comparisons, or compound boolean conditions without named constants or explanatory comments. Flag `if (days > 14)` without explanation of why 14.
+
+**Technical Debt Trajectory** — does this PR increase future maintenance cost?
+- **Debt introduction**: (1) list any `any` types, TODO comments, hardcoded values, duplicated logic, or suppressed warnings added in the diff, (2) compare with the existing count in the same file — is the ratio getting worse?
+- **Abstraction mismatch**: code that solves a specific problem with a general mechanism (over-engineering) or a general problem with a specific hack (under-engineering). Either creates maintenance burden disproportionate to the value delivered.
+- **Coupling creep**: (1) check if the diff introduces new dependencies between modules/files that were previously independent, (2) if function A now needs to know about function B's internals (not just its interface), flag the coupling
+- **Consistency erosion**: if the same problem is solved differently in this PR vs existing code (e.g., error handling style, data access pattern, config approach), flag — inconsistency forces future developers to learn multiple patterns for the same thing
+
 ---
 
 ## Domain Perspective Archetypes
