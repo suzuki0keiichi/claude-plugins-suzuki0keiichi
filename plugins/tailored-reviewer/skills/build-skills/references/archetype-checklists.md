@@ -87,12 +87,14 @@ This perspective evaluates cognitive load and technical debt trajectory — not 
 - **Implicit state machines**: if code manages state transitions (labels, statuses, lifecycle stages) without an explicit state diagram or enum, the valid transitions and their triggers are invisible to the next developer. Flag undocumented state machines.
 - **Non-obvious control flow**: callbacks, event-driven chains, or conditional dispatch where the reader must jump through 3+ files to trace a single operation. Flag when the "what happens when X" question requires reading more than 2 files.
 - **Magic values and unnamed conditions**: hardcoded numbers, string comparisons, or compound boolean conditions without named constants or explanatory comments. Flag `if (days > 14)` without explanation of why 14.
+- **Confusable identifiers in surrounding code**: read the existing code around the diff — if variables/parameters have similar names, similar types, and are easy to swap (e.g., `envar_name` vs `envar_uri`, both `const char*`), flag the naming as a structural bug attractor. This applies to EXISTING code, not just new code. The diff touching this area is the trigger to evaluate it.
 
 **Technical Debt Trajectory** — does this PR increase future maintenance cost?
 - **Debt introduction**: (1) list any `any` types, TODO comments, hardcoded values, duplicated logic, or suppressed warnings added in the diff, (2) compare with the existing count in the same file — is the ratio getting worse?
 - **Abstraction mismatch**: code that solves a specific problem with a general mechanism (over-engineering) or a general problem with a specific hack (under-engineering). Either creates maintenance burden disproportionate to the value delivered.
 - **Coupling creep**: (1) check if the diff introduces new dependencies between modules/files that were previously independent, (2) if function A now needs to know about function B's internals (not just its interface), flag the coupling
 - **Consistency erosion**: if the same problem is solved differently in this PR vs existing code (e.g., error handling style, data access pattern, config approach), flag — inconsistency forces future developers to learn multiple patterns for the same thing
+- **Debt perpetuation**: conforming to an existing bad pattern is NOT acceptable just because "the existing code does it this way." If the existing code has confusable naming, missing type safety, or poor error handling, and the new code follows the same pattern, flag BOTH the new code AND the existing pattern. Matching a bad convention expands the debt surface. Check bug-patterns.md — if this area is a known hotspot, the existing pattern is likely the root cause.
 
 ---
 
