@@ -59,6 +59,8 @@ Launch all perspectives in parallel using the Agent tool:
 
 Collect all agent results. Each returns findings in unified format.
 
+**Save raw perspective outputs**: Write each perspective's full output to `reviews/perspectives/{YYYY-MM-DD}-{target}/{perspective_name}.md`. This preserves the detailed analysis before consolidation compresses it. Create the directory if it does not exist.
+
 ### Phase 1.5: Cross-Perspective Fact Check
 
 Before contradiction detection, verify ALL findings against actual code.

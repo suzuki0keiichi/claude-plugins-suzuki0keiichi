@@ -27,6 +27,7 @@ description: >
 - All perspective findings (Phase 1 results)
 - Debate resolutions (if any)
 - Health score data (if available)
+- Raw perspective outputs are already saved to `reviews/perspectives/` by the orchestrator
 
 ## Process
 
@@ -34,32 +35,69 @@ description: >
 2. Filter: exclude findings with Confidence < 80 from the report
 3. Count ALL Suggestion-level findings (pre-filter) for health score tracking
 4. Sort by severity (Critical → Important → Suggestion)
-5. Deduplicate remaining overlaps
-6. Generate report
-7. **Write report to the file path determined above** — confirm the file was written by reading it back
+5. Deduplicate: merge findings that describe the same issue from different perspectives. Keep all detecting perspective names. Do NOT discard the finding detail — merge the descriptions.
+6. **Calculate scores** (see Scoring section below)
+7. Generate report
+8. **Write report to the file path determined above** — confirm the file was written by reading it back
+
+## Scoring
+
+Calculate two independent scores. Each is 0-100 (higher = better).
+
+### Short-term Score (bugs, security, correctness)
+
+Start at 100, deduct:
+- Each Critical finding: -20
+- Each Important finding: -5
+- Each Suggestion: -1
+- Minimum: 0
+
+### Long-term Score (maintainability, tech debt, design)
+
+Start at 100, deduct:
+- Each Critical long-term detriment: -20
+- Each Important long-term detriment: -5
+- Each long-term Suggestion: -1
+- Each Design Critique finding: -5
+- Each code-health finding: -3
+- Minimum: 0
+
+These scores are INDEPENDENT. A PR can score 95 short-term (few bugs) but 40 long-term (heavy tech debt). Both scores appear in the report summary.
 
 ## Report Format
 
 # Review Report: [target name]
 
+## Scores
+
+| | Score | Verdict |
+|--|-------|---------|
+| Short-term (bugs, security) | XX/100 | 🟢 ≥80 / 🟡 50-79 / 🔴 <50 |
+| Long-term (maintainability) | XX/100 | 🟢 ≥80 / 🟡 50-79 / 🔴 <50 |
+
 ## Summary
 - Review type, target, execution date
+- Perspectives used: N (list)
 - Short-term detriments: Critical N, Important N, Suggestion N
 - Long-term detriments: Critical N, Important N, Suggestion N
 - Design critique findings: N
 - Findings dropped by fact-check: N
 - Findings dropped by workspace reconciliation: N (PR reviews only)
+- **Detailed per-perspective outputs**: `reviews/perspectives/{date}-{target}/`
 
 ## Short-term Detriments (bugs, security, performance, cost)
 
 ### Critical
-(each finding in structured format with Verification field. Never omit.)
+(each finding in structured format with Verification field. Never omit.
+For each finding, list ALL detecting perspectives and their confidence levels.)
 
 ### Important
-(structured format)
+(structured format — preserve finding detail, do not over-compress.
+Each finding should include: location, description, verification code, suggestion.
+Merge duplicates across perspectives but keep all perspective names.)
 
 ### Suggestions
-(list format)
+(structured format — NOT just a one-line list. Include location and brief description.)
 
 ## Long-term Detriments (tech debt, design drift, chaos)
 
@@ -67,10 +105,10 @@ description: >
 (structured format)
 
 ### Important
-(structured format)
+(structured format — same detail level as short-term)
 
 ### Suggestions
-(list format)
+(structured format)
 
 ## Design Critique (purpose-implementation gaps, omissions, alternative approaches)
 (findings from Phase 1.7 — these are higher-level observations about design choices, not code-level issues)
