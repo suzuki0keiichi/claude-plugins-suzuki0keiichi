@@ -23,34 +23,11 @@ description: >
 
 ## Step 1: Perspective Selection
 
-Count the total number of available perspectives (technical concerns + domain perspectives).
+**Default: use ALL perspectives.** Do not ask for selection unless the user explicitly requests it or there are perspectives clearly irrelevant to the review target.
 
-**If 7 or fewer**: Skip selection, use all perspectives.
+If a perspective is obviously irrelevant (e.g., concurrency for a documentation-only PR, platform-constraints for a config file change), mention it proactively: "concurrency は今回のPRに関連しないため除外します。含めますか？"
 
-**If 8 or more**: Present selection UI using AskUserQuestion:
-
-Available perspectives (select by number, preset, or "all"):
-
-Technical:
-  1. execution-flow — {one-line description with project tech stack}
-  2. resource-management — ...
-  3. concurrency — ...
-  4. security — ...
-  5. platform-constraints — ...
-  6. implementation-quality — ...
-
-Domain:
-  7. {domain-perspective-1} — ...
-  ...
-
-Presets:
-  [P] PR Review: {preset_pr_perspectives}
-  [F] Full: all
-  [Q] Quick: security, implementation-quality
-
-Selection:
-
-Wait for user response. Parse selected perspective IDs.
+If the user asks to reduce scope (e.g., for token budget reasons), present the list and let them exclude specific ones.
 
 ## Input Analysis
 

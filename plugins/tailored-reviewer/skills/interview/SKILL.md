@@ -147,4 +147,26 @@ When run on a project that already has knowledge-base files:
 1. If workspace/ doesn't exist: `git clone <git_url> workspace/`
 2. Write `meta/plugin-version-used.md` with current tailored-reviewer version
 3. Write `meta/last-updated.md` with current timestamps per file
-4. Prompt user: "Knowledge base is ready. Run /build-skills to create project-specific review skills."
+4. Write `CLAUDE.md` at the project root with environment instructions:
+
+```markdown
+# Review Data Project: {project_name}
+
+This directory is a review data project for tailored-reviewer, NOT the project itself.
+
+## Directory Structure
+- `config.md` — project configuration
+- `knowledge-base/` — collected project knowledge
+- `meta/` — metadata (plugin-version, build-inputs, etc.)
+- `workspace/` — git clone of {git_url}. This is the actual code.
+- `.claude/skills/` — generated review skills
+- `reviews/` — review output
+- `backtest/` — backtest cases and results
+
+## Important Rules
+- All git/gh commands must run inside `workspace/`, not here
+- `meta/` files go at this project root, NOT in `.claude/skills/meta/`
+- Review outputs go to `reviews/`
+```
+
+5. Prompt user: "Knowledge base is ready. Run /build-skills to create project-specific review skills."
