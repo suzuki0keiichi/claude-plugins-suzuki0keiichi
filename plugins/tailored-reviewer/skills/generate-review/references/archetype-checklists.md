@@ -196,3 +196,43 @@ These perspectives apply to ALL archetypes:
 - **Error Handling Adequacy**: silent failures, swallowed exceptions, missing error paths
 - **Design Principle Compliance**: check against knowledge-base/design-principles.md
 - **Implementation Principle Compliance**: check against knowledge-base/implementation-principles.md
+
+### AI-Generated Code Patterns
+
+Code produced by AI coding assistants fails in predictable, recurring patterns.
+These checks apply to ALL code regardless of whether AI authorship is confirmed,
+because the patterns also catch human bugs of the same shape.
+
+Sources: arXiv:2403.08937, arXiv:2512.05239, Augment Code failure patterns,
+IEEE Spectrum "Newer AI Coding Assistants Are Failing in Insidious Ways" (2025),
+Stack Overflow "Are bugs and incidents inevitable with AI coding agents?" (2026)
+
+#### Structural Similarity Traps
+AI generates structurally similar functions by pattern-matching, making
+subtle-but-critical differences between them easy to miss.
+
+- **Guard inheritance**: when new code is structurally modeled after existing code (or both are generated together), verify that ALL defensive checks from the original are present in the copy — or that their absence is explicitly justified. (1) List guards in the original. (2) Check each exists in the new code. (3) Flag missing ones.
+- **Asymmetric error handling**: paired operations (create/delete, open/close, serialize/deserialize, encode/decode) where one side handles errors but the other doesn't. AI tends to implement the "forward" path carefully and the "reverse" path superficially.
+- **Copy-divergence blindness**: when multiple functions share 90%+ structure, the 10% difference is where bugs hide. Explicitly examine ONLY the differing lines — they are disproportionately likely to be wrong.
+
+#### Happy Path Bias
+AI strongly favors generating code that works under ideal conditions.
+Error handling gaps are ~2x more common in AI-generated code (Augment Code, 2026).
+
+- **Missing edge case handling**: null/undefined inputs, empty collections, boundary values (0, -1, MAX_INT), concurrent access, network failures. For each function, ask: "what happens when the input is empty/null/enormous?"
+- **Optimistic external calls**: API calls without timeout, retry, or error status checking. AI assumes external services always respond successfully.
+- **Incomplete validation at boundaries**: input from users, APIs, or config files accepted without type/range/format checks. AI validates the happy path type but misses adversarial or malformed inputs.
+
+#### Hallucinated Dependencies
+AI confidently uses APIs, functions, or packages that don't exist.
+
+- **Non-existent imports**: imported module/function/method that doesn't exist in the dependency's actual API. Verify imports resolve.
+- **Wrong method signatures**: correct method name but wrong parameter order, missing required parameters, or deprecated API usage. Cross-check against actual library documentation/types.
+- **Slopsquatting risk**: AI-hallucinated package names that could be registered by attackers. Verify all new dependencies exist in the package registry and are legitimate.
+
+#### Semantic Correctness Gaps
+Code that looks correct, runs without errors, but produces wrong results.
+
+- **Plausible but wrong logic**: conditions that read naturally but are logically inverted or incomplete (e.g., `>=` vs `>`, `&&` vs `||`). These pass casual review because they "look right."
+- **Type coercion traps**: implicit type conversions that silently produce wrong results (JS `==` vs `===`, string/number comparisons, falsy value handling).
+- **Test-code shared blindspot**: when AI generates both code and tests in the same session, tests may validate the bug rather than catching it. Tests that only check the happy path are a signal.
