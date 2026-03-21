@@ -24,9 +24,10 @@ Compare knowledge-base file timestamps with `meta/last-updated.md`:
 - If any knowledge-base file is newer → identify which skills reference that data
 - Update only affected perspectives
 
-### 2. Feedback
+### 2. Feedback and Backtest Learnings
 
 Check for new entries in:
+- `backtest/learnings.md` → each learning specifies a target perspective and a check to add. These are the highest-priority updates because they represent proven detection gaps validated against real bugs.
 - `feedback/missed-bugs.md` → identify which perspective should have caught it → add the pattern
 - `feedback/veteran-edits/` → read the diff, understand the improvement → apply to affected skill
 

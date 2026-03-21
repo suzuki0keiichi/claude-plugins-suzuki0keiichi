@@ -113,6 +113,39 @@ Write to `backtest/results/YYYY-MM-DD.md`:
 [Specific suggestions for skill improvement based on misses and validation rates]
 ```
 
+## Learning Extraction (backtest後に自動実行)
+
+backtestの結果からMISS/Partialを分析し、`backtest/learnings.md` に構造化して追記する。
+このファイルは `generate-review` と `update-review` が読み込み、スキル生成に反映する。
+
+### 抽出プロセス
+
+各 MISS または Partial match について：
+
+1. **根本原因分析**: なぜ検出できなかったか？
+   - どのパースペクティブが担当すべきだったか
+   - 既存のチェック項目の何が不足していたか
+   - どういうチェックがあれば検出できたか
+
+2. **パターン抽出**: 再利用可能な検出ルールに変換
+   - 具体的なバグ→汎用的なチェックパターンに抽象化
+   - 例: 「locked issueガード欠如」→「同一データセットを処理する並列関数間で防御的チェックが非対称」
+
+3. **追記**: `backtest/learnings.md` に以下の形式で追記
+
+```markdown
+### Learning [N]: [パターン名]
+- **Source**: backtest [date], Case [N] (MISS/Partial)
+- **Bug**: [何が起きたか]
+- **Root cause**: [なぜ検出できなかったか]
+- **Check to add**: [具体的に何をチェックすべきか]
+- **Target perspective**: [どのパースペクティブに追加すべきか]
+- **Pattern type**: code-symmetry / state-transition / boundary-check / ...
+- **Added**: [date]
+```
+
+**既存の learning と重複する場合は追記しない。**
+
 ## Interpretation
 
 ### Recall (known bug detection)

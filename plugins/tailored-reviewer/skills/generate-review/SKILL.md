@@ -20,7 +20,7 @@ Generate a complete set of project-specific review SKILL.md files based on the k
 
 ## Process
 
-### Step 1: Read Knowledge Base
+### Step 1: Read Knowledge Base and Backtest Learnings
 
 Read ALL files in knowledge-base/:
 - project-context.md
@@ -33,6 +33,8 @@ Read ALL files in knowledge-base/:
 - team-context.md
 
 Note confidence levels. Low-confidence entries (<0.5) should be used cautiously in generated skills.
+
+**Also read `backtest/learnings.md` if it exists.** This file contains detection patterns extracted from previous backtest misses — concrete checks that the review system failed to perform. Each learning specifies a target perspective and a check to add. These have the **highest priority** for inclusion in generated skills because they represent proven detection gaps validated against real bugs.
 
 ### Step 2: Detect Tech Stack and Project Archetype
 
@@ -75,6 +77,7 @@ These are NOT alternatives to domain perspectives — they COEXIST with domain p
 For each, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/technical-concern.md` and use the template:
 - Populate check items from archetype-checklists.md
 - Overlay tech-stack-specific checks from `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/tech-patterns/{stack}.md` (if exists for detected stack)
+- **Inject backtest learnings**: if `backtest/learnings.md` exists, include learnings whose `Target perspective` matches this concern. These are proven detection gaps and must be included as check items.
 - **Selective knowledge-base injection**: only include knowledge-base entries relevant to this specific concern (NOT the full knowledge-base)
   - For concurrency: race condition patterns from bug-patterns.md, transaction-related principles
   - For security: auth-related patterns, data exposure rules
@@ -106,6 +109,7 @@ For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/
 - Convert bug-patterns.md entries → specific check items
 - Convert pr-review-patterns.md entries → reviewer knowledge
 - Convert design-principles.md → deviation detection rules
+- **Inject backtest learnings**: include learnings whose `Target perspective` matches this domain perspective
 
 ### Step 5: Write All SKILL.md Files
 
