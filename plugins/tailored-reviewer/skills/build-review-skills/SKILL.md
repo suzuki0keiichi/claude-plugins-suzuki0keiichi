@@ -1,10 +1,11 @@
 ---
-name: generate-review
+name: build-review-skills
 description: >
-  This skill should be used when the user asks to "generate review skills",
-  "create review perspectives", "build review setup", "レビュースキルを生成",
-  "レビューを作って", or after interview skill has populated the knowledge-base.
-  This is the core of tailored-reviewer: it generates project-specific
+  This skill should be used when the user asks to "build review skills",
+  "generate review skills", "create review perspectives", "build review setup",
+  "レビュースキルを生成", "レビュースキルをビルド", "レビューを作って",
+  or after interview skill has populated the knowledge-base.
+  This is the core of tailored-reviewer: it builds project-specific
   SKILL.md files that form a complete review system.
 argument-hint: [--force to regenerate all]
 ---
@@ -59,7 +60,7 @@ Projects may match multiple archetypes. Include all that apply.
 
 ### Step 3: Generate Technical Concern Perspectives
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/archetype-checklists.md` (Technical Concern Perspectives section).
+Read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/archetype-checklists.md` (Technical Concern Perspectives section).
 
 **MANDATORY — generate ALL 6 of these perspectives. No exceptions. No substitutions. No skipping.**
 
@@ -74,10 +75,10 @@ These are NOT alternatives to domain perspectives — they COEXIST with domain p
 
 **Do NOT replace these 6 with project-specific perspectives** (e.g., do not generate "shell-script-robustness" instead of "execution-flow"). Project-specific concerns go into domain perspectives in Step 4.
 
-For each, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/technical-concern.md` and use the template:
+For each, read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/templates/technical-concern.md` and use the template:
 - Populate check items from archetype-checklists.md
-- Overlay tech-stack-specific checks from `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/tech-patterns/{stack}.md` (if exists for detected stack)
-- **Inject high-impact patterns**: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/high-impact-patterns.md`. For each pattern whose condition is met by the project (detected in Step 2), include it in the matching concern's check items. Only include patterns whose condition ID matches the project's characteristics.
+- Overlay tech-stack-specific checks from `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/tech-patterns/{stack}.md` (if exists for detected stack)
+- **Inject high-impact patterns**: read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/high-impact-patterns.md`. For each pattern whose condition is met by the project (detected in Step 2), include it in the matching concern's check items. Only include patterns whose condition ID matches the project's characteristics.
 - **Inject backtest learnings**: if `backtest/learnings.md` exists, include learnings whose `Target perspective` matches this concern. These are proven detection gaps and must be included as check items.
 - **Selective knowledge-base injection**: only include knowledge-base entries relevant to this specific concern (NOT the full knowledge-base)
   - For concurrency: race condition patterns from bug-patterns.md, transaction-related principles
@@ -105,7 +106,7 @@ For each matched archetype:
 3. DO NOT duplicate what the 6 technical concern perspectives already cover
    - e.g., if "Authentication & Authorization" is already covered by the security concern, only generate a domain perspective if there are project-specific auth rules beyond standard security checks
 
-For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/domain-perspective.md` and use the template:
+For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/templates/domain-perspective.md` and use the template:
 - Fill in project-specific content from knowledge-base
 - Convert bug-patterns.md entries → specific check items
 - Convert pr-review-patterns.md entries → reviewer knowledge
@@ -117,9 +118,9 @@ For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/
 Write all generated skills to `.claude/skills/{perspective-id}/SKILL.md`.
 Generate orchestrator, debate, and consolidation skills from their respective templates,
 filling in the FULL perspective list (technical + domain) and project name:
-- Orchestrator: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/orchestrator.md`
-- Debate: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/debate.md`
-- Consolidation: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/consolidation.md`
+- Orchestrator: read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/templates/orchestrator.md`
+- Debate: read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/templates/debate.md`
+- Consolidation: read `${CLAUDE_PLUGIN_ROOT}/skills/build-review-skills/references/templates/consolidation.md`
 
 ### Step 6: Completeness Verification
 

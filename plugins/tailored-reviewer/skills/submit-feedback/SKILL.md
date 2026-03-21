@@ -63,12 +63,12 @@ Date: [date]
 
 ## Proposed Plugin Change
 
-[How this should be incorporated into generate-review templates or archetype checklists]
+[How this should be incorporated into build-review-skills templates or archetype checklists]
 
 ## Classification
 
 - Archetype: [which archetype this applies to, or "all"]
-- Component: [archetype-checklists / templates/* / generate-review logic]
+- Component: [archetype-checklists / templates/* / build-review-skills logic]
 ISSUE_BODY
 )"
 ```

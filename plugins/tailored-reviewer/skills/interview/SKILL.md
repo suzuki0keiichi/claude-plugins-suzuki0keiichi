@@ -12,7 +12,7 @@ argument-hint: [project-directory-name]
 
 # Interview: Project Knowledge Collection
 
-Collect project-specific knowledge through a structured 3-phase process. The output feeds into generate-review to create tailored review skills.
+Collect project-specific knowledge through a structured 3-phase process. The output feeds into build-review-skills to create tailored review skills.
 
 **Prerequisites:** You must be in a tailored-reviewer-data project directory (contains config.md or will be created).
 
@@ -147,4 +147,4 @@ When run on a project that already has knowledge-base files:
 1. If workspace/ doesn't exist: `git clone <git_url> workspace/`
 2. Write `meta/plugin-version-used.md` with current tailored-reviewer version
 3. Write `meta/last-updated.md` with current timestamps per file
-4. Prompt user: "Knowledge base is ready. Run /generate-review to create project-specific review skills."
+4. Prompt user: "Knowledge base is ready. Run /build-review-skills to create project-specific review skills."

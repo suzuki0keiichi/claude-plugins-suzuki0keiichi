@@ -3,7 +3,7 @@
 Conditional patterns applied based on project characteristics detected in Step 2.
 Each pattern has a **condition** — only include in generated skills when the condition is met.
 
-generate-review reads this file and evaluates conditions against:
+build-review-skills reads this file and evaluates conditions against:
 - Detected tech stack (Step 2a)
 - Knowledge-base entries (Step 1)
 - workspace/ code analysis (Step 2)
