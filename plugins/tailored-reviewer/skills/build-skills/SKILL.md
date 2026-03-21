@@ -172,6 +172,8 @@ If not installed, skip — debug-review provides sufficient validation.
 
 ### Step 8: Record Metadata
 
+**IMPORTANT**: All metadata files go in the `meta/` directory at the PROJECT ROOT (next to `config.md`, `knowledge-base/`, `workspace/`). NOT in `.claude/skills/meta/`. The `.claude/skills/` directory is ONLY for generated skill SKILL.md files.
+
 - Write current tailored-reviewer version to `meta/plugin-version-used.md`
 - Update `meta/last-updated.md` with generation timestamp
 - **Record build inputs**: write `meta/build-inputs.md` with the hash (first 8 chars of sha256) of each reference file used during generation:

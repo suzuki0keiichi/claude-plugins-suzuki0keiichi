@@ -149,3 +149,5 @@ Summary:
 
 If issues found: return to build-skills with specific fix requests.
 If all passed: report success.
+
+**Output location**: If writing the validation report to a file, write it to `meta/debug-review-YYYY-MM-DD.md` at the PROJECT ROOT (next to `config.md`). Do NOT write to `.claude/skills/meta/` — that directory is only for generated skill files.
