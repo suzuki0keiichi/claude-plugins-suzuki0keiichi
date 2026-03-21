@@ -36,8 +36,25 @@ description: >
 1. Classify each finding: short-term-detriment or long-term-detriment. Design Critique findings go to long-term.
 2. For each category separately:
    a. Merge findings, replacing contradicted findings with debate resolutions
-   b. Filter: exclude findings with Confidence < 80
-   c. Deduplicate: merge findings describing the same issue from different perspectives. Keep all perspective names. Do NOT discard detail.
+   b. Deduplicate: merge findings describing the same issue from different perspectives. Keep all perspective names. Do NOT discard detail.
+   c. Apply filtering thresholds (short-term and long-term have DIFFERENT thresholds):
+
+   **Short-term filtering:**
+   | Severity | Rule |
+   |----------|------|
+   | Critical | ALL — no filtering, regardless of Confidence |
+   | Important | Confidence ≥ 80 |
+   | Suggestion | Confidence ≥ 50, top 10 by Confidence |
+
+   **Long-term filtering:**
+   | Severity | Rule |
+   |----------|------|
+   | Critical | ALL — no filtering, regardless of Confidence |
+   | Important | Confidence ≥ 60 |
+   | Suggestion | Confidence ≥ 40, top 10 by Confidence |
+
+   Long-term thresholds are lower because design judgments inherently carry more uncertainty than bug detection. A Confidence 65 design concern is still worth reporting.
+
    d. Sort by severity (Critical → Important → Suggestion)
 3. **Root Cause Analysis** (long-term file only): for each short-term Critical/Important finding, ask: "Why was this bug possible? Is there a design issue in the existing code that makes this class of bug likely?" If yes, add a root-cause finding to the long-term report linking the bug to the structural issue. Use bug-patterns.md as a starting point — if this area has repeated bugs, explain WHY it keeps producing them.
 4. Calculate scores (see Scoring section)
