@@ -87,15 +87,68 @@ Collect all agent results. Each returns findings in unified format.
 
 ### Phase 1.5: Cross-Perspective Fact Check
 
-Before contradiction detection, verify findings that appear from only ONE perspective (single-source findings are higher false-positive risk):
+Before contradiction detection, verify ALL findings against actual code.
 
-1. For each single-source finding with Severity Critical or Important:
-   - Re-read the cited code location in `workspace/`
-   - Confirm the finding's Verification field matches reality
-   - If the code does not match: drop the finding
-   - If mitigating code exists elsewhere: downgrade Severity or drop
+#### Step A: Workspace Verification (ALL findings)
 
-Findings detected by multiple perspectives have implicit cross-validation and can skip this step.
+For EVERY finding with Severity Critical or Important:
+1. Re-read the cited code location in `workspace/`
+2. Confirm the finding's Verification field matches the actual code
+3. If the code does not match the finding: **drop the finding**
+4. If mitigating code exists elsewhere: downgrade Severity or drop
+
+#### Step B: PR Diff vs Workspace Reconciliation (PR Reviews ONLY — skip in backtest)
+
+**Skip this step entirely if running in backtest mode.** In backtest mode, the workspace is intentionally set to the bug-introducing commit state, and reconciliation against the default branch would falsely drop all findings.
+
+**CRITICAL for normal PR reviews**: The PR diff shows the state at PR creation time. The workspace may contain the post-merge state with subsequent fixes. For each finding based on the PR diff:
+
+1. Read the CURRENT version of the cited file in `workspace/`
+2. Compare the specific lines cited in the finding against the current workspace code
+3. If the issue described in the finding is **already fixed** in the workspace version:
+   - **Drop the finding entirely** — do not report fixed issues
+4. If the issue is **partially fixed** in the workspace:
+   - Update the finding to reflect only the remaining issue
+   - Note: "Partially addressed in merged version"
+5. If the issue **still exists** in the workspace:
+   - Keep the finding as-is
+
+**Every PR review finding MUST survive this reconciliation step. Findings that cite code no longer present in workspace are false positives and damage review credibility.**
+
+#### Step C: Cross-Source Validation
+
+Findings detected by only ONE perspective (single-source) have higher false-positive risk:
+- Apply extra scrutiny: actively search for guards, checks, or handling elsewhere
+- Multi-source findings have implicit cross-validation and can skip this step
+
+### Phase 1.7: Design Critique (PR Reviews and Design Reviews)
+
+After fact-checking individual findings, step back and evaluate the change holistically:
+
+1. **Purpose vs Implementation Gap**: Read the PR description/commit message. Does the implementation actually achieve the stated goal? Are there gaps between what was promised and what was delivered?
+
+2. **Omission Detection**: What SHOULD have been changed but wasn't?
+   - If a new wrapper/abstraction was introduced, does ALL existing code use it? (e.g., gh.sh wrapper introduced but other scripts still call gh directly)
+   - If a security boundary was established, is it comprehensive?
+   - Are there related files that need corresponding changes?
+
+3. **Design Alternative Analysis**: Is this the right approach?
+   - Are there simpler solutions that achieve the same goal?
+   - Does this approach create new maintenance burden?
+   - Does it solve the symptom or the root cause?
+
+4. **Coverage Assessment**: What edge cases aren't handled?
+   - What happens with unexpected input?
+   - What happens under failure conditions?
+   - What happens when upstream/downstream systems change?
+
+Output format for design critique findings:
+- **Severity**: Important (design issues are rarely Critical unless security-related)
+- **Category**: design-critique
+- **Confidence**: 70-90 (design judgments inherently have more uncertainty)
+- **Description**: What the design gap is
+- **Alternative**: What a better approach might look like
+- **Evidence**: Why you believe this matters (reference knowledge-base, similar bugs, design principles)
 
 ### Phase 2: Contradiction Detection
 
@@ -268,6 +321,16 @@ description: >
 
 # Consolidation: Final Report Generation
 
+## MANDATORY: File Output (do this FIRST)
+
+**Before generating the report content**, prepare the output file:
+
+1. Create the `reviews/` directory if it does not exist
+2. Determine the file name: `reviews/{YYYY-MM-DD}-{type}-{target}.md` (e.g., `reviews/2026-03-20-pr-feature-auth.md`)
+3. After generating the report below, you MUST write it to this file. Do NOT skip this step. Do NOT write to any other location (not `meta/`, not inline only).
+
+**This is non-negotiable. A review without a saved file is an incomplete review.**
+
 ## Input
 
 - All perspective findings (Phase 1 results)
@@ -282,7 +345,7 @@ description: >
 4. Sort by severity (Critical → Important → Suggestion)
 5. Deduplicate remaining overlaps
 6. Generate report
-7. **Save report to file**: Write the report to `reviews/{YYYY-MM-DD}-{type}-{target}.md` (e.g., `reviews/2026-03-20-pr-feature-auth.md`). Create the `reviews/` directory if it does not exist.
+7. **Write report to the file path determined above** — confirm the file was written by reading it back
 
 ## Report Format
 
@@ -292,7 +355,9 @@ description: >
 - Review type, target, execution date
 - Short-term detriments: Critical N, Important N, Suggestion N
 - Long-term detriments: Critical N, Important N, Suggestion N
+- Design critique findings: N
 - Findings dropped by fact-check: N
+- Findings dropped by workspace reconciliation: N (PR reviews only)
 
 ## Short-term Detriments (bugs, security, performance, cost)
 
@@ -316,8 +381,12 @@ description: >
 ### Suggestions
 (list format)
 
+## Design Critique (purpose-implementation gaps, omissions, alternative approaches)
+(findings from Phase 1.7 — these are higher-level observations about design choices, not code-level issues)
+
 ## Fact-Check Log
-(findings that were dropped or downgraded during Phase 1.5, with reason)
+(findings that were dropped or downgraded during Phase 1.5, with reason.
+For PR reviews: include findings dropped by workspace reconciliation with explanation of what changed between PR diff and merged code.)
 
 ## Debate Notes
 (only if debate occurred)

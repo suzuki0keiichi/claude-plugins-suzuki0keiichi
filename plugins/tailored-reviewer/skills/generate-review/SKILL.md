@@ -59,13 +59,18 @@ Projects may match multiple archetypes. Include all that apply.
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/archetype-checklists.md` (Technical Concern Perspectives section).
 
-Always generate these 6 perspectives:
+**MANDATORY — generate ALL 6 of these perspectives. No exceptions. No substitutions. No skipping.**
+
 1. execution-flow
 2. resource-management
 3. concurrency
 4. security
 5. platform-constraints
 6. implementation-quality
+
+These are NOT alternatives to domain perspectives — they COEXIST with domain perspectives generated in Step 4. A project will have these 6 PLUS domain-specific perspectives.
+
+**Do NOT replace these 6 with project-specific perspectives** (e.g., do not generate "shell-script-robustness" instead of "execution-flow"). Project-specific concerns go into domain perspectives in Step 4.
 
 For each, use the **Technical Concern SKILL.md Template** from skill-templates.md:
 - Populate check items from archetype-checklists.md
@@ -75,6 +80,16 @@ For each, use the **Technical Concern SKILL.md Template** from skill-templates.m
   - For security: auth-related patterns, data exposure rules
   - For implementation-quality: coding conventions from implementation-principles.md
   - etc.
+
+**Verification**: After generating, confirm you have exactly 6 files:
+- `.claude/skills/execution-flow/SKILL.md`
+- `.claude/skills/resource-management/SKILL.md`
+- `.claude/skills/concurrency/SKILL.md`
+- `.claude/skills/security/SKILL.md`
+- `.claude/skills/platform-constraints/SKILL.md`
+- `.claude/skills/implementation-quality/SKILL.md`
+
+If any are missing, go back and generate them before proceeding to Step 4.
 
 ### Step 4: Generate Domain Perspectives
 
@@ -102,13 +117,33 @@ filling in the FULL perspective list (technical + domain) and project name.
 
 Before finishing, verify:
 
-- [ ] All 6 technical concern perspectives are generated
+**Technical Concern Coverage (CRITICAL — failure here means restart Step 3):**
+- [ ] execution-flow/SKILL.md exists
+- [ ] resource-management/SKILL.md exists
+- [ ] concurrency/SKILL.md exists
+- [ ] security/SKILL.md exists
+- [ ] platform-constraints/SKILL.md exists
+- [ ] implementation-quality/SKILL.md exists
+
+**Content Quality:**
 - [ ] Each technical concern has tech-stack-specific checks (not just generic)
 - [ ] Domain perspectives don't duplicate technical concerns
 - [ ] Knowledge-base injection is selective (each skill only has relevant KB entries)
 - [ ] knowledge-base entries with unique patterns (bug hotspots, reviewer focus areas) are reflected
 - [ ] Generated skills reference specific files/modules from the project, not just generic advice
-- [ ] Orchestrator correctly lists all generated perspectives
+
+**Orchestrator Completeness:**
+- [ ] Lists ALL generated perspectives (6 technical + domain)
+- [ ] Has Phase 1.5 with workspace verification AND PR diff reconciliation
+- [ ] Has Phase 1.7 Design Critique
+- [ ] Has Phase 2 Contradiction Detection
+- [ ] Has Phase 3 Consolidation dispatch
+
+**Consolidation Completeness:**
+- [ ] Has MANDATORY File Output section at the TOP
+- [ ] File path uses `reviews/` directory
+- [ ] Report format includes Design Critique section
+- [ ] Report format includes workspace reconciliation drops in Fact-Check Log
 
 ### Step 6: Run Debug-Review
 

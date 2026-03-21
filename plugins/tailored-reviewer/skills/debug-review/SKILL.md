@@ -84,6 +84,46 @@ Read each skill as if you were an LLM following instructions. Flag if:
 - [ ] Conditional logic has ambiguous conditions ("if appropriate", "when relevant")
 - [ ] Steps lack explicit "do this, then do that" sequencing
 
+### 8. Template Compliance Validation
+
+Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/skill-templates.md` and verify that generated skills include all MANDATORY elements from their corresponding template.
+
+**Orchestrator MUST have:**
+- [ ] Step 0: Environment Setup (workspace/ instruction, config.md reading)
+- [ ] Phase 1.5 Step A: Workspace Verification (re-read cited code in workspace/)
+- [ ] Phase 1.5 Step B: PR Diff vs Workspace Reconciliation (compare diff findings against current workspace code)
+- [ ] Phase 1.7: Design Critique (purpose-implementation gap, omission detection, design alternative analysis)
+- [ ] Phase 2: Contradiction Detection
+- [ ] Phase 3: Consolidation dispatch
+
+**Consolidation MUST have:**
+- [ ] MANDATORY File Output section at the TOP (write to `reviews/` directory)
+- [ ] Explicit file path format: `reviews/{YYYY-MM-DD}-{type}-{target}.md`
+- [ ] Design Critique section in report format
+- [ ] Fact-Check Log including workspace reconciliation drops
+
+**Each Technical Concern perspective MUST have:**
+- [ ] Check items from archetype-checklists.md for this concern
+- [ ] Tech-stack-specific checks from tech-patterns/{stack}.md (not just generic)
+- [ ] Selective knowledge-base injection (NOT full KB)
+- [ ] Fact Check section
+
+**If ANY mandatory element is missing: FAIL the validation and return to generate-review with the specific missing elements listed.**
+
+### 9. Technical Concern Coverage Validation
+
+Verify that ALL 6 standard technical concerns exist as generated skills:
+- [ ] execution-flow
+- [ ] resource-management
+- [ ] concurrency
+- [ ] security
+- [ ] platform-constraints
+- [ ] implementation-quality
+
+If ANY of the 6 are missing, this is a CRITICAL failure. These 6 are mandatory for all projects regardless of archetype.
+
+Note: projects may ALSO have domain-specific perspectives in addition to these 6. The 6 technical concerns and domain perspectives coexist — they are not alternatives.
+
 ## Output
 
 ### Validation Report
@@ -97,6 +137,8 @@ For each skill:
 - Instruction Compliance: ✅/❌ [details]
 - Agent Delegation: ✅/❌ [details] (orchestrator only)
 - Skip Risk: ✅/❌ [details]
+- Template Compliance: ✅/❌ [missing mandatory elements] (orchestrator, consolidation, perspectives)
+- Technical Concern Coverage: ✅/❌ [missing concerns] (overall check)
 ```
 
 Summary:

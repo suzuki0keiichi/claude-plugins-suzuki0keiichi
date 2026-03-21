@@ -56,7 +56,7 @@ Compare `meta/plugin-version-used.md` with `${CLAUDE_PLUGIN_ROOT}/VERSION`:
 3. For each existing skill: compare against what would be generated fresh
 4. Apply improvements while preserving project-specific customizations added by veterans
 5. Run debug-review on all skills
-6. Run dry-run if test cases exist
+6. Run backtest if test cases exist
 
 ## Output
 
