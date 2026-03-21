@@ -14,6 +14,19 @@ argument-hint: [--full to update all skills, default: changed only]
 Update generated review skills based on changes without full regeneration.
 Handles both updating existing skills AND adding new ones that don't exist yet.
 
+## Step 0: Environment Setup (MUST do first)
+
+The current directory is the **review data project** (e.g., `~/review/rclc/`). This directory contains:
+- `config.md` — project configuration
+- `knowledge-base/` — collected project knowledge
+- `meta/` — metadata files (plugin-version-used.md, build-inputs.md, etc.)
+- `workspace/` — git clone of the actual project
+- `.claude/skills/` — generated skill files
+
+**All paths in this skill are relative to this project root.**
+- `meta/` means the project root's `meta/`, NOT `.claude/skills/meta/`
+- Generated/updated skills go to `.claude/skills/{perspective-id}/SKILL.md`
+
 **Prerequisites:** Generated skills exist in .claude/skills/
 
 ## Trigger Detection

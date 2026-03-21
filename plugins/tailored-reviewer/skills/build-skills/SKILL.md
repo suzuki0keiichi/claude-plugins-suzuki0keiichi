@@ -10,9 +10,23 @@ description: >
 argument-hint: [--force to regenerate all]
 ---
 
-# Generate Review Skills
+# Build Review Skills
 
 Generate a complete set of project-specific review SKILL.md files based on the knowledge-base.
+
+## Step 0: Environment Setup (MUST do first)
+
+The current directory is the **review data project** (e.g., `~/review/rclc/`). This directory contains:
+- `config.md` — project configuration
+- `knowledge-base/` — collected project knowledge
+- `meta/` — metadata files (plugin-version-used.md, build-inputs.md, etc.)
+- `workspace/` — git clone of the actual project
+- `.claude/skills/` — generated skill files (output destination)
+
+**All paths in this skill are relative to this project root.**
+- `meta/` means the project root's `meta/`, NOT `.claude/skills/meta/`
+- `knowledge-base/` means the project root's `knowledge-base/`
+- Generated skills go to `.claude/skills/{perspective-id}/SKILL.md`
 
 **Prerequisites:**
 - knowledge-base/ directory exists with populated files
