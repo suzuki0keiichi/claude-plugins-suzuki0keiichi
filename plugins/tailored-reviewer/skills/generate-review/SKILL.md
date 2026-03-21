@@ -77,6 +77,7 @@ These are NOT alternatives to domain perspectives — they COEXIST with domain p
 For each, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/technical-concern.md` and use the template:
 - Populate check items from archetype-checklists.md
 - Overlay tech-stack-specific checks from `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/tech-patterns/{stack}.md` (if exists for detected stack)
+- **Inject high-impact patterns**: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/high-impact-patterns.md`. For each pattern whose condition is met by the project (detected in Step 2), include it in the matching concern's check items. Only include patterns whose condition ID matches the project's characteristics.
 - **Inject backtest learnings**: if `backtest/learnings.md` exists, include learnings whose `Target perspective` matches this concern. These are proven detection gaps and must be included as check items.
 - **Selective knowledge-base injection**: only include knowledge-base entries relevant to this specific concern (NOT the full knowledge-base)
   - For concurrency: race condition patterns from bug-patterns.md, transaction-related principles
