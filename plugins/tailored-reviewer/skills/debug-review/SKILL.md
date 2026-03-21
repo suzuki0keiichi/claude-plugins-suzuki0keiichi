@@ -120,10 +120,11 @@ Verify that ALL 6 standard technical concerns exist as generated skills:
 - [ ] platform-constraints
 - [ ] implementation-quality
 - [ ] code-health
+- [ ] strategic-alignment
 
-If ANY of the 7 are missing, this is a CRITICAL failure. These 7 are mandatory for all projects regardless of archetype.
+If ANY of the 8 are missing, this is a CRITICAL failure. These 8 are mandatory for all projects regardless of archetype.
 
-Note: projects may ALSO have domain-specific perspectives in addition to these 7. The 7 perspectives and domain perspectives coexist — they are not alternatives.
+Note: projects may ALSO have domain-specific perspectives in addition to these 8. The 8 perspectives and domain perspectives coexist — they are not alternatives.
 
 ## Output
 

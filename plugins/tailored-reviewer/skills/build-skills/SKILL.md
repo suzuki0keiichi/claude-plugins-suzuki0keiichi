@@ -76,7 +76,7 @@ Projects may match multiple archetypes. Include all that apply.
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/archetype-checklists.md` (Technical Concern Perspectives section).
 
-**MANDATORY — generate ALL 7 of these perspectives. No exceptions. No substitutions. No skipping.**
+**MANDATORY — generate ALL 8 of these perspectives. No exceptions. No substitutions. No skipping.**
 
 1. execution-flow
 2. resource-management
@@ -84,13 +84,14 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/archetype-checklists.
 4. security
 5. platform-constraints
 6. implementation-quality
-7. code-health
+7. code-health (cognitive load + debt trajectory + design integrity + observability)
+8. strategic-alignment (problem diagnosis + roadmap consistency)
 
-1-6 are Technical Concerns (does the code work correctly?). 7 is a Design Concern (is the code maintainable over time?). Both types are mandatory.
+1-6 are Technical Concerns (does the code work correctly?). 7-8 are Design Concerns (is the code maintainable and strategically sound?). All types are mandatory.
 
-These are NOT alternatives to domain perspectives — they COEXIST with domain perspectives generated in Step 4. A project will have these 7 PLUS domain-specific perspectives.
+These are NOT alternatives to domain perspectives — they COEXIST with domain perspectives generated in Step 4. A project will have these 8 PLUS domain-specific perspectives.
 
-**Do NOT replace these 7 with project-specific perspectives** (e.g., do not generate "shell-script-robustness" instead of "execution-flow"). Project-specific concerns go into domain perspectives in Step 4.
+**Do NOT replace these 8 with project-specific perspectives** (e.g., do not generate "shell-script-robustness" instead of "execution-flow"). Project-specific concerns go into domain perspectives in Step 4.
 
 For each, read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/technical-concern.md` and use the template:
 - Populate check items from archetype-checklists.md
@@ -101,10 +102,11 @@ For each, read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/t
   - For concurrency: race condition patterns from bug-patterns.md, transaction-related principles
   - For security: auth-related patterns, data exposure rules
   - For implementation-quality: coding conventions from implementation-principles.md
-  - For code-health: design-principles.md (architectural patterns, module boundaries), bug-patterns.md (areas with high churn indicating debt)
+  - For code-health: design-principles.md (architectural patterns, module boundaries), bug-patterns.md (areas with high churn indicating debt), implementation-principles.md (coding conventions)
+  - For strategic-alignment: roadmap.md (planned features, migration plans), design-principles.md (architectural direction), project-context.md (project goals)
   - etc.
 
-**Verification**: After generating, confirm you have exactly 7 files:
+**Verification**: After generating, confirm you have exactly 8 files:
 - `.claude/skills/execution-flow/SKILL.md`
 - `.claude/skills/resource-management/SKILL.md`
 - `.claude/skills/concurrency/SKILL.md`
@@ -112,6 +114,7 @@ For each, read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/t
 - `.claude/skills/platform-constraints/SKILL.md`
 - `.claude/skills/implementation-quality/SKILL.md`
 - `.claude/skills/code-health/SKILL.md`
+- `.claude/skills/strategic-alignment/SKILL.md`
 
 If any are missing, go back and generate them before proceeding to Step 4.
 
@@ -153,6 +156,7 @@ Before finishing, verify:
 - [ ] platform-constraints/SKILL.md exists
 - [ ] implementation-quality/SKILL.md exists
 - [ ] code-health/SKILL.md exists
+- [ ] strategic-alignment/SKILL.md exists
 
 **Content Quality:**
 - [ ] Each technical concern has tech-stack-specific checks (not just generic)
@@ -162,7 +166,7 @@ Before finishing, verify:
 - [ ] Generated skills reference specific files/modules from the project, not just generic advice
 
 **Orchestrator Completeness:**
-- [ ] Lists ALL generated perspectives (7 perspectives + domain)
+- [ ] Lists ALL generated perspectives (8 perspectives + domain)
 - [ ] Has Phase 1.5 with workspace verification AND PR diff reconciliation
 - [ ] Has Phase 1.7 Design Critique
 - [ ] Has Phase 2 Contradiction Detection

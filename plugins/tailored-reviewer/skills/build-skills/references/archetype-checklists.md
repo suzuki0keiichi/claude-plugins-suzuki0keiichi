@@ -32,6 +32,7 @@ Does code execute in the intended order? Are all paths reachable?
 - **Guard condition symmetry** (must enumerate, not just "check"): when multiple functions process the same data source (e.g., markStale/closeExpired, create/delete, encode/decode), (1) list every early-return/continue/skip guard in each function, (2) compare the lists, (3) if a guard exists in one function but not another, flag it — the missing function likely needs the same guard or an explicit reason for omission
 - **State transition gaps**: when code acts on a condition checked earlier (check-then-act), verify that external state changes between check and act are handled (e.g., label applied → time passes → close, but what if someone commented in between?)
 - **Automation completeness**: if a workflow introduces a new state/label/flag, verify ALL consumers of that entity handle the new state (not just the producer)
+- **Implicit contract violation**: if the diff changes a function's behavior (return type, error conditions, side effects, calling order requirements), check all callers — do they depend on the old behavior? Contracts that are not expressed in types or interfaces ("this function must be called after init", "returns null only when X") are invisible to the compiler and break silently
 
 ### 2. Resource Management
 Are resources acquired and released correctly?
@@ -95,6 +96,30 @@ This perspective evaluates cognitive load and technical debt trajectory — not 
 - **Coupling creep**: (1) check if the diff introduces new dependencies between modules/files that were previously independent, (2) if function A now needs to know about function B's internals (not just its interface), flag the coupling
 - **Consistency erosion**: if the same problem is solved differently in this PR vs existing code (e.g., error handling style, data access pattern, config approach), flag — inconsistency forces future developers to learn multiple patterns for the same thing
 - **Debt perpetuation**: conforming to an existing bad pattern is NOT acceptable just because "the existing code does it this way." If the existing code has confusable naming, missing type safety, or poor error handling, and the new code follows the same pattern, flag BOTH the new code AND the existing pattern. Matching a bad convention expands the debt surface. Check bug-patterns.md — if this area is a known hotspot, the existing pattern is likely the root cause.
+
+**Design Integrity** — does this change respect the project's design principles?
+- **Design principle adherence**: read knowledge-base/design-principles.md. Does the new code follow the project's established patterns (layering, module boundaries, naming conventions, error handling style)? If the project uses DDD, is business logic leaking into infrastructure? If Clean Architecture, are dependency arrows pointing inward?
+- **Dependency direction**: (1) list new imports/includes added in the diff, (2) check if any create a dependency from a lower-level module to a higher-level one, or from a stable module to an unstable one. Flag inversions.
+- **Responsibility placement**: is the new code in the right file/module/layer? If a function is added to module A but its logic is about module B's domain, flag the misplacement.
+
+**Observability & Operability** — can problems be detected and diagnosed in production?
+- **Logging adequacy**: new error paths or significant state changes without log output. If an operation can fail silently, flag it.
+- **Metric exposure**: new features or critical paths without performance/health metrics. Can operators tell if this code is working correctly without reading the source?
+- **Debugging support**: when this code fails, does the error message contain enough context (IDs, state, input values) to diagnose the issue without reproducing it?
+
+### 8. Strategic Alignment
+Does this change move the project toward its goals, or away from them?
+This perspective requires knowledge-base/roadmap.md and knowledge-base/design-principles.md. If roadmap information is unavailable, evaluate based on architectural direction and design principles.
+
+**Problem Diagnosis** — is the PR solving the right problem?
+- **Symptom vs root cause**: (1) read the related ticket/issue, (2) read the PR description, (3) does the implementation address the root cause or just suppress the symptom? A null check addition may fix the crash but the question is: why is null being passed in the first place?
+- **Problem scope**: the fix addresses one occurrence, but does the same problem exist elsewhere? Check for similar code patterns in the codebase.
+- **Alternative approaches**: is there a simpler or more fundamental solution? Would a type-level constraint eliminate the entire class of bug?
+
+**Roadmap Consistency** — does this change align with where the project is heading?
+- **Direction check**: read knowledge-base/roadmap.md. Does this PR introduce patterns, dependencies, or architectural decisions that conflict with planned future work? Example: adding a new ORM dependency when the roadmap includes migrating to a different database.
+- **Premature decisions**: does this PR make assumptions about future requirements that lock in a design prematurely? Over-engineering for hypothetical scenarios is as risky as under-engineering.
+- **Migration path**: if the project is migrating from A to B (e.g., DDS to Zenoh, monolith to microservices), does this PR add new code on the old (A) side instead of the new (B) side?
 
 ---
 

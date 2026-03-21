@@ -47,10 +47,10 @@ Check each file listed in `meta/build-inputs.md` under "Reference File Hashes":
 
 | Changed file | Affected skills |
 |-------------|----------------|
-| archetype-checklists.md | All 7 perspectives + orchestrator |
+| archetype-checklists.md | All 8 perspectives + orchestrator |
 | high-impact-patterns.md | Technical concerns matching changed condition IDs |
 | templates/orchestrator.md | Orchestrator only |
-| templates/technical-concern.md | All 7 perspectives |
+| templates/technical-concern.md | All 8 perspectives |
 | templates/domain-perspective.md | All domain perspectives |
 | templates/debate.md | Debate only |
 | templates/consolidation.md | Consolidation only |
