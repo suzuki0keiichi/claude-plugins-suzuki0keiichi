@@ -119,6 +119,8 @@ After fact-checking individual findings, step back and evaluate the change holis
    - What happens under failure conditions?
    - What happens when upstream/downstream systems change?
 
+5. **Structural Root Cause**: If Phase 1 found Critical/Important bugs, ask: why was this bug structurally possible? Look beyond the diff — the code AROUND the bug (existing naming, types, API design) may be the real problem. Check bug-patterns.md: if this area is a known hotspot, explain WHY it keeps producing bugs, not just THAT it does. This turns a short-term bug finding into a long-term design improvement recommendation.
+
 Output format for design critique findings:
 - **Severity**: Important (design issues are rarely Critical unless security-related)
 - **Category**: design-critique

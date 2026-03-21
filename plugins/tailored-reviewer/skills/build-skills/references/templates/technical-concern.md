@@ -40,6 +40,16 @@ For each finding you are about to report, you MUST verify it:
 
 Only findings that survive this verification appear in your output.
 
+## Root Cause Analysis (after finding bugs, MUST do)
+
+For each Critical or Important finding, do NOT stop at the symptom. Ask:
+
+1. **Why was this bug possible?** Is the existing code structure (naming, types, API design) making this class of bug likely? If `envar_name` and `envar_uri` are confusable, the root cause is the naming, not the typo.
+2. **Is this area a known hotspot?** Check bug-patterns.md — if this file/module has repeated bugs, explain WHY it keeps producing them. Use bug-patterns as a **starting point for design analysis**, not just as confidence evidence.
+3. **What would prevent this class of bug?** Not just "fix this line" but "rename these variables" or "use a type wrapper to make confusion impossible."
+
+Report root-cause findings as separate long-term-detriment entries linked to the original short-term finding.
+
 ## Output Format
 
 For each finding:
