@@ -23,11 +23,11 @@ description: >
 
 ## Step 1: Perspective Selection
 
-**Default: use ALL perspectives.** Do not ask for selection unless the user explicitly requests it or there are perspectives clearly irrelevant to the review target.
+**ALWAYS use ALL perspectives. Do NOT exclude any.**
 
-If a perspective is obviously irrelevant (e.g., concurrency for a documentation-only PR, platform-constraints for a config file change), mention it proactively: "concurrency は今回のPRに関連しないため除外します。含めますか？"
+You are not authorized to decide which perspectives are relevant. Every perspective exists for a reason, and "this PR doesn't seem related to X" is exactly the kind of assumption that causes blind spots. code-health and strategic-alignment are ESPECIALLY important — they evaluate design quality and project direction, which applies to EVERY PR regardless of its apparent scope.
 
-If the user asks to reduce scope (e.g., for token budget reasons), present the list and let them exclude specific ones.
+The ONLY exception: if the user explicitly asks to exclude specific perspectives (e.g., for token budget), follow their instruction. Never exclude on your own judgment.
 
 ## Input Analysis
 
