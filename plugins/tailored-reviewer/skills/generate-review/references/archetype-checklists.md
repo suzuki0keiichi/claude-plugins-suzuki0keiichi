@@ -29,7 +29,7 @@ Does code execute in the intended order? Are all paths reachable?
 - Conditional branch coverage (unreachable code, always-true guards)
 - Framework lifecycle (SSR/CSR boundary, hydration, hook ordering)
 - Error propagation paths (does throw reach the right catch?)
-- **Code symmetry**: functions processing the same data set (e.g., markStale/closeExpired, create/delete, serialize/deserialize) must have consistent guard checks — if one skips locked/disabled/archived items, all must
+- **Guard condition symmetry** (must enumerate, not just "check"): when multiple functions process the same data source (e.g., markStale/closeExpired, create/delete, encode/decode), (1) list every early-return/continue/skip guard in each function, (2) compare the lists, (3) if a guard exists in one function but not another, flag it — the missing function likely needs the same guard or an explicit reason for omission
 - **State transition gaps**: when code acts on a condition checked earlier (check-then-act), verify that external state changes between check and act are handled (e.g., label applied → time passes → close, but what if someone commented in between?)
 - **Automation completeness**: if a workflow introduces a new state/label/flag, verify ALL consumers of that entity handle the new state (not just the producer)
 
@@ -76,6 +76,7 @@ Is the code maintainable and correct?
 - Test coverage for changed code paths
 - **Silent success on failure**: process wrappers that catch errors and exit 0 (e.g., `main().catch(console.error)`) hide CI failures — top-level error handlers must propagate non-zero exit codes
 - **Scope-limited protections**: guards/thresholds applied to one category but not others where the same logic applies (e.g., upvote protection only for enhancements, not bugs)
+- **Parallel function consistency**: for functions in the same file with similar iteration patterns (e.g., both loop over issues), compare their error handling and guard conditions — inconsistencies are likely bugs, not intentional differences
 
 ---
 

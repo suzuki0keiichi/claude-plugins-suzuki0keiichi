@@ -28,6 +28,16 @@
 - **`GITHUB_TOKEN` default permissions**: Default is read-write for everything in the repo. Set `permissions:` at workflow level to minimize: `permissions: { contents: read }`.
 - **Third-party action pinning**: `uses: some-action@main` can change underneath. Pin to SHA: `uses: some-action@abc123`. A compromised action with repo secrets access = supply chain attack.
 
+## Platform Constraints — GitHub API Failure Modes
+
+Scripts that call the GitHub API (via `gh` CLI or `octokit`/`fetch`) must handle these failure modes:
+
+- **Locked issues**: POST to `/comments`, `/labels` on a locked issue → 403 Forbidden. Any function that iterates issues and writes to them must check `issue.locked` before write operations.
+- **Archived repos**: all write operations → 403. Check `repo.archived` if the script may target archived repos.
+- **Rate limiting**: `GITHUB_TOKEN` in Actions allows 1,000 requests/hour. N+1 query patterns (fetching events/comments per issue in a loop) can easily exceed this. Check `X-RateLimit-Remaining` header or use conditional requests.
+- **Pagination boundary shift**: mutating operations (close, label) during paginated iteration can shift page boundaries, causing issues to be skipped or processed twice. Collect all targets first, then mutate.
+- **404 return type mismatch**: when an issue is deleted or a repo is renamed, API returns 404. If the caller expects an array (e.g., `any[]`) but the error handler returns `{}`, downstream code crashes on `.length`, `.filter()`, `for...of`.
+
 ## Implementation Quality
 
 - **`actions/checkout` defaults to shallow clone**: `fetch-depth: 1` by default. `git log`, `git diff`, tags-based version calculation fail. Set `fetch-depth: 0` for full history when needed.

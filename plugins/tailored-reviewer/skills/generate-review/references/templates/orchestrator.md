@@ -126,6 +126,7 @@ After fact-checking individual findings, step back and evaluate the change holis
    - If a new wrapper/abstraction was introduced, does ALL existing code use it? (e.g., gh.sh wrapper introduced but other scripts still call gh directly)
    - If a security boundary was established, is it comprehensive?
    - Are there related files that need corresponding changes?
+   - **Deleted code feature coverage**: if the PR deletes files or code blocks, list each feature/behavior the deleted code provided. Then verify each feature is covered by the new code. Missing features are UX regression candidates. Pay special attention to user-facing notifications, warning messages, grace periods, and fallback behaviors — these "soft" features are most often lost in rewrites.
 
 3. **Design Alternative Analysis**: Is this the right approach?
    - Are there simpler solutions that achieve the same goal?
