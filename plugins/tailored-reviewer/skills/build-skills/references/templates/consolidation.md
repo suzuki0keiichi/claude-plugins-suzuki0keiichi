@@ -33,7 +33,17 @@ description: >
 
 ## Process
 
-1. Classify each finding: short-term-detriment or long-term-detriment. Design Critique findings go to long-term.
+1. Classify each finding by source perspective — do NOT rely on the finding's self-declared category:
+
+   **Short-term** (bugs, security, correctness — goes to short-term file):
+   - All findings from: execution-flow, resource-management, concurrency, security, platform-constraints, implementation-quality
+   - Exception: if these perspectives produce a Root Cause Analysis finding, that goes to long-term
+
+   **Long-term** (maintainability, design, strategy — goes to long-term file):
+   - All findings from: code-health, strategic-alignment
+   - All findings from domain perspectives
+   - All Design Critique findings (Phase 1.7)
+   - All Root Cause Analysis findings (regardless of source perspective)
 2. For each category separately:
    a. Merge findings, replacing contradicted findings with debate resolutions
    b. Deduplicate: merge findings describing the same issue from different perspectives. Keep all perspective names. Do NOT discard detail.
@@ -70,7 +80,7 @@ Start at 100, deduct:
 - Each Critical finding: -20
 - Each Important finding: -5
 - Each Suggestion: -1
-- Minimum: 0
+- **No minimum** — negative scores are valid and indicate severe issues
 
 ### Long-term Score (maintainability, tech debt, design)
 
@@ -80,7 +90,7 @@ Start at 100, deduct:
 - Each long-term Suggestion: -1
 - Each Design Critique finding: -5
 - Each root-cause finding: -5
-- Minimum: 0
+- **No minimum** — negative scores are valid
 
 ## Short-term Report Format
 
@@ -88,7 +98,7 @@ Start at 100, deduct:
 
 ## Score
 
-| Short-term (bugs, security) | XX/100 | 🟢 ≥80 / 🟡 50-79 / 🔴 <50 |
+| Short-term (bugs, security) | XX | 🟢 ≥80 / 🟡 50-79 / 🔴 0-49 / ⚫ <0 |
 
 ## Summary
 - Review type, target, execution date
@@ -122,7 +132,7 @@ Merge duplicates across perspectives but keep all perspective names.)
 
 ## Score
 
-| Long-term (maintainability) | XX/100 | 🟢 ≥80 / 🟡 50-79 / 🔴 <50 |
+| Long-term (maintainability) | XX | 🟢 ≥80 / 🟡 50-79 / 🔴 0-49 / ⚫ <0 |
 
 ## Summary
 - Review type, target, execution date
