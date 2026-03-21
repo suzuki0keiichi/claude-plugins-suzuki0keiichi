@@ -86,7 +86,7 @@ Read each skill as if you were an LLM following instructions. Flag if:
 
 ### 8. Template Compliance Validation
 
-Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/skill-templates.md` and verify that generated skills include all MANDATORY elements from their corresponding template.
+Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/` and verify that generated skills include all MANDATORY elements from their corresponding template (orchestrator.md, technical-concern.md, domain-perspective.md, debate.md, consolidation.md).
 
 **Orchestrator MUST have:**
 - [ ] Step 0: Environment Setup (workspace/ instruction, config.md reading)

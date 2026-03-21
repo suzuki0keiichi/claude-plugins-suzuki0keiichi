@@ -72,7 +72,7 @@ These are NOT alternatives to domain perspectives — they COEXIST with domain p
 
 **Do NOT replace these 6 with project-specific perspectives** (e.g., do not generate "shell-script-robustness" instead of "execution-flow"). Project-specific concerns go into domain perspectives in Step 4.
 
-For each, use the **Technical Concern SKILL.md Template** from skill-templates.md:
+For each, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/technical-concern.md` and use the template:
 - Populate check items from archetype-checklists.md
 - Overlay tech-stack-specific checks from `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/tech-patterns/{stack}.md` (if exists for detected stack)
 - **Selective knowledge-base injection**: only include knowledge-base entries relevant to this specific concern (NOT the full knowledge-base)
@@ -101,7 +101,7 @@ For each matched archetype:
 3. DO NOT duplicate what the 6 technical concern perspectives already cover
    - e.g., if "Authentication & Authorization" is already covered by the security concern, only generate a domain perspective if there are project-specific auth rules beyond standard security checks
 
-For each domain perspective, use the **Domain SKILL.md Template**:
+For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/domain-perspective.md` and use the template:
 - Fill in project-specific content from knowledge-base
 - Convert bug-patterns.md entries → specific check items
 - Convert pr-review-patterns.md entries → reviewer knowledge
@@ -110,8 +110,11 @@ For each domain perspective, use the **Domain SKILL.md Template**:
 ### Step 5: Write All SKILL.md Files
 
 Write all generated skills to `.claude/skills/{perspective-id}/SKILL.md`.
-Generate orchestrator, debate, and consolidation skills from their templates,
-filling in the FULL perspective list (technical + domain) and project name.
+Generate orchestrator, debate, and consolidation skills from their respective templates,
+filling in the FULL perspective list (technical + domain) and project name:
+- Orchestrator: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/orchestrator.md`
+- Debate: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/debate.md`
+- Consolidation: read `${CLAUDE_PLUGIN_ROOT}/skills/generate-review/references/templates/consolidation.md`
 
 ### Step 6: Completeness Verification
 

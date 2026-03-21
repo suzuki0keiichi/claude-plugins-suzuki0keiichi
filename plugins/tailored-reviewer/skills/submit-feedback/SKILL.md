@@ -68,7 +68,7 @@ Date: [date]
 ## Classification
 
 - Archetype: [which archetype this applies to, or "all"]
-- Component: [archetype-checklists / skill-templates / generate-review logic]
+- Component: [archetype-checklists / templates/* / generate-review logic]
 ISSUE_BODY
 )"
 ```
