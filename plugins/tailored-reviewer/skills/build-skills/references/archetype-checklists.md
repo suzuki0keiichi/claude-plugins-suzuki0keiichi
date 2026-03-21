@@ -28,7 +28,7 @@ Does code execute in the intended order? Are all paths reachable?
 - Middleware/interceptor ordering and short-circuit behavior
 - Conditional branch coverage (unreachable code, always-true guards)
 - Framework lifecycle (SSR/CSR boundary, hydration, hook ordering)
-- Error propagation paths (does throw reach the right catch?)
+- **Error propagation paths**: for each throw/reject in the diff, trace upward through the call stack — (1) identify the nearest catch/try, (2) check if it handles this specific error type or catches too broadly, (3) if no catch exists in the changed code, check if the caller handles it. Flag unhandled throws and catch blocks that swallow errors silently
 - **Guard condition symmetry** (must enumerate, not just "check"): when multiple functions process the same data source (e.g., markStale/closeExpired, create/delete, encode/decode), (1) list every early-return/continue/skip guard in each function, (2) compare the lists, (3) if a guard exists in one function but not another, flag it — the missing function likely needs the same guard or an explicit reason for omission
 - **State transition gaps**: when code acts on a condition checked earlier (check-then-act), verify that external state changes between check and act are handled (e.g., label applied → time passes → close, but what if someone commented in between?)
 - **Automation completeness**: if a workflow introduces a new state/label/flag, verify ALL consumers of that entity handle the new state (not just the producer)
@@ -54,7 +54,7 @@ Does code behave correctly under simultaneous access?
 
 ### 4. Security
 Are attack vectors closed?
-- Authentication bypass (missing auth checks on routes)
+- **Authentication bypass**: (1) list all new routes/endpoints/handlers added in the diff, (2) for each, check if auth middleware or permission check is applied, (3) compare against existing routes in the same file/module to verify the auth pattern is consistent. A new route without auth in a file where all others have auth is likely a bug
 - Injection (SQL, NoSQL, command, template)
 - Sensitive data exposure (logs, errors, API responses)
 - CSRF / SSRF / open redirect
@@ -75,7 +75,7 @@ Is the code maintainable and correct?
 - Dead code and unused imports
 - Test coverage for changed code paths
 - **Silent success on failure**: process wrappers that catch errors and exit 0 (e.g., `main().catch(console.error)`) hide CI failures — top-level error handlers must propagate non-zero exit codes
-- **Scope-limited protections**: guards/thresholds applied to one category but not others where the same logic applies (e.g., upvote protection only for enhancements, not bugs)
+- **Scope-limited protections**: (1) find guards/thresholds that filter by category or type (e.g., `if (isEnhancement)`), (2) ask whether the protection logic applies equally to OTHER categories, (3) if the guard makes sense for all types but is scoped to one, flag it. Example: upvote protection only for enhancements when bugs with 10+ upvotes should also be protected
 - **Parallel function consistency**: for functions in the same file with similar iteration patterns (e.g., both loop over issues), compare their error handling and guard conditions — inconsistencies are likely bugs, not intentional differences
 
 ---
