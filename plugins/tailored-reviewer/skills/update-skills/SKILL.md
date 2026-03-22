@@ -14,6 +14,15 @@ argument-hint: [--full to update all skills, default: changed only]
 Update generated review skills based on changes without full regeneration.
 Handles both updating existing skills AND adding new ones that don't exist yet.
 
+## Limitations
+
+This skill handles content updates and new skill additions, but does NOT handle:
+- **Skill renames** (e.g., `review-orchestrator` → `review-{project_name_slug}`)
+- **Skill directory moves or deletions**
+- **Structural changes to the skill hierarchy**
+
+If the plugin update involves these kinds of changes, inform the user and recommend running `/build-skills --force` instead.
+
 ## Step 0: Environment Setup (MUST do first)
 
 The current directory is the **review data project** (e.g., `~/review/rclc/`). This directory contains:
