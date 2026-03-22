@@ -4,7 +4,7 @@
 
 ## 着想
 
-[sashiko](https://github.com/sashikorern/sashiko) のマルチパースペクティブレビューに触発されて開発。プロジェクト固有の知識注入と backtest による検証ループを加えた。
+[sashiko](https://github.com/sashikorern/sashiko) のプロジェクト固有知識の収集・注入アプローチに触発されて開発。
 
 ## 何を解決するか
 
