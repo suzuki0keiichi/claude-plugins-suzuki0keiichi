@@ -18,6 +18,24 @@ description: >
 2. **All code lives in `workspace/`** — all git/code operations target `workspace/`, NOT the current directory
 3. Read `knowledge-base/project-context.md` for project background
 
+## Step 0.5: Output Language Detection
+
+Detect the language of the user's review instruction (e.g., "レビューして" → Japanese, "review PR #123" → English). Store this as `{output_language}` — it will be passed to the consolidation agent so the final report is written in the same language the user used.
+
+## Step 0.6: Input Data Preparation (MUST do before launching agents)
+
+Background subagents cannot run interactive Bash commands (permission approval is blocked). ALL external data must be fetched here by the orchestrator and saved to files.
+
+**For PR reviews:**
+1. Create the output directory: `reviews/perspectives/{YYYY-MM-DD}-{target}/`
+2. Run these commands in `workspace/`:
+   - `cd workspace && gh pr diff {number} > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt`
+   - `cd workspace && gh pr view {number} > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-info.txt`
+   - `cd workspace && gh pr view {number} --json files --jq '.files[].path' > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-files.txt`
+3. Verify the files are non-empty. If `gh` fails, ask the user to check authentication.
+
+**For non-PR reviews:** Skip this step. Agents can Read code files directly.
+
 ## Step 1: Perspective Selection
 
 **ALWAYS use ALL perspectives. Do NOT exclude any.**
@@ -38,9 +56,11 @@ If no review target is specified, ask the user:
 
 **Use the Agent tool** to launch each perspective as a separate subagent. Do NOT execute perspectives yourself — context pollution degrades quality.
 
+**IMPORTANT**: Subagents run in the background and CANNOT execute Bash commands interactively. All data they need must be accessible via the Read tool.
+
 Launch ALL perspectives in parallel:
 {for each perspective}
-- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute against [review target]. Return findings in the output format specified."
+- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute against [review target]. All code is in workspace/. For PR reviews: the PR diff is at reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt, PR description at pr-info.txt, changed files list at pr-files.txt — use the Read tool to access these files. Do NOT run gh or git commands. Return findings in the output format specified."
 {end for}
 
 **Save raw outputs**: Write each perspective's full output to `reviews/perspectives/{YYYY-MM-DD}-{target}/{perspective_name}.md`.
@@ -61,7 +81,7 @@ Scan all findings for contradictions (same location different severity, conflict
 
 **Use the Agent tool** to launch consolidation as a separate subagent.
 
-Agent tool: name="consolidation", prompt="Read .claude/skills/consolidation/SKILL.md and follow its instructions. Input: [all Phase 1 results + debate results]. MUST write reports to reviews/."
+Agent tool: name="consolidation", prompt="Read .claude/skills/consolidation/SKILL.md and follow its instructions. Input: [all Phase 1 results + debate results]. Output language: {output_language}. MUST write reports to reviews/."
 
 **MANDATORY**: Two review files MUST exist after consolidation:
 - `reviews/{YYYY-MM-DD}-{type}-{target}-short-term.md`

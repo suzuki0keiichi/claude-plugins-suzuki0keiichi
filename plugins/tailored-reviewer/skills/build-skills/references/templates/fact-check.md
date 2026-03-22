@@ -25,6 +25,11 @@ For EVERY finding with Severity Critical or Important:
 
 **Skip this step entirely if running in backtest mode.** In backtest mode, the workspace is intentionally set to the bug-introducing commit state, and reconciliation against the default branch would falsely drop all findings.
 
+**PR diff data location**: The orchestrator pre-fetches PR data in Step 0.5. Use the Read tool to access:
+- `reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt` — full diff
+- `reviews/perspectives/{YYYY-MM-DD}-{target}/pr-info.txt` — PR description
+Do NOT run `gh pr diff` or `gh pr view` — the data is already saved.
+
 **CRITICAL for normal PR reviews**: The PR diff shows the state at PR creation time. The workspace may contain the post-merge state with subsequent fixes. For each finding based on the PR diff:
 
 1. Read the CURRENT version of the cited file in `workspace/`

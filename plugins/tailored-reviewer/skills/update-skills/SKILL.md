@@ -52,6 +52,8 @@ Check each file listed in `meta/build-inputs.md` under "Reference File Hashes":
 | templates/orchestrator.md | Orchestrator only |
 | templates/technical-concern.md | All 8 perspectives |
 | templates/domain-perspective.md | All domain perspectives |
+| templates/fact-check.md | Fact check only |
+| templates/design-critique.md | Design critique only |
 | templates/debate.md | Debate only |
 | templates/consolidation.md | Consolidation only |
 | tech-patterns/{stack}.md | Technical concerns using that stack |

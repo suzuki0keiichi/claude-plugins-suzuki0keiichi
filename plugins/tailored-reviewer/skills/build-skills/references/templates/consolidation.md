@@ -24,6 +24,10 @@ description: >
 
 **This is non-negotiable. A review without saved files is an incomplete review.**
 
+## Output Language
+
+Write the entire report in the language specified by the orchestrator's `Output language` parameter. If not specified, default to English. All section headers, descriptions, and analysis text must be in the output language. Code references (file paths, variable names, etc.) remain in their original form.
+
 ## Input
 
 - All perspective findings (Phase 1 results)
@@ -89,7 +93,7 @@ Start at 100, deduct:
 - Each Important long-term detriment: -3
 - Each long-term Suggestion: -1
 - Each Design Critique finding: -3
-- Each 構造的背景 finding: -3
+- Each Structural Root Cause finding: -3
 - **No minimum** — negative scores are valid
 
 ## Short-term Report Format
@@ -139,19 +143,19 @@ Merge duplicates across perspectives but keep all perspective names.)
 - Perspectives used: N (list)
 - Critical: N, Important: N, Suggestion: N
 - Design critique: N
-- 短期的な問題の構造的背景: N
+- Structural Root Causes: N
 - **Per-perspective details**: `reviews/perspectives/{date}-{target}/`
 
-## 短期的な問題の構造的背景
+## Structural Root Causes of Short-term Issues
 
-以下は、short-termレビューで検出されたCritical/Important級の問題について、「なぜこの問題がそもそも起きうる構造になっているのか」を分析したものです。個別のバグ修正はshort-termレポートを参照してください。ここでは、同種の問題が繰り返されないための構造的な改善を提案します。
+For each Critical/Important finding from the short-term report, analyze WHY the issue was structurally possible. Individual bug fixes belong in the short-term report. Here, propose structural improvements to prevent the entire class of bug from recurring.
 
 (For each major short-term finding, explain the structural root cause, link to bug-patterns.md if this area is a known hotspot, and propose structural fixes that prevent the entire class of bug.)
 
-## 設計上の懸念
-(目的と実装のギャップ、欠落している考慮事項、代替アプローチの提案)
+## Design Concerns
+(Purpose-implementation gaps, missing considerations, alternative approach proposals)
 
-## 長期的な問題
+## Long-term Issues
 
 ### Critical
 (structured format)
