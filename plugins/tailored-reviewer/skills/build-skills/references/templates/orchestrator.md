@@ -4,19 +4,35 @@ Fill in {placeholders} with project-specific content from knowledge-base.
 
 ```
 ---
-name: review-orchestrator
+name: review-{project_name_slug}
 description: >
-  Orchestrates {project_name} review execution. Coordinates parallel review
-  agents, fact-checking, design critique, and consolidation.
+  This skill should be used when the user asks to "review", "review PR",
+  "review code", "run review", "レビュー", "レビューして", "PRレビュー",
+  "コードレビュー", or wants to execute the {project_name} review system
+  against a PR, module, or incident.
+argument-hint: [PR #123 | module src/ | incident description]
 ---
 
-# {project_name} Review Orchestrator
+# {project_name} Review
 
 ## Step 0: Environment Setup (MUST do first)
 
+The current directory is the **review data project**. This directory contains:
+- `config.md` — project configuration (read this for git URL and project info)
+- `knowledge-base/` — collected project knowledge
+- `meta/` — metadata files
+- `workspace/` — git clone of the actual project
+- `.claude/skills/` — generated review skills
+- `reviews/` — review output destination
+
+**IMPORTANT:**
+- The project root is NOT a git repository. `workspace/` is.
+- All git commands (`gh`, `git`) must run inside `workspace/`.
+- All code reading must target `workspace/`.
+- Review outputs go to `reviews/` at the project root.
+
 1. Read `config.md` for project information
-2. **All code lives in `workspace/`** — all git/code operations target `workspace/`, NOT the current directory
-3. Read `knowledge-base/project-context.md` for project background
+2. Read `knowledge-base/project-context.md` for project background
 
 ## Step 0.5: Output Language Detection
 

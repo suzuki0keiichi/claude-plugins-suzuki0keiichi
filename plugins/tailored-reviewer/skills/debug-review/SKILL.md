@@ -27,15 +27,15 @@ For each SKILL.md in .claude/skills/:
 - [ ] Has clear section headers (not just a wall of text)
 - [ ] Markdown is well-formed (no broken links, unclosed code blocks)
 
-For orchestrator specifically:
+For the review entry point (`review-*` skill):
 - [ ] Lists all perspective skills by name
 - [ ] Includes contradiction detection logic
 - [ ] References debate and consolidation skills
 
 ### 2. Cross-Reference Integrity
 
-- [ ] Every perspective listed in orchestrator exists as a file
-- [ ] No orphan perspectives (files that orchestrator doesn't reference)
+- [ ] Every perspective listed in the review entry point exists as a file
+- [ ] No orphan perspectives (files that the review entry point doesn't reference)
 - [ ] Debate skill references the same output format as perspectives
 - [ ] Consolidation skill references the confidence threshold (80)
 
@@ -70,7 +70,7 @@ For each skill, simulate execution by reading the SKILL.md and verifying:
 
 ### 6. Agent Delegation Validation
 
-For orchestrator:
+For the review entry point:
 - [ ] Each perspective dispatch specifies the exact skill path
 - [ ] Parallel dispatch is explicitly stated (not implied)
 - [ ] Result collection from agents is described (how to gather outputs)
@@ -88,7 +88,7 @@ Read each skill as if you were an LLM following instructions. Flag if:
 
 Read the templates in `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/` and verify that generated skills include all MANDATORY elements from their corresponding template (orchestrator.md, technical-concern.md, domain-perspective.md, debate.md, consolidation.md).
 
-**Orchestrator MUST have:**
+**Review entry point (`review-*`) MUST have:**
 - [ ] Step 0: Environment Setup (workspace/ instruction, config.md reading)
 - [ ] Phase 1.5 Step A: Workspace Verification (re-read cited code in workspace/)
 - [ ] Phase 1.5 Step B: PR Diff vs Workspace Reconciliation (compare diff findings against current workspace code)
@@ -137,9 +137,9 @@ For each skill:
 - Completeness: ✅/❌ [details]
 - Specificity: ✅/❌ [N project-specific references]
 - Instruction Compliance: ✅/❌ [details]
-- Agent Delegation: ✅/❌ [details] (orchestrator only)
+- Agent Delegation: ✅/❌ [details] (review entry point only)
 - Skip Risk: ✅/❌ [details]
-- Template Compliance: ✅/❌ [missing mandatory elements] (orchestrator, consolidation, perspectives)
+- Template Compliance: ✅/❌ [missing mandatory elements] (review entry point, consolidation, perspectives)
 - Technical Concern Coverage: ✅/❌ [missing concerns] (overall check)
 ```
 

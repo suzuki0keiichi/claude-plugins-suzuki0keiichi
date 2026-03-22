@@ -47,9 +47,9 @@ Check each file listed in `meta/build-inputs.md` under "Reference File Hashes":
 
 | Changed file | Affected skills |
 |-------------|----------------|
-| archetype-checklists.md | All 8 perspectives + orchestrator |
+| archetype-checklists.md | All 8 perspectives + review entry point |
 | high-impact-patterns.md | Technical concerns matching changed condition IDs |
-| templates/orchestrator.md | Orchestrator only |
+| templates/orchestrator.md | Review entry point only |
 | templates/technical-concern.md | All 8 perspectives |
 | templates/domain-perspective.md | All domain perspectives |
 | templates/fact-check.md | Fact check only |
@@ -103,7 +103,7 @@ For each missing perspective:
 3. Read tech-patterns for detected stack(s): `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/tech-patterns/{stack}.md`
 4. Read knowledge-base files relevant to this perspective
 5. **Generate the SKILL.md** — write to `.claude/skills/{perspective-id}/SKILL.md`
-6. **Update the orchestrator** — add the new perspective to `.claude/skills/review-orchestrator/SKILL.md`:
+6. **Update the review entry point** — find the `review-*` skill in `.claude/skills/` and add the new perspective:
    - Add to perspective count
    - Add to Technical/Domain perspective list
    - Add Agent dispatch entry in Phase 1
@@ -141,6 +141,6 @@ Report:
 - Skills updated: [list]
 - Skills unchanged: [list]
 - Changes applied: [summary per skill]
-- Orchestrator updated: yes/no
+- Review entry point updated: yes/no
 - Debug-review result: pass/fail
 - If version update: new features applied from updated templates

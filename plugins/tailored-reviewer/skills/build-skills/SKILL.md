@@ -138,8 +138,8 @@ For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/ref
 ### Step 5: Write All SKILL.md Files
 
 Write all generated skills to `.claude/skills/{perspective-id}/SKILL.md`.
-Generate orchestrator, fact-check, design-critique, debate, and consolidation skills from their respective templates, filling in the FULL perspective list (technical + domain) and project name:
-- Orchestrator: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/orchestrator.md`
+Generate review entry point, fact-check, design-critique, debate, and consolidation skills from their respective templates, filling in the FULL perspective list (technical + domain) and project name:
+- Review entry point: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/orchestrator.md` → write to `.claude/skills/review-{project_name_slug}/SKILL.md` (where `{project_name_slug}` is the project name lowercased, spaces/special chars replaced with hyphens)
 - Fact Check: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/fact-check.md`
 - Design Critique: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/design-critique.md`
 - Debate: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/debate.md`
@@ -166,7 +166,9 @@ Before finishing, verify:
 - [ ] knowledge-base entries with unique patterns (bug hotspots, reviewer focus areas) are reflected
 - [ ] Generated skills reference specific files/modules from the project, not just generic advice
 
-**Orchestrator Completeness:**
+**Review Entry Point Completeness:**
+- [ ] Skill name is `review-{project_name_slug}` (NOT `review-orchestrator`)
+- [ ] Description includes trigger phrases for the skill system
 - [ ] Lists ALL generated perspectives (8 perspectives + domain)
 - [ ] Has Phase 1.5 with workspace verification AND PR diff reconciliation
 - [ ] Has Phase 1.7 Design Critique
@@ -207,6 +209,8 @@ Generated: YYYY-MM-DD
 - templates/orchestrator.md: {hash}
 - templates/technical-concern.md: {hash}
 - templates/domain-perspective.md: {hash}
+- templates/fact-check.md: {hash}
+- templates/design-critique.md: {hash}
 - templates/debate.md: {hash}
 - templates/consolidation.md: {hash}
 - tech-patterns/{stack1}.md: {hash}
@@ -232,4 +236,4 @@ Report to user:
 - Number of perspectives generated
 - List of perspective names with one-line descriptions
 - Any warnings from debug-review
-- Prompt: "Review skills generated. Run your review orchestrator from this project directory."
+- Prompt: "Review skills generated. Run `/review-{project_name_slug}` from this project directory."
