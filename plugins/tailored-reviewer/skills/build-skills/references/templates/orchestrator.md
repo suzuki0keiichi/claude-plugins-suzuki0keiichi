@@ -76,7 +76,7 @@ If no review target is specified, ask the user:
 
 Launch ALL perspectives in parallel:
 {for each perspective}
-- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute against [review target]. All code is in workspace/. For PR reviews: the PR diff is at reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt, PR description at pr-info.txt, changed files list at pr-files.txt — use the Read tool to access these files. Do NOT run gh or git commands. Return findings in the output format specified."
+- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute against [review target]. All code is in workspace/. For PR reviews: the PR diff is at reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt, PR description at pr-info.txt, changed files list at pr-files.txt — use the Read tool to access these files. Do NOT run gh or git commands. Output language: {output_language}. Return findings in the output format specified."
 {end for}
 
 **Save raw outputs**: Write each perspective's full output to `reviews/perspectives/{YYYY-MM-DD}-{target}/{perspective_name}.md`.

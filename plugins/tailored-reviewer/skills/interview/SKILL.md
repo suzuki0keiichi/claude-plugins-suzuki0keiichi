@@ -163,9 +163,13 @@ When run on a project that already has knowledge-base files:
 ## After Interview
 
 1. If workspace/ doesn't exist: `git clone <git_url> workspace/`
-2. Write `meta/plugin-version-used.md` with current tailored-reviewer version
-3. Write `meta/last-updated.md` with current timestamps per file
-4. Write `CLAUDE.md` at the project root with environment instructions:
+2. Create `.gitignore` if it doesn't exist (workspace/ should not be committed to the review data project):
+   ```
+   workspace/
+   ```
+3. Write `meta/plugin-version-used.md` with current tailored-reviewer version
+4. Write `meta/last-updated.md` with current timestamps per file
+5. Write `CLAUDE.md` at the project root with environment instructions:
 
 ```markdown
 # Review Data Project: {project_name}
@@ -187,4 +191,4 @@ This directory is a review data project for tailored-reviewer, NOT the project i
 - Review outputs go to `reviews/`
 ```
 
-5. Prompt user: "Knowledge base is ready. Run /build-skills to create project-specific review skills."
+6. Prompt user: "Knowledge base is ready. Run /build-skills to create project-specific review skills."

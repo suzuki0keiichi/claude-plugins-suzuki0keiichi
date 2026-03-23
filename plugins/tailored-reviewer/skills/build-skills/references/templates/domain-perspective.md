@@ -48,11 +48,35 @@ For each finding you are about to report, you MUST verify it:
 
 Only findings that survive this verification appear in your output.
 
+## Root Cause Analysis (after finding bugs, MUST do)
+
+For each Critical or Important finding, do NOT stop at the symptom. Ask:
+
+1. **Why was this bug possible?** Is the existing code structure (naming, types, API design) making this class of bug likely? If `envar_name` and `envar_uri` are confusable, the root cause is the naming, not the typo.
+2. **Is this area a known hotspot?** Check bug-patterns.md — if this file/module has repeated bugs, explain WHY it keeps producing them. Use bug-patterns as a **starting point for design analysis**, not just as confidence evidence.
+3. **What would prevent this class of bug?** Not just "fix this line" but "rename these variables" or "use a type wrapper to make confusion impossible."
+
+Report root-cause findings as separate long-term-detriment entries linked to the original short-term finding.
+
+## Output Language
+
+Write all output (finding titles, descriptions, suggestions, analysis) in the language specified by the "Output language" parameter in the agent prompt that launched you. If no language was specified, default to English. Code references (file paths, variable names, code quotes) remain in their original form.
+
 ## Output Format
 
-For each finding:
+### Findings Overview (table — MUST include)
 
-### [Finding Title]
+| # | Severity | Category | Location | Title | Confidence |
+|---|----------|----------|----------|-------|------------|
+| [F1](#f1) | Critical | short-term | file:line | Brief title | 95 |
+| [F2](#f2) | Important | long-term | file:line | Brief title | 82 |
+| ... | ... | ... | ... | ... | ... |
+
+### Finding Details
+
+For each finding, use an anchor matching the table:
+
+#### <a id="f1"></a>F1: [Finding Title]
 - **Severity**: Critical / Important / Suggestion
 - **Category**: short-term-detriment / long-term-detriment
 - **Confidence**: 0-100

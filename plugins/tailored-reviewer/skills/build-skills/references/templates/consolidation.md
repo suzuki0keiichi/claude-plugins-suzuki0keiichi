@@ -96,79 +96,101 @@ Start at 100, deduct:
 - Each Structural Root Cause finding: -3
 - **No minimum** — negative scores are valid
 
-## Short-term Report Format
+## Report Format
 
-# Short-term Review: [target name]
+**ALL section headers and prose MUST be written in the output language.** The section names below are structural references — translate them. For example, if output language is Japanese: "Score" → "スコア", "Summary" → "概要", "Critical" → "クリティカル", "Findings Overview" → "検出結果一覧", etc.
 
-## Score
+Code references (file paths, variable names, code quotes) remain in their original form.
 
-| Short-term (bugs, security) | XX | 🟢 ≥80 / 🟡 50-79 / 🔴 0-49 / ⚫ <0 |
+### Short-term Report
 
-## Summary
+```
+# [Short-term Review title in output language]: [target name]
+
+## [Score]
+
+| [Short-term (bugs, security)] | XX | 🟢 ≥80 / 🟡 50-79 / 🔴 0-49 / ⚫ <0 |
+
+## [Summary]
 - Review type, target, execution date
 - Perspectives used: N (list)
 - Critical: N, Important: N, Suggestion: N
 - Findings dropped by fact-check: N
 - Findings dropped by workspace reconciliation: N (PR reviews only)
-- **Per-perspective details**: `reviews/perspectives/{date}-{target}/`
+- Per-perspective details: `reviews/perspectives/{date}-{target}/`
 
-## Critical
-(each finding in structured format with Verification field. Never omit.
-For each finding, list ALL detecting perspectives and their confidence levels.)
+## [Findings Overview] (table — MUST include for readability)
 
-## Important
+| # | [Severity] | [Location] | [Title] | [Perspectives] | [Confidence] |
+|---|------------|------------|---------|----------------|-------------|
+| [S1](#s1) | Critical | file:line | Brief title | security, exec-flow | 95 |
+| [S2](#s2) | Important | file:line | Brief title | concurrency | 85 |
+| ... | ... | ... | ... | ... | ... |
+
+## [Finding Details]
+
+### <a id="s1"></a>S1: [Finding Title]
+(structured format with Verification field. Never omit.
+List ALL detecting perspectives and their confidence levels.)
+
+### <a id="s2"></a>S2: [Finding Title]
 (structured format — preserve finding detail, do not over-compress.
-Each finding should include: location, description, verification code, suggestion.
+Each finding: location, description, verification code, suggestion.
 Merge duplicates across perspectives but keep all perspective names.)
 
-## Suggestions
-(structured format — NOT just a one-line list. Include location and brief description.)
-
-## Fact-Check Log
+## [Fact-Check Log]
 (findings dropped or downgraded, with reason.)
 
-## Debate Notes
+## [Debate Notes]
 (only if debate occurred)
+```
 
-## Long-term Report Format
+### Long-term Report
 
-# Long-term Review: [target name]
+```
+# [Long-term Review title in output language]: [target name]
 
-## Score
+## [Score]
 
-| Long-term (maintainability) | XX | 🟢 ≥80 / 🟡 50-79 / 🔴 0-49 / ⚫ <0 |
+| [Long-term (maintainability)] | XX | 🟢 ≥80 / 🟡 50-79 / 🔴 0-49 / ⚫ <0 |
 
-## Summary
+## [Summary]
 - Review type, target, execution date
 - Perspectives used: N (list)
 - Critical: N, Important: N, Suggestion: N
 - Design critique: N
 - Structural Root Causes: N
-- **Per-perspective details**: `reviews/perspectives/{date}-{target}/`
+- Per-perspective details: `reviews/perspectives/{date}-{target}/`
 
-## Structural Root Causes of Short-term Issues
+## [Findings Overview] (table — MUST include)
+
+| # | [Severity] | [Category] | [Location] | [Title] | [Confidence] |
+|---|------------|------------|------------|---------|-------------|
+| [L1](#l1) | Critical | root-cause | file:line | Brief title | 90 |
+| [L2](#l2) | Important | design | file:line | Brief title | 75 |
+| ... | ... | ... | ... | ... | ... |
+
+Category values: root-cause, design, long-term-issue
+
+## [Structural Root Causes of Short-term Issues]
 
 For each Critical/Important finding from the short-term report, analyze WHY the issue was structurally possible. Individual bug fixes belong in the short-term report. Here, propose structural improvements to prevent the entire class of bug from recurring.
 
-(For each major short-term finding, explain the structural root cause, link to bug-patterns.md if this area is a known hotspot, and propose structural fixes that prevent the entire class of bug.)
-
-## Design Concerns
+## [Design Concerns]
 (Purpose-implementation gaps, missing considerations, alternative approach proposals)
 
-## Long-term Issues
+## [Long-term Issue Details]
 
-### Critical
+### <a id="l1"></a>L1: [Finding Title]
 (structured format)
 
-### Important
+### <a id="l2"></a>L2: [Finding Title]
 (structured format — same detail level as short-term)
 
-### Suggestions
-(structured format)
-
-## Knowledge Base References
+## [Knowledge Base References]
 (which knowledge-base entries were consulted, and by which perspectives)
 
-## Health Score Data
+## [Health Score Data]
 (if available: relevant trends for reviewed areas)
+```
 ```
