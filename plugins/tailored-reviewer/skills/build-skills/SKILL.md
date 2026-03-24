@@ -46,6 +46,7 @@ Read ALL files in knowledge-base/:
 - bug-patterns.md
 - pr-review-patterns.md
 - team-context.md
+- spec-sources.md
 
 Note confidence levels. Low-confidence entries (<0.5) should be used cautiously in generated skills.
 

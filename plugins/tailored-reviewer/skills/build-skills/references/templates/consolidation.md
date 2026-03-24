@@ -46,8 +46,12 @@ Write the entire report in the language specified by the orchestrator's `Output 
    **Long-term** (maintainability, design, strategy — goes to long-term file):
    - All findings from: code-health, strategic-alignment
    - All findings from domain perspectives
-   - All Design Critique findings (Phase 1.7)
+   - All Design Critique findings (Phase 1.7) — EXCEPT spec-conformance category (see below)
    - All Root Cause Analysis findings (regardless of source perspective)
+
+   **Spec Conformance** (from Phase 1.7 Design Critique, category: spec-conformance):
+   - Critical/Important spec-conformance findings → **short-term** (missing or wrong requirements are functional gaps, equivalent to bugs)
+   - Suggestion-level spec-conformance findings → **long-term** (minor deviations are design concerns)
 2. For each category separately:
    a. Merge findings, replacing contradicted findings with debate resolutions
    b. Deduplicate: merge findings describing the same issue from different perspectives. Keep all perspective names. Do NOT discard detail.
@@ -170,7 +174,7 @@ Merge duplicates across perspectives but keep all perspective names.)
 | [L2](#l2) | Important | design | file:line | Brief title | 75 |
 | ... | ... | ... | ... | ... | ... |
 
-Category values: root-cause, design, long-term-issue
+Category values: root-cause, design, long-term-issue, spec-conformance
 
 ## [Structural Root Causes of Short-term Issues]
 

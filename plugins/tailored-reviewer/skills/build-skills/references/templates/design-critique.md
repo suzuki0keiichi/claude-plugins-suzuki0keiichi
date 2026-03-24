@@ -45,6 +45,22 @@ What edge cases aren't handled?
 
 If Phase 1 found Critical/Important bugs, ask: why was this bug structurally possible? Look beyond the diff — the code AROUND the bug (existing naming, types, API design) may be the real problem. Check bug-patterns.md: if this area is a known hotspot, explain WHY it keeps producing bugs, not just THAT it does.
 
+## 6. Spec Conformance Check
+
+**Skip this section if `reviews/perspectives/{YYYY-MM-DD}-{target}/spec-context.md` is empty or says "No spec context available".**
+
+Read the spec context file. For each requirement, acceptance criterion, or agreed decision found in the spec:
+
+1. **Traced**: Is this requirement implemented in the diff? Cite the specific file:line where it is addressed. If the requirement is about existing behavior that should be preserved, verify it is not broken by the diff.
+2. **Faithful**: Does the implementation match the spec's intent — not just "something was done" but "the right thing was done"? Watch for subtle deviations: spec says "must validate X" but code only checks for null, not format.
+3. **Complete**: Are edge cases or error conditions mentioned in the spec handled in the implementation? Specs often describe happy path + a few exceptions — check each.
+4. **Unconsidered**: Are there spec requirements that appear unaddressed by the diff AND were not flagged by any Phase 1 perspective? These are the highest-value findings — requirements that fell through the cracks entirely.
+
+Report spec conformance gaps as findings:
+- **Severity**: Critical (spec requirement missing entirely or contradicted) or Important (partially implemented, edge case missing)
+- **Category**: spec-conformance
+- **Evidence**: Quote the specific spec requirement AND show what is missing or different in the code
+
 ## Output Format
 
 - **Severity**: Important (design issues are rarely Critical unless security-related)

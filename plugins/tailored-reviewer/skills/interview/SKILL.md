@@ -77,6 +77,21 @@ Ask these in order. For each, provide examples of what you're looking for:
    - "Which MCP servers do you have installed? (Slack MCP, Jira MCP, etc.)"
    - "This determines what I can read automatically in Phase 2."
 
+9. **Specification sources**
+   - "Where are feature specifications and design decisions recorded?"
+   - "  - Feature specs (Confluence, Notion, Google Docs, repo docs, etc.)"
+   - "  - Technical decisions (ADR, Slack channel, meeting notes, etc.)"
+   - "  - Does the location vary by area? (e.g., backend specs in Confluence, frontend in Figma)"
+   - "For each: what's the space/folder/URL pattern to find them?"
+
+10. **Library / platform / API specification sources**
+    - "For well-known libraries (React, AWS SDK, etc.), we can find official docs ourselves — no need to list those."
+    - "Are there internal libraries, company platforms, or niche external dependencies whose documentation lives somewhere specific?"
+    - "  - Internal shared libraries with their own docs"
+    - "  - Company platform APIs (internal API gateway, auth service, etc.)"
+    - "  - Less common external services with specific doc locations"
+    - "If there's nothing like this, that's fine — just say so."
+
 ### Output
 
 Write results to:
@@ -130,6 +145,13 @@ sources:
 7. **Team context** → `knowledge-base/team-context.md`
    - Infer from git log (active contributors, areas of ownership)
    - Note: much of this requires user input in Phase 3
+
+8. **Spec sources** → `knowledge-base/spec-sources.md`
+   - Compile from Phase 1 questions 5, 9, and 10
+   - Structure as a map: area/component → spec location + access method
+   - Include internal library/platform doc locations if provided
+   - If user said "nothing" for internal libs, note that (don't omit the file)
+   - This file is used at review time by the orchestrator (Step 0.7) and by each perspective's Fact Check to look up specifications and API documentation
 
 ### Staleness Detection
 

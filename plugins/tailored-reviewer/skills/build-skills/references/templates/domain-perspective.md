@@ -44,7 +44,13 @@ For each finding you are about to report, you MUST verify it:
 1. **Re-read the actual code** at the location you are about to cite. Do not report from memory.
 2. **Prove the issue exists**: find the specific line(s) that demonstrate the problem. If you cannot point to concrete code, drop the finding.
 3. **Attempt to disprove**: actively look for guards, checks, or handling elsewhere that might already address this issue (other middleware, service layer, caller code, etc.). If found, drop or downgrade the finding.
-4. **Check for false assumptions**: verify your understanding of the framework, library, or pattern being used. If unsure, note uncertainty in Confidence.
+4. **Check for false assumptions**: verify your understanding of the framework, library, or pattern being used. If you are not confident about the correct usage of an API, library, or framework:
+   - Check `knowledge-base/spec-sources.md` for documentation locations (internal libraries, company platforms, niche dependencies)
+   - If a documentation URL is known → use WebFetch to retrieve the relevant page
+   - If no URL is known but it's a public library → use WebSearch for official documentation
+   - Verify: parameter semantics, version-specific behavior changes, deprecated API usage, required initialization or teardown
+   - If the URL's domain matches an available MCP tool (e.g., Confluence, Slack), prefer the MCP tool over WebFetch for richer data
+   - If you still cannot verify after lookup, note the uncertainty in Confidence rather than guessing
 
 Only findings that survive this verification appear in your output.
 
