@@ -140,7 +140,7 @@ For each domain perspective, read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/ref
 
 Write all generated skills to `.claude/skills/{perspective-id}/SKILL.md`.
 Generate review entry point, fact-check, design-critique, debate, and consolidation skills from their respective templates, filling in the FULL perspective list (technical + domain) and project name:
-- Review entry point: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/orchestrator.md` → write to `.claude/skills/review-{project_name_slug}/SKILL.md` (where `{project_name_slug}` is the project name lowercased, spaces/special chars replaced with hyphens)
+- Review entry point: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/orchestrator.md` → write to `.claude/skills/review-{project_name_slug}/SKILL.md` (where `{project_name_slug}` is the project name lowercased, spaces/special chars replaced with hyphens). **CRITICAL**: The orchestrator template contains Steps 0 through Phase 4. Do NOT summarize or omit any steps. Every numbered step and phase must appear in the generated skill. In particular: Step 0.6 (base branch alignment), Step 0.7 (Spec Context Collection with AskUserQuestion), and Phase 4 (Cleanup) are frequently dropped by accident — verify they are present.
 - Fact Check: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/fact-check.md`
 - Design Critique: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/design-critique.md`
 - Debate: read `${CLAUDE_PLUGIN_ROOT}/skills/build-skills/references/templates/debate.md`
@@ -171,10 +171,13 @@ Before finishing, verify:
 - [ ] Skill name is `review-{project_name_slug}` (NOT `review-orchestrator`)
 - [ ] Description includes trigger phrases for the skill system
 - [ ] Lists ALL generated perspectives (8 perspectives + domain)
+- [ ] Step 0.6 fetches PR metadata (`pr-meta.json` with base branch), diff, info, and files; aligns workspace to PR base branch
+- [ ] Step 0.7 Spec Context Collection is present — auto-fetches linked tickets AND asks user via AskUserQuestion
 - [ ] Has Phase 1.5 with workspace verification AND PR diff reconciliation
 - [ ] Has Phase 1.7 Design Critique
 - [ ] Has Phase 2 Contradiction Detection
 - [ ] Has Phase 3 Consolidation dispatch
+- [ ] Has Phase 4 Cleanup — restores workspace to default_branch after review
 
 **Consolidation Completeness:**
 - [ ] Has MANDATORY File Output section at the TOP

@@ -44,11 +44,15 @@ Background subagents cannot run interactive Bash commands (permission approval i
 
 **For PR reviews:**
 1. Create the output directory: `reviews/perspectives/{YYYY-MM-DD}-{target}/`
-2. Run these commands in `workspace/`:
+2. Fetch PR metadata and diff in `workspace/`:
+   - `cd workspace && gh pr view {number} --json baseRefName,state,mergedAt --jq '{base: .baseRefName, state: .state, merged: .mergedAt}' > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-meta.json`
    - `cd workspace && gh pr diff {number} > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt`
    - `cd workspace && gh pr view {number} > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-info.txt`
    - `cd workspace && gh pr view {number} --json files --jq '.files[].path' > ../reviews/perspectives/{YYYY-MM-DD}-{target}/pr-files.txt`
-3. Verify the files are non-empty. If `gh` fails, ask the user to check authentication.
+3. **Align workspace to PR base branch**: Read `base` from `pr-meta.json`. If the workspace HEAD is not on this branch:
+   - `cd workspace && git fetch origin && git checkout {base_branch}`
+   - This ensures all file reads by perspectives reflect the correct base state (e.g., dependency versions, existing code patterns). Without this, workspace may be on a stale release branch while the PR targets the active development branch.
+4. Verify the files are non-empty. If `gh` fails, ask the user to check authentication.
 
 **For non-PR reviews:** Skip this step. Agents can Read code files directly.
 
@@ -103,7 +107,7 @@ If no review target is specified, ask the user:
 
 Launch ALL perspectives in parallel:
 {for each perspective}
-- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute against [review target]. All code is in workspace/. For PR reviews: the PR diff is at reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt, PR description at pr-info.txt, changed files list at pr-files.txt — use the Read tool to access these files. Do NOT run gh or git commands. Output language: {output_language}. Return findings in the output format specified."
+- Agent tool: name="{perspective_name}", prompt="Read .claude/skills/{perspective_id}/SKILL.md and execute against [review target]. All code is in workspace/. For PR reviews: the PR diff is at reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt, PR description at pr-info.txt, changed files list at pr-files.txt, PR metadata at pr-meta.json (contains base branch) — use the Read tool to access these files. The workspace is checked out to the PR's base branch ({base_branch}). Do NOT run gh or git commands. Output language: {output_language}. Return findings in the output format specified."
 {end for}
 
 **Save raw outputs**: Write each perspective's full output to `reviews/perspectives/{YYYY-MM-DD}-{target}/{perspective_name}.md`.
@@ -129,4 +133,9 @@ Agent tool: name="consolidation", prompt="Read .claude/skills/consolidation/SKIL
 **MANDATORY**: Two review files MUST exist after consolidation:
 - `reviews/{YYYY-MM-DD}-{type}-{target}-short-term.md`
 - `reviews/{YYYY-MM-DD}-{type}-{target}-long-term.md`
+
+### Phase 4: Cleanup
+
+Restore workspace to the project's primary development branch (from `config.md` `default_branch`):
+- `cd workspace && git checkout {default_branch}`
 ```

@@ -15,6 +15,15 @@ description: >
 
 Evaluate the change holistically after fact-checking individual findings:
 
+## 0. PR Description Context (PR reviews only)
+
+Read `pr-info.txt` thoroughly before any analysis. PR descriptions often contain:
+- Rationale for design decisions
+- Links to discussions (Slack threads, tickets, design docs) documenting consensus
+- Explicit trade-off explanations
+
+When a design decision has rationale or consensus links in the PR description, do NOT flag it as "needs documentation", "needs confirmation", or "should verify". Only flag if the rationale is actually insufficient or incorrect.
+
 ## 1. Purpose vs Implementation Gap
 
 Read the PR description/commit message. Does the implementation actually achieve the stated goal? Are there gaps between what was promised and what was delivered?

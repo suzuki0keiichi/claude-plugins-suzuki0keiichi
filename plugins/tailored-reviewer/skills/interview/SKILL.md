@@ -98,6 +98,39 @@ Write results to:
 - `config.md` — frontmatter (project_name, git_url, default_branch) + information source sections with full detail (see spec for format)
 - `knowledge-base/source-map.md` — structured map of all identified sources with access methods
 
+## Phase 1.5: Development Branch Detection
+
+**Purpose**: Some projects use a branch other than the GitHub default as their primary development branch (e.g., `develop` for active work, `main` only for releases). Using the wrong branch causes stale analysis.
+
+Run immediately after Phase 1 (once git_url is known):
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/detect-dev-branch.sh <owner/repo>
+```
+
+### Interpreting Results
+
+The script reports 3 signals. Use this decision logic:
+
+1. **If no candidate branches found** → use GitHub default branch as-is
+2. **If a candidate branch has 2+ of these indicators, recommend it:**
+   - Receives majority (>50%) of merged PRs
+   - Latest commit is >90 days newer than the default branch
+   - Is significantly ahead (>10 commits) with 0 behind
+3. **Show findings to the user** — always confirm before overriding the default:
+   - "GitHub のデフォルトブランチは `master` ですが、実際の開発ブランチは `develop` のようです（最終コミット: 2026-03-09、masterより24コミット先行）。`develop` を主ブランチとして使ってよいですか？"
+
+### Storing the Result
+
+Store the **confirmed primary development branch** as `default_branch` in `config.md` frontmatter. This is the branch that all tailored-reviewer operations (backtest, fact-check, workspace checkout) will use.
+
+If the primary branch differs from the GitHub default, also note this in config.md body:
+```markdown
+## Branch Strategy
+- GitHub default branch: master (release branch, infrequently updated)
+- Primary development branch: develop (stored as default_branch)
+```
+
 ## Phase 2: AI Self-Reading
 
 Read from sources identified in Phase 1. Use only tools available in the user's Claude Code environment (MCP servers, gh CLI, git, file system). Do NOT attempt to access tools that aren't installed.
@@ -185,13 +218,14 @@ When run on a project that already has knowledge-base files:
 ## After Interview
 
 1. If workspace/ doesn't exist: `git clone <git_url> workspace/`
-2. Create `.gitignore` if it doesn't exist (workspace/ should not be committed to the review data project):
+2. Ensure workspace is on the correct branch: `cd workspace && git checkout <default_branch from config.md>` (this matters when the primary development branch differs from the GitHub default)
+3. Create `.gitignore` if it doesn't exist (workspace/ should not be committed to the review data project):
    ```
    workspace/
    ```
-3. Write `meta/plugin-version-used.md` with current tailored-reviewer version
-4. Write `meta/last-updated.md` with current timestamps per file
-5. Write `CLAUDE.md` at the project root with environment instructions:
+4. Write `meta/plugin-version-used.md` with current tailored-reviewer version
+5. Write `meta/last-updated.md` with current timestamps per file
+6. Write `CLAUDE.md` at the project root with environment instructions:
 
 ```markdown
 # Review Data Project: {project_name}
@@ -213,4 +247,4 @@ This directory is a review data project for tailored-reviewer, NOT the project i
 - Review outputs go to `reviews/`
 ```
 
-6. Prompt user: "Knowledge base is ready. Run /build-skills to create project-specific review skills."
+7. Prompt user: "Knowledge base is ready. Run /build-skills to create project-specific review skills."

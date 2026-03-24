@@ -51,6 +51,7 @@ For each finding you are about to report, you MUST verify it:
    - Verify: parameter semantics, version-specific behavior changes, deprecated API usage, required initialization or teardown
    - If the URL's domain matches an available MCP tool (e.g., Confluence, Slack), prefer the MCP tool over WebFetch for richer data
    - If you still cannot verify after lookup, note the uncertainty in Confidence rather than guessing
+5. **Check PR description for existing justification** (PR reviews only): Before flagging a design decision as questionable or requesting documentation/confirmation, read `pr-info.txt`. If the PR description already provides rationale, links to discussions (Slack threads, tickets, design docs), or explicit consensus for the decision in question, do NOT flag it as "needs confirmation" or "needs documentation". Only flag if the provided rationale is actually insufficient or incorrect.
 
 Only findings that survive this verification appear in your output.
 

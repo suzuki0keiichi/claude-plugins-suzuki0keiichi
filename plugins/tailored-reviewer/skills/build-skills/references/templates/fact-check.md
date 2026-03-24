@@ -25,12 +25,17 @@ For EVERY finding with Severity Critical or Important:
 
 **Skip this step entirely if running in backtest mode.** In backtest mode, the workspace is intentionally set to the bug-introducing commit state, and reconciliation against the default branch would falsely drop all findings.
 
-**PR diff data location**: The orchestrator pre-fetches PR data in Step 0.5. Use the Read tool to access:
+**PR diff data location**: The orchestrator pre-fetches PR data in Step 0.6. Use the Read tool to access:
 - `reviews/perspectives/{YYYY-MM-DD}-{target}/pr-diff.txt` — full diff
 - `reviews/perspectives/{YYYY-MM-DD}-{target}/pr-info.txt` — PR description
+- `reviews/perspectives/{YYYY-MM-DD}-{target}/pr-meta.json` — PR metadata (base branch, state, merged date)
 Do NOT run `gh pr diff` or `gh pr view` — the data is already saved.
 
-**CRITICAL for normal PR reviews**: The PR diff shows the state at PR creation time. The workspace may contain the post-merge state with subsequent fixes. For each finding based on the PR diff:
+**Workspace branch context**: The orchestrator aligns the workspace to the PR's base branch in Step 0.6. This means:
+- `workspace/` reflects the base branch state (correct dependency versions, existing code patterns)
+- Perspectives that read dependency files (poetry.lock, package.json, go.mod, etc.) get the base branch versions, not a stale release branch
+
+**Reconciliation for MERGED PRs**: Check `pr-meta.json` — if `merged` is non-null, the PR is merged and the base branch includes the PR changes plus subsequent commits. For each finding:
 
 1. Read the CURRENT version of the cited file in `workspace/`
 2. Compare the specific lines cited in the finding against the current workspace code
@@ -41,6 +46,8 @@ Do NOT run `gh pr diff` or `gh pr view` — the data is already saved.
    - Note: "Partially addressed in merged version"
 5. If the issue **still exists** in the workspace:
    - Keep the finding as-is
+
+**Reconciliation for OPEN PRs**: If `merged` is null, the PR is not yet merged. The workspace (base branch) does NOT contain the PR changes. Skip diff-vs-workspace reconciliation — the PR diff is the source of truth. Still perform Step A (verify cited code locations exist in the diff).
 
 **Every PR review finding MUST survive this reconciliation step. Findings that cite code no longer present in workspace are false positives and damage review credibility.**
 

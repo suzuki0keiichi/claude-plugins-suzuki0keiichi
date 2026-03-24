@@ -37,7 +37,33 @@ Write the entire report in the language specified by the orchestrator's `Output 
 
 ## Process
 
-1. Classify each finding by source perspective — do NOT rely on the finding's self-declared category:
+1. **Short-term Eligibility Filter** (PR reviews only — apply BEFORE perspective-based classification):
+
+   Every finding must pass two gates to qualify for the short-term report. Findings that fail either gate go to long-term regardless of source perspective.
+
+   **Gate 1: Severity — does this break something if merged?**
+
+   Short-term is ONLY for "this PR causes real harm if merged":
+   - Bug: code will produce wrong results or crash
+   - Security: a vulnerability is introduced
+   - Data loss/corruption: irreversible damage occurs
+
+   "Nice to have" improvements, redundant-but-harmless code, and readability concerns → long-term, regardless of severity label.
+
+   **Gate 2: PR Causation — did THIS PR introduce or expand the issue?**
+
+   | Pattern | This PR's issue? | Example |
+   |---------|:---:|---|
+   | PR **introduced** new debt | Yes | New function with hardcoded password |
+   | PR **expanded** existing pattern (added new usage) | Yes | Applied existing `shell=True` to a new command |
+   | PR **rode on** existing debt (called existing code) | No | Added code inside an existing `@retry(catch=Exception)` function |
+   | Debt **happened to be nearby** (PR didn't touch it) | No | Adjacent code uses deprecated API |
+
+   "Rode on" vs "expanded": if `@retry` was already on the function and the PR just changed the function body → rode on (long-term). If the PR added `@retry` to a NEW function → expanded (short-term).
+
+   Findings that fail Gate 2 go to long-term as **existing issues** (still valuable to report, but not PR-blocking).
+
+2. Classify findings that passed the eligibility filter by source perspective:
 
    **Short-term** (bugs, security, correctness — goes to short-term file):
    - All findings from: execution-flow, resource-management, concurrency, security, platform-constraints, implementation-quality
@@ -48,9 +74,10 @@ Write the entire report in the language specified by the orchestrator's `Output 
    - All findings from domain perspectives
    - All Design Critique findings (Phase 1.7) — EXCEPT spec-conformance category (see below)
    - All Root Cause Analysis findings (regardless of source perspective)
+   - All findings that failed the Short-term Eligibility Filter (Gate 1 or Gate 2)
 
    **Spec Conformance** (from Phase 1.7 Design Critique, category: spec-conformance):
-   - Critical/Important spec-conformance findings → **short-term** (missing or wrong requirements are functional gaps, equivalent to bugs)
+   - Critical/Important spec-conformance findings → **short-term** (missing or wrong requirements are functional gaps, equivalent to bugs) — still subject to Gate 2
    - Suggestion-level spec-conformance findings → **long-term** (minor deviations are design concerns)
 2. For each category separately:
    a. Merge findings, replacing contradicted findings with debate resolutions
