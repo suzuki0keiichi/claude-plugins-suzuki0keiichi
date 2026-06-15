@@ -1,0 +1,328 @@
+import { pathToFileURL } from "node:url";
+import { confidenceMessage, judgeMatchConfidence } from "./confidence.ts";
+import { loadGraph, loadRequiredVectorIndex, prepareVectorSearch, searchGraph } from "./retrieval.ts";
+import { validateGraph } from "./schema.ts";
+import { describeVectorIndex } from "./vector.ts";
+
+// Score thresholds + judgeMatchConfidence/confidenceMessage now live in
+// ./confidence.ts so brief and evidence-packet share one tuned copy. Re-export
+// judgeMatchConfidence to keep brief.ts's existing import surface stable.
+export { judgeMatchConfidence };
+
+const DEFAULT_SUMMARY_CHARS = 280;
+const DEFAULT_LIMIT = 5;
+
+const CALL_EXCESSIVE = 3;
+
+type RepeatState = "fresh" | "followup" | "excessive";
+
+export async function buildGraphBrief(options: any = {}) {
+  const graphSource = options.graph ?? process.env.GRAPHRAG_VAULT_DIR;
+  const graph = options.graphData ?? await loadGraph(graphSource);
+  const nodesById = new Map((graph.nodes ?? []).map((node) => [node.id, node]));
+  const mode = options.mode ?? (options.query ? "query" : "resume");
+  const summaryChars = options.summaryChars ?? DEFAULT_SUMMARY_CHARS;
+
+  const base = {
+    generated_by: "graphrag/brief.ts",
+    mode,
+    graph: graphHealth(graph, graphSource)
+  };
+
+  if (mode === "resume") {
+    return {
+      ...base,
+      active: buildResumeBrief(graph, nodesById, {
+        limit: options.limit ?? 1,
+        summaryChars,
+        includeCandidates: options.includeCandidates ?? false
+      }),
+      usage: [
+        "Use active.primary.current_focus and active.primary.next_actions before running broad evidence retrieval.",
+        "Run graph:evidence only after choosing a concrete next action that needs source-backed context."
+      ]
+    };
+  }
+
+  if (mode === "query") {
+    if (!options.query) throw new Error("Missing --query <text> for --mode query");
+    return {
+      ...base,
+      query: await buildQueryBrief(graph, nodesById, {
+        query: options.query,
+        vaultDir: graphSource,
+        vectorPath: options.vector,
+        vectorIndex: options.vectorIndex,
+        queryVector: options.queryVector,
+        // R6 multi-query (--gist): 複数クエリベクトル。R5 graph rerank の on/off。
+        // どちらも未指定なら従来挙動 (single vector / rerank on)。
+        queryVectors: options.queryVectors,
+        graphRerank: options.graphRerank,
+        limit: options.limit ?? DEFAULT_LIMIT,
+        summaryChars,
+        relationLimit: options.relationLimit ?? 8,
+        callNumber: options.callNumber
+      }),
+      usage: [
+        "Use matches to choose the smallest relevant node set.",
+        "If query.match_confidence is 'low' or 'none', try one alternative keyword; if still no hit, switch to code/doc direct reading instead of repeating graph queries.",
+        "If query.repeat.repeat_state is 'excessive', stop graph search and switch to graph-external sources.",
+        "Escalate to graph:evidence only when the brief does not contain enough provenance."
+      ]
+    };
+  }
+
+  throw new Error(`Unknown brief mode: ${mode}`);
+}
+
+export function buildResumeBrief(graph, nodesById, options: any = {}) {
+  const investigations = (graph.nodes ?? []).filter((node) => node.type === "Investigation");
+  const active = investigations
+    .filter((node) => node.state === "active")
+    .map((node) => ({
+      ...compactNode(node, options),
+      updated_at: node.updated_at ?? node.last_updated_at ?? null,
+      current_focus: cleanScalar(node.current_focus),
+      next_actions: parseListLike(node.next_actions),
+      blockers: parseListLike(node.blockers),
+      touched_files: parseListLike(node.touched_files),
+      linked_decisions: linkedNodes(graph, nodesById, node.id, {
+        type: "Decision",
+        relations: new Set(["led_to", "has_premise"]),
+        minimal: true,
+        limit: 5
+      })
+    }))
+    .sort(compareResumeItems);
+
+  const primary = active[0] ?? null;
+
+  // 大声原則: active が 0 件でも state 無し Investigation が居れば黙って空を返さない。
+  // (state 導入前の旧データは全件 state 無しで、resume が構造的に空振りしていた)
+  const stateless = investigations.filter((node) => node.state === undefined || node.state === null);
+  const legacyNotice = active.length === 0 && stateless.length > 0
+    ? {
+        legacy_stateless_investigations: stateless.length,
+        legacy_note:
+          `active な Investigation は 0 件だが、state 無しの Investigation が ${stateless.length} 件ある。` +
+          "state 無しは現役/終結を判別できない旧データ。現役のものに state:\"active\"、終わったものに state:\"closed\" を付与せよ。"
+      }
+    : {};
+
+  return {
+    primary,
+    candidates: options.includeCandidates ? active.slice(0, options.limit ?? 3) : undefined,
+    active_count: active.length,
+    ...legacyNotice
+  };
+}
+
+export async function buildQueryBrief(graph, nodesById, options: any = {}) {
+  // 呼び出し側 (ask の world ヒント等) が索引とクエリ embedding を済ませている時は
+  // 共用する (同じ問いを 2 回 embedding しない)。無ければ従来どおりここで行う。
+  const vectorIndex = options.vectorIndex
+    ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath);
+  // R6: queryVectors (複数) が来ていれば最優先 (gist + 質問の両埋め込み)。
+  // 次に従来の単一 queryVector、無ければここで embed する。
+  let vectorSearch: any;
+  if (Array.isArray(options.queryVectors) && options.queryVectors.length > 0) {
+    vectorSearch = { vectorIndex, queryVectors: options.queryVectors };
+  } else if (options.queryVector !== undefined && options.queryVector !== null) {
+    vectorSearch = { vectorIndex, queryVector: options.queryVector };
+  } else {
+    vectorSearch = await prepareVectorSearch(options.query, { vectorIndex });
+  }
+  const matches = searchGraph(graph, options.query, {
+    limit: options.limit,
+    // R5 graph rerank: 既定 on。--graph-rerank off で false を渡すと無効化。
+    ...(options.graphRerank !== undefined ? { graphRerank: options.graphRerank } : {}),
+    ...vectorSearch
+  });
+  const compactMatches = matches.map((match, index) => ({
+    rank: index + 1,
+    score: match.score,
+    reasons: compactReasons(match.reasons),
+    // 終端 state による減点注記 (searchGraph 付与) はそのまま透過する
+    ...(match.state_note ? { state_note: match.state_note } : {}),
+    node: compactNode(match.node, options),
+    relations: compactRelations(graph, nodesById, match.node.id, {
+      limit: options.relationLimit,
+      summaryChars: options.summaryChars
+    })
+  }));
+  const matchConfidence = judgeMatchConfidence(compactMatches[0]);
+
+  return {
+    text: options.query,
+    vector: describeVectorIndex(vectorIndex),
+    match_confidence: matchConfidence,
+    confidence_message: confidenceMessage(matchConfidence),
+    repeat: buildRepeatGuidance(options.callNumber),
+    matches: compactMatches
+  };
+}
+
+export function buildRepeatGuidance(callNumber: number | undefined): { repeat_state: RepeatState; message: string | null } {
+  const n = Number(callNumber);
+  if (!Number.isFinite(n) || n <= 1) {
+    return { repeat_state: "fresh", message: null };
+  }
+  if (n < CALL_EXCESSIVE) {
+    return { repeat_state: "followup", message: null };
+  }
+  return {
+    repeat_state: "excessive",
+    message: `Same-focus query call #${n}. Graph likely does not cover this area. Stop repeating graph queries and switch to graph-external sources (code/doc direct reading).`
+  };
+}
+
+export function graphHealth(graph, graphSource) {
+  const failures = validateGraph(graph);
+  return {
+    source: graphSource,
+    loaded_from: graph.source ?? null,
+    nodes: graph.nodes?.length ?? 0,
+    edges: graph.edges?.length ?? 0,
+    failures_count: failures.length,
+    failures_sample: failures.slice(0, 5)
+  };
+}
+
+function compactNode(node, options: any = {}) {
+  return {
+    id: node.id,
+    type: node.type,
+    title: node.title ?? null,
+    summary: truncate(node.summary, options.summaryChars ?? DEFAULT_SUMMARY_CHARS),
+    path: node.path ?? null,
+    state: node.state ?? null
+  };
+}
+
+function linkedNodes(graph, nodesById, nodeId, options: any = {}) {
+  const relations = options.relations ?? new Set();
+  const linked = [];
+  for (const edge of graph.edges ?? []) {
+    if (relations.size > 0 && !relations.has(edge.type)) continue;
+    if (edge.from !== nodeId && edge.to !== nodeId) continue;
+    const otherId = edge.from === nodeId ? edge.to : edge.from;
+    const other = nodesById.get(otherId);
+    if (!other || (options.type && other.type !== options.type)) continue;
+    linked.push({
+      relation: edge.type,
+      direction: edge.from === nodeId ? "out" : "in",
+      node: options.minimal ? minimalNode(other) : compactNode(other, options)
+    });
+  }
+  return linked.slice(0, options.limit ?? 5);
+}
+
+function minimalNode(node) {
+  return {
+    id: node.id,
+    type: node.type,
+    title: node.title ?? null,
+    state: node.state ?? null
+  };
+}
+
+function compactRelations(graph, nodesById, nodeId, options: any = {}) {
+  const relations = [];
+  for (const edge of graph.edges ?? []) {
+    if (edge.from !== nodeId && edge.to !== nodeId) continue;
+    const otherId = edge.from === nodeId ? edge.to : edge.from;
+    const other = nodesById.get(otherId);
+    if (!other) continue;
+    relations.push({
+      relation: edge.type,
+      direction: edge.from === nodeId ? "out" : "in",
+      node: compactNode(other, options)
+    });
+  }
+  return relations.slice(0, options.limit ?? 8);
+}
+
+function compactReasons(reasons = []) {
+  return reasons.filter((reason) =>
+    reason.startsWith("alias") || reason.startsWith("vector:") || reason.startsWith("ngram:") ||
+    reason.startsWith("state:")
+  );
+}
+
+function compareResumeItems(left, right) {
+  const leftTime = Date.parse(left.updated_at ?? "");
+  const rightTime = Date.parse(right.updated_at ?? "");
+  const leftSortable = Number.isNaN(leftTime) ? 0 : leftTime;
+  const rightSortable = Number.isNaN(rightTime) ? 0 : rightTime;
+  return rightSortable - leftSortable || left.id.localeCompare(right.id);
+}
+
+function parseListLike(value) {
+  if (Array.isArray(value)) return value.map(cleanScalar).filter(Boolean);
+  const text = cleanScalar(value);
+  if (!text) return [];
+  const bracketed = text.match(/^\[(.*)\]$/s)?.[1] ?? text;
+  return bracketed
+    .split(/\s*,\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cleanScalar(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function truncate(value, maxChars) {
+  if (typeof value !== "string") return null;
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function parseArgs(argv) {
+  const parsed: any = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg?.startsWith("--")) continue;
+    const key = arg.slice(2);
+    const value = argv[index + 1];
+    if (value && !value.startsWith("--")) {
+      parsed[key] = value;
+      index += 1;
+    } else {
+      parsed[key] = true;
+    }
+  }
+
+  return {
+    mode: typeof parsed.mode === "string" ? parsed.mode : undefined,
+    query: typeof parsed.query === "string" ? parsed.query : undefined,
+    graph: typeof parsed.graph === "string" ? parsed.graph : undefined,
+    graphName: typeof parsed.graphName === "string" ? parsed.graphName : undefined,
+    host: typeof parsed.host === "string" ? parsed.host : undefined,
+    port: typeof parsed.port === "string" && Number.isFinite(Number(parsed.port)) ? Number(parsed.port) : undefined,
+    password: typeof parsed.password === "string" ? parsed.password : undefined,
+    vector: typeof parsed.vector === "string" ? parsed.vector : undefined,
+    limit: typeof parsed.limit === "string" ? Number(parsed.limit) : undefined,
+    relationLimit: typeof parsed["relation-limit"] === "string" ? Number(parsed["relation-limit"]) : undefined,
+    summaryChars: typeof parsed["summary-chars"] === "string" ? Number(parsed["summary-chars"]) : undefined,
+    includeCandidates: Boolean(parsed["include-candidates"]),
+    callNumber: typeof parsed["call-number"] === "string" && Number.isFinite(Number(parsed["call-number"]))
+      ? Number(parsed["call-number"])
+      : undefined
+  };
+}
+
+export async function main(argv: string[] = process.argv.slice(2)) {
+  const brief = await buildGraphBrief(parseArgs(argv));
+  console.log(JSON.stringify(brief, null, 2));
+}
+
+if (isMainModule(import.meta.url)) {
+  await main();
+}
+
+function isMainModule(url) {
+  if (!process.argv[1]) return false;
+  const entryUrl = pathToFileURL(process.argv[1]).href;
+  return entryUrl === url || entryUrl.replace(/\.mjs$/, ".ts") === url;
+}

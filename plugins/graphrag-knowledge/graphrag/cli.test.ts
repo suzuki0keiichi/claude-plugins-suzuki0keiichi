@@ -1,0 +1,47 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { listKnownVerbs, isHeadlineVerb, isPrimitiveVerb } from "./cli.ts";
+
+test("cli has expected primitive verbs", () => {
+  const expected = [
+    "brief", "search", "evidence", "index", "vector-index",
+    "vault-build", "vault-import",
+    "concern-suggest", "edge-suggest-policy", "carving-check",
+    "branch-merge", "world-refresh",
+    "carving-allow", "harvest-history", "staleness-check"
+  ];
+  for (const v of expected) {
+    assert.ok(isPrimitiveVerb(v), `expected primitive: ${v}`);
+  }
+});
+
+test("cli has no FalkorDB verbs after 作業C (removed)", () => {
+  for (const v of ["mutate", "falkor-sync", "falkor-export", "list", "drop", "branch", "worktree-drop"]) {
+    assert.equal(isPrimitiveVerb(v), false, `${v} should be removed`);
+    assert.equal(isHeadlineVerb(v), false, `${v} should be removed`);
+  }
+});
+
+test("cli has expected headline verbs", () => {
+  const expected = [
+    "ask", "carve", "commit-mutation",
+    "add-decision", "add-ok", "add-risk", "add-constraint", "add-goal",
+    "add-investigation", "add-rejected-option",
+    "inspect"
+  ];
+  for (const v of expected) {
+    assert.ok(isHeadlineVerb(v), `expected headline: ${v}`);
+  }
+});
+
+test("listKnownVerbs returns all 26 verbs (15 primitive + 11 headline)", () => {
+  const all = listKnownVerbs();
+  assert.equal(all.length, 26);
+});
+
+test("isHeadlineVerb / isPrimitiveVerb are disjoint", () => {
+  for (const v of listKnownVerbs()) {
+    if (isHeadlineVerb(v)) assert.equal(isPrimitiveVerb(v), false, `${v} double-classified`);
+    else assert.ok(isPrimitiveVerb(v), `${v} not classified`);
+  }
+});

@@ -1,0 +1,3750 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>graphrag-skill — システムの知識を「掘れる地層」にする</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper: #f7f3ea;
+        --paper-2: #f0eadc;
+        --paper-3: #e9e1cf;
+        --ink: #33302a;
+        --ink-soft: #5f594d;
+        --ink-faint: #8b8374;
+        --line: #dcd3bf;
+        --line-strong: #c7bca3;
+        --moss: #5e7355;
+        --moss-soft: #e3e8db;
+        --terra: #b05c42;
+        --terra-soft: #f2e0d7;
+        --ochre: #a8862f;
+        --ochre-soft: #f0e6c8;
+        --slate: #54708a;
+        --slate-soft: #dee5ea;
+        --plum: #7d5e6e;
+        --plum-soft: #eadee4;
+        --code-bg: #2e2b25;
+        --code-ink: #e8e2d2;
+        --radius: 10px;
+        --maxw: 1060px;
+        --serif: "Zen Old Mincho", "Hiragino Mincho ProN", serif;
+        --sans: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", sans-serif;
+        --mono: "IBM Plex Mono", "Menlo", monospace;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.9;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* 紙の質感 */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+      }
+      main,
+      header.site,
+      footer.site {
+        position: relative;
+        z-index: 1;
+      }
+
+      a {
+        color: var(--terra);
+        text-decoration: none;
+        border-bottom: 1px solid
+          color-mix(in srgb, var(--terra) 35%, transparent);
+      }
+      a:hover {
+        border-bottom-color: var(--terra);
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        background: var(--paper-3);
+        padding: 0.1em 0.4em;
+        border-radius: 4px;
+        color: var(--ink);
+      }
+      strong {
+        font-weight: 700;
+      }
+
+      /* ───────── header / nav ───────── */
+      header.site {
+        border-bottom: 1px solid var(--line);
+        background: color-mix(in srgb, var(--paper) 88%, white);
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(6px);
+      }
+      .nav {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 10px 24px;
+        display: flex;
+        align-items: baseline;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .nav .brand {
+        font-family: var(--mono);
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--ink);
+      }
+      .nav .brand .v {
+        color: var(--ink-faint);
+        font-weight: 400;
+      }
+      .nav ul {
+        list-style: none;
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-left: auto;
+      }
+      .nav ul a {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+        border: none;
+        letter-spacing: 0.02em;
+      }
+      .nav ul a:hover {
+        color: var(--terra);
+      }
+      .nav ul a .no {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--ink-faint);
+        margin-right: 3px;
+      }
+
+      /* ───────── hero ───────── */
+      .hero {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 84px 24px 56px;
+        position: relative;
+        overflow: hidden;
+      }
+      .hero .kicker {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        letter-spacing: 0.18em;
+        color: var(--moss);
+        text-transform: uppercase;
+        margin-bottom: 22px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .hero .kicker::before {
+        content: "";
+        width: 34px;
+        height: 1px;
+        background: var(--moss);
+      }
+      h1 {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: clamp(34px, 5.4vw, 56px);
+        line-height: 1.42;
+        letter-spacing: 0.01em;
+        max-width: 21em;
+      }
+      h1 .em {
+        background: linear-gradient(transparent 68%, var(--ochre-soft) 68%);
+        padding: 0 0.06em;
+      }
+      .hero .lead {
+        margin-top: 30px;
+        max-width: 44em;
+        color: var(--ink-soft);
+        font-size: 16.5px;
+      }
+      .hero .lead b {
+        color: var(--ink);
+      }
+      .hero-meta {
+        margin-top: 36px;
+        display: flex;
+        gap: 0;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .hero-meta div {
+        padding: 14px 26px 14px 0;
+        margin-right: 26px;
+        font-size: 13px;
+        color: var(--ink-soft);
+        border-right: 1px solid var(--line);
+      }
+      .hero-meta div:last-child {
+        border-right: none;
+      }
+      .hero-meta .k {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        color: var(--ink-faint);
+        display: block;
+        text-transform: uppercase;
+      }
+      .hero-meta .val {
+        font-weight: 700;
+        color: var(--ink);
+      }
+
+      /* hero 背景の等高線風装飾 */
+      .hero svg.contour {
+        position: absolute;
+        right: -60px;
+        top: 20px;
+        width: 420px;
+        opacity: 0.5;
+        pointer-events: none;
+      }
+
+      /* ───────── section 共通 ───────── */
+      section {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 72px 24px 8px;
+      }
+      .sec-head {
+        display: flex;
+        align-items: baseline;
+        gap: 18px;
+        margin-bottom: 8px;
+      }
+      .sec-no {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--paper);
+        background: var(--ink);
+        padding: 3px 10px;
+        border-radius: 3px;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
+      }
+      h2 {
+        font-family: var(--serif);
+        font-size: clamp(24px, 3.2vw, 32px);
+        font-weight: 700;
+        line-height: 1.5;
+      }
+      .sec-sub {
+        color: var(--ink-faint);
+        font-size: 13.5px;
+        margin: 6px 0 34px;
+        padding-left: 2px;
+      }
+      h3 {
+        font-family: var(--serif);
+        font-size: 20px;
+        font-weight: 700;
+        margin: 44px 0 14px;
+      }
+      p.body {
+        max-width: 46em;
+        color: var(--ink-soft);
+        margin-bottom: 18px;
+      }
+      p.body b,
+      p.body strong {
+        color: var(--ink);
+      }
+      .fineprint {
+        font-size: 12.5px;
+        color: var(--ink-faint);
+        border-left: 3px solid var(--line-strong);
+        padding: 8px 18px;
+        margin: 20px 0;
+        line-height: 1.9;
+        max-width: 52em;
+      }
+      .fineprint b {
+        color: var(--ink-soft);
+      }
+
+      /* 知的伝統 → design constraint */
+      .trad {
+        list-style: none;
+        margin: 24px 0 28px;
+        border-top: 1px solid var(--line);
+        max-width: 56em;
+      }
+      .trad li {
+        display: grid;
+        grid-template-columns: 230px 1fr;
+        gap: 18px;
+        padding: 13px 4px;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+        align-items: baseline;
+      }
+      .trad .src {
+        font-weight: 700;
+        color: var(--ink);
+        font-size: 13px;
+        font-family: var(--serif);
+      }
+      .trad .src small {
+        display: block;
+        font-weight: 400;
+        color: var(--ink-faint);
+        font-size: 11px;
+        font-family: var(--sans);
+      }
+      .trad .to {
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .trad .to b {
+        color: var(--ink);
+      }
+      @media (max-width: 700px) {
+        .trad li {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+      }
+
+      /* reveal */
+      .rv {
+        opacity: 0;
+        transform: translateY(14px);
+        transition:
+          opacity 0.7s ease,
+          transform 0.7s ease;
+      }
+      .rv.on {
+        opacity: 1;
+        transform: none;
+      }
+
+      /* ───────── 課題カード (§1) ───────── */
+      .pain-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+        margin: 30px 0 10px;
+      }
+      .pain {
+        background: var(--paper-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 22px 22px 18px;
+        position: relative;
+      }
+      .pain .ico {
+        font-size: 20px;
+        margin-bottom: 10px;
+        display: block;
+      }
+      .pain h4 {
+        font-size: 15px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .pain p {
+        font-size: 13.5px;
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .pain::after {
+        content: "";
+        position: absolute;
+        left: 22px;
+        right: 22px;
+        bottom: 0;
+        height: 3px;
+        border-radius: 3px 3px 0 0;
+        background: var(--line-strong);
+      }
+      .pain.p1::after {
+        background: var(--terra);
+      }
+      .pain.p2::after {
+        background: var(--ochre);
+      }
+      .pain.p3::after {
+        background: var(--slate);
+      }
+      .pain.p4::after {
+        background: var(--plum);
+      }
+
+      /* 進化の系譜 */
+      .evo {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        margin: 30px 0 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: #fcfaf4;
+      }
+      .evo .st {
+        padding: 20px 20px 18px;
+        border-right: 1px solid var(--line);
+        position: relative;
+      }
+      .evo .st:last-child {
+        border-right: none;
+      }
+      .evo .era {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        color: var(--ink-faint);
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .evo h5 {
+        font-family: var(--serif);
+        font-size: 15.5px;
+        font-weight: 700;
+        margin: 5px 0 7px;
+      }
+      .evo p {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+        line-height: 1.75;
+      }
+      .evo .lim {
+        margin-top: 11px;
+        font-size: 11.5px;
+        color: #9a5b3f;
+        line-height: 1.7;
+        padding-top: 9px;
+        border-top: 1px dashed var(--line);
+      }
+      .evo .lim b {
+        color: #8a4631;
+        font-weight: 700;
+      }
+      .evo .st::after {
+        content: "→";
+        position: absolute;
+        right: -9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--ink-faint);
+        background: var(--paper);
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        font-size: 11px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2;
+        border: 1px solid var(--line);
+      }
+      .evo .st:last-child::after {
+        display: none;
+      }
+      .evo .st.ans {
+        background: color-mix(in srgb, var(--moss-soft) 55%, white);
+      }
+      .evo .st.ans .era {
+        color: var(--moss);
+      }
+      .evo .st.ans .lim {
+        color: #46583e;
+        border-top-color: #c9d4bd;
+      }
+      .evo .st.ans .lim b {
+        color: #3c4c35;
+      }
+      @media (max-width: 880px) {
+        .evo {
+          grid-template-columns: 1fr 1fr;
+        }
+        .evo .st:nth-child(2)::after {
+          display: none;
+        }
+        .evo .st:nth-child(-n + 2) {
+          border-bottom: 1px solid var(--line);
+        }
+      }
+      @media (max-width: 560px) {
+        .evo {
+          grid-template-columns: 1fr;
+        }
+        .evo .st {
+          border-right: none;
+          border-bottom: 1px solid var(--line);
+        }
+        .evo .st::after {
+          display: none;
+        }
+        .evo .st:last-child {
+          border-bottom: none;
+        }
+      }
+
+      /* コスト判断 */
+      .cost {
+        margin: 38px 0 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fcfaf4;
+        padding: 26px 28px 22px;
+      }
+      .cost h4 {
+        font-family: var(--serif);
+        font-size: 17px;
+        font-weight: 700;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .cost h4 .b {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        color: var(--paper);
+        background: var(--terra);
+        padding: 2px 9px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        flex-shrink: 0;
+      }
+      .cost p {
+        font-size: 13.5px;
+        color: var(--ink-soft);
+        line-height: 1.85;
+        max-width: 46em;
+      }
+      .cost p b {
+        color: var(--ink);
+      }
+      .bn {
+        margin: 20px 0 6px;
+      }
+      .bn-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin: 9px 0;
+      }
+      .bn-label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-faint);
+        width: 10em;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      .bn-bar {
+        display: flex;
+        flex: 1;
+        height: 32px;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+      }
+      .bn-seg {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--ink-soft);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .bn-seg.s1 {
+        background: var(--paper-3);
+      }
+      .bn-seg.s2 {
+        background: var(--slate-soft);
+      }
+      .bn-seg.s3 {
+        background: var(--terra-soft);
+      }
+      .bn-seg.hot {
+        background: #edcdbf;
+        color: #8a4631;
+        font-weight: 600;
+      }
+      .bn-cap {
+        font-size: 12px;
+        color: var(--ink-faint);
+        margin-top: 10px;
+        line-height: 1.8;
+      }
+      @media (max-width: 560px) {
+        .bn-label {
+          width: 6.5em;
+        }
+      }
+
+      /* 対比表 */
+      .vs {
+        margin: 36px 0 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        overflow-x: auto;
+        background: var(--paper-2);
+      }
+      .vs table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+        min-width: 700px;
+      }
+      .vs th {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-align: left;
+        padding: 12px 18px;
+        color: var(--ink-faint);
+        border-bottom: 1px solid var(--line);
+        font-weight: 600;
+      }
+      .vs th.win {
+        color: var(--moss);
+      }
+      .vs td {
+        padding: 11px 18px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        color: var(--ink-soft);
+        line-height: 1.7;
+      }
+      .vs tr:last-child td {
+        border-bottom: none;
+      }
+      .vs td:first-child {
+        width: 7.5em;
+        color: var(--ink);
+        font-weight: 700;
+        font-size: 12.5px;
+        background: color-mix(in srgb, var(--paper-3) 55%, transparent);
+      }
+      .vs td.win {
+        background: color-mix(in srgb, var(--moss-soft) 45%, transparent);
+        color: var(--ink);
+      }
+
+      /* ───────── 原則 (§2) ───────── */
+      .princ {
+        counter-reset: pr;
+        margin: 28px 0 10px;
+        display: grid;
+        gap: 0;
+        border-top: 1px solid var(--line);
+      }
+      .princ li {
+        list-style: none;
+        counter-increment: pr;
+        display: grid;
+        grid-template-columns: 64px 240px 1fr;
+        gap: 18px;
+        padding: 22px 4px;
+        border-bottom: 1px solid var(--line);
+        align-items: baseline;
+      }
+      .princ li::before {
+        content: "原則 " counter(pr);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: var(--moss);
+        font-weight: 600;
+      }
+      .princ .t {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: 16.5px;
+        line-height: 1.6;
+      }
+      .princ .d {
+        font-size: 13.5px;
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .princ .d code {
+        font-size: 0.92em;
+      }
+      @media (max-width: 760px) {
+        .princ li {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+      }
+
+      /* ───────── 全体像 (§3) ───────── */
+      .flow-wrap {
+        margin: 34px 0 14px;
+        background: var(--paper-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 30px 18px 22px;
+        overflow-x: auto;
+      }
+      .flow-wrap svg {
+        display: block;
+        margin: 0 auto;
+        min-width: 660px;
+        max-width: 860px;
+        width: 100%;
+      }
+      .flow-cap {
+        font-size: 12.5px;
+        color: var(--ink-faint);
+        text-align: center;
+        margin-top: 14px;
+        line-height: 1.8;
+      }
+
+      /* ───────── ノード型 (§4) ───────── */
+      .legend {
+        display: flex;
+        gap: 22px;
+        flex-wrap: wrap;
+        margin: 26px 0 26px;
+        font-size: 12.5px;
+        color: var(--ink-soft);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .legend i {
+        width: 11px;
+        height: 11px;
+        border-radius: 3px;
+        display: inline-block;
+      }
+      .node-group {
+        margin: 34px 0;
+      }
+      .node-group .gh {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 16px;
+      }
+      .node-group .gh h4 {
+        font-family: var(--serif);
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .node-group .gh .cnt {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--ink-faint);
+      }
+      .node-group .gh .desc {
+        font-size: 13px;
+        color: var(--ink-soft);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+        gap: 14px;
+      }
+      .ncard {
+        background: #fcfaf4;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px 18px 16px;
+        position: relative;
+        overflow: hidden;
+        transition:
+          transform 0.25s ease,
+          box-shadow 0.25s ease;
+      }
+      .ncard:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 26px -14px rgba(70, 60, 40, 0.35);
+      }
+      .ncard::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+      }
+      .ncard.c-file::before {
+        background: var(--slate);
+      }
+      .ncard.c-know::before {
+        background: var(--terra);
+      }
+      .ncard.c-cross::before {
+        background: var(--moss);
+      }
+      .ncard .ty {
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+      }
+      .ncard .ja {
+        font-size: 12px;
+        color: var(--ink-faint);
+        margin-left: 8px;
+      }
+      .ncard .alias {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--ink-faint);
+        background: var(--paper-3);
+        border-radius: 3px;
+        padding: 1px 6px;
+        margin-left: 6px;
+        vertical-align: 1px;
+      }
+      .ncard p {
+        font-size: 13px;
+        color: var(--ink-soft);
+        line-height: 1.75;
+        margin-top: 9px;
+      }
+      .ncard p b {
+        color: var(--ink);
+      }
+
+      /* 地質断面図 */
+      .geo-wrap {
+        margin: 40px 0 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, #fbf8f0 0%, var(--paper-2) 100%);
+        padding: 34px 18px 24px;
+        overflow-x: auto;
+      }
+      .geo-wrap svg {
+        display: block;
+        margin: 0 auto;
+        min-width: 640px;
+        max-width: 820px;
+        width: 100%;
+      }
+
+      /* ───────── エッジ (§5) ───────── */
+      .edge-groups {
+        display: grid;
+        gap: 18px;
+        margin: 30px 0 10px;
+      }
+      .eg {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fcfaf4;
+        overflow: hidden;
+      }
+      .eg .eg-h {
+        padding: 13px 20px;
+        background: var(--paper-2);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .eg .eg-h h4 {
+        font-family: var(--serif);
+        font-size: 15.5px;
+        font-weight: 700;
+      }
+      .eg .eg-h span {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+      }
+      .eg ul {
+        list-style: none;
+      }
+      .eg li {
+        display: grid;
+        grid-template-columns: 230px 1fr;
+        gap: 14px;
+        align-items: center;
+        padding: 11px 20px;
+        border-bottom: 1px solid
+          color-mix(in srgb, var(--line) 55%, transparent);
+        font-size: 13px;
+      }
+      .eg li:last-child {
+        border-bottom: none;
+      }
+      .eg .en {
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--ink);
+      }
+      .eg .pair {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--ink-faint);
+      }
+      .chip {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 2px 9px;
+        border-radius: 99px;
+        white-space: nowrap;
+        border: 1px solid transparent;
+      }
+      .chip.k {
+        background: var(--terra-soft);
+        color: #8a4631;
+        border-color: #e3c4b6;
+      }
+      .chip.f {
+        background: var(--slate-soft);
+        color: #3d556c;
+        border-color: #c2cfda;
+      }
+      .chip.x {
+        background: var(--moss-soft);
+        color: #46583e;
+        border-color: #c9d4bd;
+      }
+      .chip.g {
+        background: var(--ochre-soft);
+        color: #7a6122;
+        border-color: #dfd0a0;
+      }
+      .arrow {
+        color: var(--ink-faint);
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+      .eg .note {
+        font-size: 12px;
+        color: var(--ink-faint);
+        grid-column: 1 / -1;
+        margin-top: -4px;
+        line-height: 1.7;
+      }
+      @media (max-width: 700px) {
+        .eg li {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+      }
+
+      /* ───────── 読み方 (§6) ───────── */
+      .term {
+        background: var(--code-bg);
+        color: var(--code-ink);
+        border-radius: var(--radius);
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.85;
+        padding: 18px 22px;
+        margin: 24px 0;
+        overflow-x: auto;
+        box-shadow: 0 14px 34px -20px rgba(46, 43, 37, 0.55);
+      }
+      .term .dim {
+        color: #8f887a;
+      }
+      .term .grn {
+        color: #a8c08c;
+      }
+      .term .yel {
+        color: #d9bc7a;
+      }
+      .term .red {
+        color: #d49080;
+      }
+      .term .cy {
+        color: #92b4c8;
+      }
+      .ladder {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+        margin: 30px 0 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .ladder div {
+        padding: 18px 20px;
+        background: #fcfaf4;
+        border-right: 1px solid var(--line);
+        position: relative;
+      }
+      .ladder div:last-child {
+        border-right: none;
+      }
+      .ladder .st {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        color: var(--moss);
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .ladder h5 {
+        font-family: var(--mono);
+        font-size: 15px;
+        margin: 4px 0 6px;
+      }
+      .ladder p {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+        line-height: 1.75;
+      }
+      .ladder div::after {
+        content: "→";
+        position: absolute;
+        right: -9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--ink-faint);
+        background: var(--paper);
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        font-size: 11px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2;
+        border: 1px solid var(--line);
+      }
+      .ladder div:last-child::after {
+        display: none;
+      }
+      @media (max-width: 700px) {
+        .ladder {
+          grid-template-columns: 1fr;
+        }
+        .ladder div {
+          border-right: none;
+          border-bottom: 1px solid var(--line);
+        }
+        .ladder div::after {
+          display: none;
+        }
+      }
+      .stop-rules {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 14px;
+        margin: 24px 0;
+      }
+      .stop {
+        background: var(--paper-2);
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--ochre);
+        border-radius: 8px;
+        padding: 16px 18px;
+        font-size: 13px;
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .stop b {
+        color: var(--ink);
+      }
+      .stop code {
+        background: #fff;
+      }
+
+      /* ───────── Obsidian (§7) ───────── */
+      .note-anatomy {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        gap: 24px;
+        margin: 30px 0 10px;
+        align-items: start;
+      }
+      @media (max-width: 880px) {
+        .note-anatomy {
+          grid-template-columns: 1fr;
+        }
+      }
+      .obs-note {
+        background: #fcfaf4;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        box-shadow: 0 18px 40px -24px rgba(70, 60, 40, 0.4);
+        overflow: hidden;
+        font-size: 12.5px;
+      }
+      .obs-note .bar {
+        background: var(--paper-3);
+        padding: 8px 16px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-soft);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      .obs-note .bar i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--line-strong);
+        display: inline-block;
+      }
+      .obs-note pre {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.8;
+        padding: 16px 18px;
+        overflow-x: auto;
+        color: var(--ink-soft);
+        white-space: pre;
+      }
+      .obs-note .fm {
+        color: #6e7f5c;
+      }
+      .obs-note .key {
+        color: #54708a;
+      }
+      .obs-note .str {
+        color: #9a5b3f;
+      }
+      .obs-note .mark {
+        color: #a09780;
+        font-style: italic;
+      }
+      .obs-note .wl {
+        color: #7d5e6e;
+        font-weight: 600;
+      }
+      .obs-note .hd {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .tag-pin {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--paper);
+        font-size: 10.5px;
+        font-family: var(--mono);
+        flex-shrink: 0;
+        margin-right: 10px;
+        font-weight: 600;
+      }
+      .anno {
+        list-style: none;
+        display: grid;
+        gap: 14px;
+      }
+      .anno li {
+        display: flex;
+        align-items: flex-start;
+        font-size: 13.5px;
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .anno b {
+        color: var(--ink);
+      }
+      .obs-points {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 14px;
+        margin: 30px 0 8px;
+      }
+      .op {
+        background: var(--paper-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px 20px;
+      }
+      .op .t {
+        font-weight: 700;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 8px;
+      }
+      .op .t .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--plum);
+        flex-shrink: 0;
+      }
+      .op p {
+        font-size: 13px;
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .warn {
+        margin: 28px 0;
+        border: 1px solid #e0c9a6;
+        background: #f7eedc;
+        border-radius: var(--radius);
+        padding: 18px 22px;
+        font-size: 13.5px;
+        color: #6e5a33;
+        line-height: 1.85;
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+      }
+      .warn .wi {
+        font-size: 17px;
+        line-height: 1.5;
+      }
+      .warn b {
+        color: #54451f;
+      }
+
+      /* ───────── 書き方 (§8) ───────── */
+      .keep-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin: 28px 0 8px;
+      }
+      @media (max-width: 700px) {
+        .keep-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .keep {
+        border-radius: var(--radius);
+        padding: 20px 22px;
+        border: 1px solid var(--line);
+      }
+      .keep.yes {
+        background: color-mix(in srgb, var(--moss-soft) 55%, white);
+      }
+      .keep.no {
+        background: var(--paper-2);
+      }
+      .keep h5 {
+        font-family: var(--serif);
+        font-size: 15.5px;
+        font-weight: 700;
+        margin-bottom: 10px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .keep ul {
+        list-style: none;
+        display: grid;
+        gap: 7px;
+      }
+      .keep li {
+        font-size: 13px;
+        color: var(--ink-soft);
+        padding-left: 1.3em;
+        position: relative;
+        line-height: 1.75;
+      }
+      .keep.yes li::before {
+        content: "●";
+        position: absolute;
+        left: 0;
+        font-size: 8px;
+        top: 0.62em;
+        color: var(--moss);
+      }
+      .keep.no li::before {
+        content: "●";
+        position: absolute;
+        left: 0;
+        font-size: 8px;
+        top: 0.62em;
+        color: var(--ink-faint);
+      }
+      .pipeline {
+        margin: 26px 0;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        flex-wrap: wrap;
+        row-gap: 10px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+      .pipeline .pstep {
+        background: #fcfaf4;
+        border: 1px solid var(--line-strong);
+        padding: 7px 13px;
+        border-radius: 6px;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      .pipeline .psep {
+        color: var(--ink-faint);
+        padding: 0 8px;
+      }
+
+      /* ───────── 姉妹スキル ───────── */
+      .sis {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 14px;
+        margin: 28px 0 8px;
+      }
+      .sis a {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px 20px;
+        background: #fcfaf4;
+        color: var(--ink);
+        display: block;
+        transition:
+          transform 0.25s ease,
+          box-shadow 0.25s ease;
+      }
+      .sis a:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 26px -14px rgba(70, 60, 40, 0.3);
+      }
+      .sis .sn {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--terra);
+      }
+      .sis p {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+        margin-top: 7px;
+        line-height: 1.75;
+      }
+
+      /* ───────── footer ───────── */
+      footer.site {
+        margin-top: 90px;
+        border-top: 1px solid var(--line);
+        background: var(--paper-2);
+      }
+      .foot {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 34px 24px 44px;
+        font-size: 12.5px;
+        color: var(--ink-faint);
+        line-height: 2;
+      }
+      .foot .refs {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+      }
+      .foot code {
+        background: var(--paper-3);
+      }
+
+      /* ───────── OKF 適合チェック (§9) ───────── */
+      .okf-check {
+        margin: 26px 0 10px;
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 0;
+      }
+      .okf-conds {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: #fcfaf4;
+      }
+      .okf-row {
+        display: grid;
+        grid-template-columns: 64px 1fr auto 36px;
+        gap: 10px;
+        align-items: center;
+        padding: 13px 18px;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+        font-size: 13.5px;
+      }
+      .okf-row:last-child {
+        border-bottom: none;
+      }
+      .okf-row .cond-no {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        color: var(--ink-faint);
+        font-weight: 600;
+      }
+      .okf-row .cond-desc {
+        color: var(--ink-soft);
+        line-height: 1.7;
+      }
+      .okf-row .cond-how {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--ink-faint);
+        text-align: right;
+        white-space: nowrap;
+      }
+      .okf-row .cond-ok {
+        font-family: var(--mono);
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--moss);
+        text-align: center;
+      }
+      .okf-arrow {
+        padding: 0 18px;
+        display: flex;
+        align-items: center;
+        color: var(--ink-faint);
+        font-size: 22px;
+      }
+      .okf-result {
+        background: color-mix(in srgb, var(--moss-soft) 55%, white);
+        border: 2px solid color-mix(in srgb, var(--moss) 35%, transparent);
+        border-radius: var(--radius);
+        padding: 28px 26px;
+        text-align: center;
+        min-width: 180px;
+      }
+      .okf-result .check-all {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--moss);
+        font-weight: 700;
+        display: block;
+        margin-bottom: 8px;
+      }
+      .okf-result .check-label {
+        font-family: var(--serif);
+        font-size: 15.5px;
+        font-weight: 700;
+        color: var(--ink);
+        line-height: 1.55;
+      }
+      @media (max-width: 880px) {
+        .okf-check {
+          grid-template-columns: 1fr;
+          gap: 0;
+        }
+        .okf-arrow {
+          justify-content: center;
+          padding: 10px 0;
+          transform: rotate(90deg);
+        }
+        .okf-result {
+          min-width: auto;
+        }
+      }
+      @media (max-width: 600px) {
+        .okf-row {
+          grid-template-columns: 50px 1fr 28px;
+          gap: 6px;
+        }
+        .okf-row .cond-how {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site">
+      <nav class="nav">
+        <span class="brand"
+          >graphrag-skill
+          <span class="v">/ overview&nbsp;&amp;&nbsp;field guide</span></span
+        >
+        <ul>
+          <li>
+            <a href="#bg"><span class="no">01</span>背景</a>
+          </li>
+          <li>
+            <a href="#principle"><span class="no">02</span>設計原則</a>
+          </li>
+          <li>
+            <a href="#flow"><span class="no">03</span>全体像</a>
+          </li>
+          <li>
+            <a href="#nodes"><span class="no">04</span>ノード型</a>
+          </li>
+          <li>
+            <a href="#edges"><span class="no">05</span>エッジ文法</a>
+          </li>
+          <li>
+            <a href="#read"><span class="no">06</span>読み方</a>
+          </li>
+          <li>
+            <a href="#obsidian"><span class="no">07</span>Obsidian</a>
+          </li>
+          <li>
+            <a href="#write"><span class="no">08</span>書き方</a>
+          </li>
+          <li>
+            <a href="#okf"><span class="no">09</span>OKF</a>
+          </li>
+          <li>
+            <a href="#token-capital"><span class="no">10</span>Token Capital</a>
+          </li>
+        </ul>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ═══════════ HERO ═══════════ -->
+      <div class="hero">
+        <svg
+          class="contour"
+          viewBox="0 0 420 360"
+          fill="none"
+          aria-hidden="true"
+        >
+          <g stroke="#B8AD93" stroke-width="1">
+            <path
+              d="M30 330 C 90 280, 80 220, 150 190 C 220 160, 230 100, 310 80 C 360 67, 390 40, 410 20"
+            />
+            <path
+              d="M60 340 C 120 295, 112 235, 180 205 C 248 175, 258 118, 335 96 C 382 82, 405 60, 420 45"
+              opacity=".75"
+            />
+            <path
+              d="M95 350 C 150 310, 145 252, 210 222 C 275 192, 288 138, 360 115 C 400 102, 415 85, 425 72"
+              opacity=".5"
+            />
+            <path
+              d="M135 358 C 185 322, 180 270, 242 240 C 304 210, 318 158, 385 135"
+              opacity=".3"
+            />
+          </g>
+        </svg>
+        <p class="kicker">GraphRAG Knowledge — Field Guide</p>
+        <h1>
+          システムの知識を、<br />ドキュメントではなく<br /><span class="em"
+            >「掘れる地層」</span
+          >として残す。
+        </h1>
+        <p class="lead">
+          AI
+          エージェントは、毎回「初見」でシステムに挑まされています。graphrag-skill
+          は、プロジェクトの
+          <b>設計判断・却下した案・制約・リスク・運用知識</b
+          >を型付きの知識グラフとして蓄積し、
+          エージェントが作業の最初に「先に引いて」から動けるようにする──探索の運に頼らない足場を渡す仕組みです。
+          正本は Obsidian でそのまま読める <b>Markdown の vault</b> 一つ。外部
+          DB はありません。
+        </p>
+        <div class="hero-meta">
+          <div>
+            <span class="k">正本</span><span class="val">vault</span>（Markdown
+            + git）
+          </div>
+          <div>
+            <span class="k">ノード型</span><span class="val">12 種</span>
+          </div>
+          <div>
+            <span class="k">エッジ型</span
+            ><span class="val">14 種</span>（型ペア検証つき）
+          </div>
+          <div>
+            <span class="k">読み口</span><span class="val">ask</span>（semantic
+            + lexical）
+          </div>
+        </div>
+        <p class="fineprint">
+          先に答えておくと──Claude Code や Codex
+          の<b>メモリー機能が完璧に進化したら、この仕組みはお役御免になります</b>。
+          これは LLM
+          製品がまだ持っていない「構造化された長期記憶」を外付けする繋ぎであり、その日が来るまでの実利を取りに行くものです。
+        </p>
+      </div>
+
+      <!-- ═══════════ §01 背景 ═══════════ -->
+      <section id="bg">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 01</span>
+          <h2>背景 — なぜグラフでナレッジを持つのか</h2>
+        </div>
+        <p class="sec-sub">
+          初見で問題を解かされるエージェントに、「それっぽさ」の運ではなく、構造の足場を渡す。
+        </p>
+
+        <p class="body rv">
+          AI
+          エージェントは、毎回<b>情報ゼロの状態から「初見」で問題を解かされる</b>という、人間の開発者なら誰も引き受けない
+          不利な条件で働いています。この不利をどう埋めるかは段階的に進歩してきました──ドキュメントを読ませる、RAG
+          で引く、
+          そして現在の主流である「エージェントが自ら探しに行く」エージェンティックサーチへ。それでも、まだ埋まらない穴があります。
+        </p>
+
+        <div class="evo rv">
+          <div class="st">
+            <span class="era">第 1 段階</span>
+            <h5>ドキュメント整備</h5>
+            <p>人が書き、エージェントに読ませる。</p>
+            <p class="lim">
+              <b>限界:</b>
+              書かれない・腐る・量が増えると「どれを読ませるか」自体が問題になる。
+            </p>
+          </div>
+          <div class="st">
+            <span class="era">第 2 段階</span>
+            <h5>RAG</h5>
+            <p>類似度検索でチャンクを引き、コンテキストに足す。</p>
+            <p class="lim">
+              <b>限界:</b>
+              引けるのは「似た文章」まで。関係は辿れず、網羅も担えない。
+            </p>
+          </div>
+          <div class="st">
+            <span class="era">第 3 段階・現在の主流</span>
+            <h5>エージェンティックサーチ</h5>
+            <p>
+              エージェント自身が ls・grep・read でコードベースを自走探索する。
+            </p>
+            <p class="lim">
+              <b>限界:</b>
+              「それっぽさ」頼みの探索。網羅できたかを誰も保証しない。
+            </p>
+          </div>
+          <div class="st ans">
+            <span class="era">graphrag の立場</span>
+            <h5>知識グラフ</h5>
+            <p>
+              判断・制約・関係を型付きのグラフ構造で保存し、semantic
+              に引いてエッジを辿る。
+            </p>
+            <p class="lim">
+              <b>狙い:</b> 網羅を探索の腕前ではなく、データ構造の性質にする。
+            </p>
+          </div>
+        </div>
+
+        <p class="body rv" style="margin-top: 26px">
+          エージェンティックサーチは強力ですが、その正体は<b
+            >「それっぽいフォルダを ls し、それっぽい語を grep する」</b
+          >という
+          ヒューリスティックな探索です。よく整理されたコードベースなら高い確率で当たります。しかし、それは保証ではありません。
+        </p>
+
+        <div class="pain-grid">
+          <div class="pain p1 rv">
+            <span class="ico">🎲</span>
+            <h4>網羅が保証されない</h4>
+            <p>
+              影響範囲を調べ尽くしたかどうかは、キーワード選びの運に懸かっている。命名・フォルダ構成・変数名が荒れたコードベースでは、「それっぽい場所」がそもそも存在しない。
+            </p>
+          </div>
+          <div class="pain p2 rv">
+            <span class="ico">🕳️</span>
+            <h4>コードに書かれていない情報</h4>
+            <p>
+              過去に選ばなかった選択肢、ノウハウ、制約は、ファイルにはほとんど残っていない。どれだけ上手に探しても、<b
+                >grep すべき対象が最初から存在しない</b
+              >。
+            </p>
+          </div>
+          <div class="pain p3 rv">
+            <span class="ico">📚</span>
+            <h4>ドキュメントでも覆えない</h4>
+            <p>
+              では文書化すればよいかというと、大量のドキュメントをキーワードだけで探すのは言い換えに弱く、すべてをコンテキストに積むのは物理的に不可能。
+            </p>
+          </div>
+          <div class="pain p4 rv">
+            <span class="ico">🧵</span>
+            <h4>「波及」を問える構造がない</h4>
+            <p>
+              「ここを変えると何に効くか」という<b>関係そのもの</b>は、コードにもドキュメントにも明示的には記録されない。読み手が毎回、推測で再構築している。
+            </p>
+          </div>
+        </div>
+
+        <p class="body rv" style="margin-top: 26px">
+          だから、知識を最初から<b>グラフ構造で保存しておく</b>──これが
+          graphrag-skill の答えです。
+          判断・却下案・制約・リスクを型付きノードとして持ち、「何に効くか」「何を上書きしたか」を型付きエッジで持つ。
+          引くときは semantic
+          検索で雑な問いから入り、当たったノードからエッジを辿って影響圏を機械的に列挙する。
+          網羅性が、探索の腕前ではなく<b>データ構造の性質</b>になります。
+        </p>
+
+        <div class="vs rv">
+          <table>
+            <tr>
+              <th>観点</th>
+              <th>エージェンティックサーチ<br />(ls / grep / read)</th>
+              <th>ドキュメント + RAG</th>
+              <th class="win">知識グラフ（graphrag）</th>
+            </tr>
+            <tr>
+              <td>初見の足場</td>
+              <td>毎回ゼロから探索をやり直す</td>
+              <td>何を読ませるかは結局検索任せ</td>
+              <td class="win">
+                触る領域の判断・制約・リスクを <code>ask</code> 一発で先に引く
+              </td>
+            </tr>
+            <tr>
+              <td>影響範囲の網羅</td>
+              <td>キーワードの当たり外れ次第。保証なし</td>
+              <td>書かれた範囲のみ。関係は辿れない</td>
+              <td class="win">
+                型付きエッジ（constrains / risks_in /
+                sets_policy_for…）を辿って機械的に列挙
+              </td>
+            </tr>
+            <tr>
+              <td>却下案・制約・ノウハウ</td>
+              <td>コードには残らない＝探しても無い</td>
+              <td>書かれても note に埋没しがち</td>
+              <td class="win">
+                RejectedOption / Constraint / OperationalKnowledge が一級ノード
+              </td>
+            </tr>
+            <tr>
+              <td>引き方</td>
+              <td>キーワード一致（言い換えに弱い）</td>
+              <td>類似チャンクの詰み込み</td>
+              <td class="win">
+                semantic + lexical の同重み合算 + 近傍展開、ランク済み JSON
+              </td>
+            </tr>
+            <tr>
+              <td>コンテキスト消費</td>
+              <td>読んだファイル全文が積み上がる</td>
+              <td>関連チャンクをまとめて積む</td>
+              <td class="win">
+                brief → search → evidence と必要な深さの分だけ自動段上げ
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="cost rv">
+          <h4>
+            <span class="b">trade-off</span
+            >更新は重い。それでも、いまならお釣りが来る
+          </h4>
+          <p>
+            GraphRAG
+            の弱点は<b>更新コスト</b>です。知識を蒸留し、型を付け、関係を張って書き戻す手間は、平文のメモより明らかに重い。
+            それでも採る価値がある、と判断した根拠は開発のボトルネックの移動にあります。
+            コーディングエージェントの登場で設計・実装は桁違いに速くなり、いま詰まっているのは<b>レビューと影響調査</b>のほうです。
+          </p>
+          <div class="bn">
+            <div class="bn-row">
+              <span class="bn-label">エージェント以前</span>
+              <div class="bn-bar">
+                <span class="bn-seg s1" style="flex: 22">設計</span>
+                <span class="bn-seg s2" style="flex: 56">実装</span>
+                <span class="bn-seg s3" style="flex: 22">レビュー</span>
+              </div>
+            </div>
+            <div class="bn-row">
+              <span class="bn-label">いま</span>
+              <div class="bn-bar">
+                <span class="bn-seg s1" style="flex: 12">設計</span>
+                <span class="bn-seg s2" style="flex: 16">実装</span>
+                <span class="bn-seg s3 hot" style="flex: 72"
+                  >レビュー・影響調査（ここがブロッカー）</span
+                >
+              </div>
+            </div>
+            <p class="bn-cap">
+              開発が速くなった分だけ、待ち行列はレビューと影響調査に集中する。判断の系譜と影響圏を構造で渡せれば、ここが軽くなる──グラフの更新コストは、この場所で回収する。
+            </p>
+          </div>
+          <p style="margin-top: 18px">
+            もう一つ、<b>更新の重さ自体もスキル化で削っています</b>。グラフへの書き戻しは、後でまとめてやる文書化作業ではなく、
+            エージェントとのやり取りの中に埋め込まれています。「○○することにする」と決まった瞬間、試した案が駄目だと分かった瞬間に、
+            会話の流れのままエージェントが型を付けて書き戻す（§08 の Proactive
+            Persistence）。
+            普段なら言語化されずに消えていく<b>暗黙知までグラフに乗りやすく</b>なり、
+            使い込むほどエージェントは「このシステムの事情を知っているベテランエンジニア」に近づいていきます。
+          </p>
+        </div>
+
+        <p class="fineprint rv">
+          <b>名前についての断り書き。</b>「GraphRAG」は本来 Microsoft
+          発の手法名で、本家の定義はここでの説明と異なります
+          ──文書をチャンクに区切り、LLM
+          がエンティティと関係を抽出してグラフ化し、グラフ上の距離が近い塊を「コミュニティ」として
+          検出して要約を付ける、という<b>自動構築</b>のパイプラインです。このスキルは名前を借りつつ、コミュニティを事後的に
+          発見する代わりに、型付きスキーマで<b>最初から構造を彫っておく</b>我流の亜種です。コミュニティ要約が担う「塊の意味」は
+          Stratum / Vein / Pocket とその description
+          が担っているので、看板に偽りあり、とまでは言わないでいただけると幸いです。
+          なお、コミュニティ方式をあえて採らなかった積極的な理由（構造ドリフトの検知）は
+          §04 で述べます。
+        </p>
+      </section>
+
+      <!-- ═══════════ §02 設計原則 ═══════════ -->
+      <section id="principle">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 02</span>
+          <h2>意図 — 動かさない設計境界</h2>
+        </div>
+        <p class="sec-sub">
+          このスキルの価値は型の列挙ではなく、切り分けの判断とそれを支える不変条件にある。
+        </p>
+
+        <ul class="princ">
+          <li class="rv">
+            <span class="t">vault が単一正本</span>
+            <span class="d"
+              >知識は vault（Markdown）に格納し、検索・索引・書き込みは全て
+              vault を読む。外部 graph DB は v3 で撤去済み。<code
+                >graph.json</code
+              >
+              は索引器の中間表現であって正本ではない。バックアップと履歴は git
+              が担う。</span
+            >
+          </li>
+          <li class="rv">
+            <span class="t">LLM に生クエリを書かせない</span>
+            <span class="d"
+              >LLM が触れる面は「ランク済み JSON
+              を読む」「型付きの追加コマンド／mutation plan を出す」の 2
+              つだけ。Cypher
+              のような生クエリ層を露出しないことで、検証可能な読み書き境界を保つ。</span
+            >
+          </li>
+          <li class="rv">
+            <span class="t">semantic は非交渉</span>
+            <span class="d"
+              >検索は lexical（一致・カバー率）と semantic（embedding
+              cosine）を同じ重みで合算する。ベクトル索引が無ければ
+              <code>ask</code>
+              は黙ってフォールバックせず、明示エラーで停止する。品質の落ちた検索を一級経路にしない。</span
+            >
+          </li>
+          <li class="rv">
+            <span class="t">出所必須（source backing）</span>
+            <span class="d"
+              >Decision / RejectedOption / Risk /
+              運用知識のような蒸留知識は、生の一次情報（ファイル・会話・調査）へ辿れることが
+              schema 上の必須要件。出所のない「きれいな結論」は validation で
+              reject される。</span
+            >
+          </li>
+          <li class="rv">
+            <span class="t">却下案は一級市民</span>
+            <span class="d"
+              >「なぜ採らなかったか」は最も腐りやすく最も失われやすい情報なので、RejectedOption
+              を独立ノード型にし、再検討時に同じ議論を繰り返さないようにする。</span
+            >
+          </li>
+          <li class="rv">
+            <span class="t">書き込みは常に検証つき原子操作</span>
+            <span class="d"
+              >vault は手編集しない。<code>add-*</code> /
+              <code>commit-mutation</code> が lock → 楽観排他（OCC）→ schema
+              検証 → 重複ゲート（新規ノードを既存の同型ノードと embedding
+              照合し、近すぎれば確認を要求）→ 原子 delta 書込 → ベクトル索引更新 → git commit
+              を一括で担保する。失敗時は all-or-nothing
+              でロールバック。複数エージェントの並行書込を前提にした作りになっている。</span
+            >
+          </li>
+        </ul>
+      </section>
+
+      <!-- ═══════════ §03 全体像 ═══════════ -->
+      <section id="flow">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 03</span>
+          <h2>全体像 — 知識はどう流れるか</h2>
+        </div>
+        <p class="sec-sub">
+          作業の最上流で「引く」、一段落で「書き戻す」。その間に vault がある。
+        </p>
+
+        <div class="flow-wrap rv">
+          <svg
+            viewBox="0 0 860 330"
+            font-family="IBM Plex Mono, monospace"
+            aria-label="知識の流れ図"
+          >
+            <defs>
+              <marker
+                id="ah"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0 L10 5 L0 10 z" fill="#8B8374" />
+              </marker>
+              <marker
+                id="ahm"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0 L10 5 L0 10 z" fill="#5E7355" />
+              </marker>
+              <marker
+                id="aht"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0 L10 5 L0 10 z" fill="#B05C42" />
+              </marker>
+            </defs>
+
+            <!-- 左: 作業の現場 -->
+            <rect
+              x="20"
+              y="70"
+              width="200"
+              height="190"
+              rx="10"
+              fill="#F0EADC"
+              stroke="#C7BCA3"
+            />
+            <text
+              x="120"
+              y="98"
+              text-anchor="middle"
+              font-size="13"
+              fill="#33302A"
+              font-weight="600"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              作業の現場
+            </text>
+            <g
+              font-size="11"
+              fill="#5F594D"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              <rect
+                x="38"
+                y="114"
+                width="164"
+                height="30"
+                rx="6"
+                fill="#FCFAF4"
+                stroke="#DCD3BF"
+              />
+              <text x="120" y="134" text-anchor="middle">会話・設計議論</text>
+              <rect
+                x="38"
+                y="152"
+                width="164"
+                height="30"
+                rx="6"
+                fill="#FCFAF4"
+                stroke="#DCD3BF"
+              />
+              <text x="120" y="172" text-anchor="middle">実装・修正・調査</text>
+              <rect
+                x="38"
+                y="190"
+                width="164"
+                height="30"
+                rx="6"
+                fill="#FCFAF4"
+                stroke="#DCD3BF"
+              />
+              <text x="120" y="210" text-anchor="middle">
+                試して駄目だった案
+              </text>
+            </g>
+            <text
+              x="120"
+              y="246"
+              text-anchor="middle"
+              font-size="10"
+              fill="#8B8374"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              コードしか残らないはずの情報
+            </text>
+
+            <!-- 蒸留矢印 -->
+            <path
+              d="M228 140 C 280 140, 280 150, 322 158"
+              fill="none"
+              stroke="#B05C42"
+              stroke-width="1.6"
+              marker-end="url(#aht)"
+            />
+            <text
+              x="276"
+              y="128"
+              text-anchor="middle"
+              font-size="10.5"
+              fill="#B05C42"
+            >
+              蒸留して書く
+            </text>
+            <text
+              x="276"
+              y="143"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#B05C42"
+            >
+              add-* / commit-mutation
+            </text>
+
+            <!-- 中央: vault -->
+            <rect
+              x="330"
+              y="58"
+              width="210"
+              height="216"
+              rx="12"
+              fill="#FCFAF4"
+              stroke="#5E7355"
+              stroke-width="1.6"
+            />
+            <text
+              x="435"
+              y="88"
+              text-anchor="middle"
+              font-size="14"
+              font-weight="600"
+              fill="#33302A"
+            >
+              vault
+            </text>
+            <text
+              x="435"
+              y="106"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#8B8374"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              単一正本 / Markdown + git
+            </text>
+            <g font-size="10" fill="#5F594D">
+              <rect
+                x="348"
+                y="120"
+                width="174"
+                height="26"
+                rx="5"
+                fill="#E3E8DB"
+              />
+              <text x="435" y="137" text-anchor="middle">
+                Decision/ Risk/ Goal …
+              </text>
+              <rect
+                x="348"
+                y="152"
+                width="174"
+                height="26"
+                rx="5"
+                fill="#E3E8DB"
+              />
+              <text x="435" y="169" text-anchor="middle">
+                RejectedOption/ OK …
+              </text>
+              <rect
+                x="348"
+                y="184"
+                width="174"
+                height="26"
+                rx="5"
+                fill="#E3E8DB"
+              />
+              <text x="435" y="201" text-anchor="middle">
+                File/ Stratum/ Vein/ Pocket
+              </text>
+            </g>
+            <text
+              x="435"
+              y="236"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#8B8374"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              frontmatter が正・本文は人間投影
+            </text>
+            <text
+              x="435"
+              y="252"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#8B8374"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              書込は lock→検証→原子→git commit
+            </text>
+
+            <!-- ask 矢印 -->
+            <path
+              d="M548 130 C 600 122, 600 112, 648 106"
+              fill="none"
+              stroke="#5E7355"
+              stroke-width="1.6"
+              marker-end="url(#ahm)"
+            />
+            <text
+              x="598"
+              y="98"
+              text-anchor="middle"
+              font-size="10.5"
+              fill="#5E7355"
+            >
+              ask "&lt;質問&gt;"
+            </text>
+            <text
+              x="598"
+              y="113"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#5E7355"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              semantic+lexical で引く
+            </text>
+
+            <!-- Obsidian 矢印 -->
+            <path
+              d="M548 210 C 600 218, 600 228, 648 234"
+              fill="none"
+              stroke="#8B8374"
+              stroke-width="1.4"
+              stroke-dasharray="4 4"
+              marker-end="url(#ah)"
+            />
+            <text
+              x="598"
+              y="248"
+              text-anchor="middle"
+              font-size="10.5"
+              fill="#8B8374"
+            >
+              Obsidian で開く
+            </text>
+            <text
+              x="598"
+              y="263"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#8B8374"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              人間の閲覧窓（読み取り）
+            </text>
+
+            <!-- 右上: エージェント -->
+            <rect
+              x="656"
+              y="62"
+              width="184"
+              height="86"
+              rx="10"
+              fill="#F0EADC"
+              stroke="#C7BCA3"
+            />
+            <text
+              x="748"
+              y="92"
+              text-anchor="middle"
+              font-size="13"
+              font-weight="600"
+              fill="#33302A"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              AI エージェント
+            </text>
+            <text
+              x="748"
+              y="112"
+              text-anchor="middle"
+              font-size="10"
+              fill="#5F594D"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              着手前に判断・制約・リスクを
+            </text>
+            <text
+              x="748"
+              y="128"
+              text-anchor="middle"
+              font-size="10"
+              fill="#5F594D"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              先に引いてから作業する
+            </text>
+
+            <!-- 右下: 人間 -->
+            <rect
+              x="656"
+              y="194"
+              width="184"
+              height="86"
+              rx="10"
+              fill="#F0EADC"
+              stroke="#C7BCA3"
+            />
+            <text
+              x="748"
+              y="224"
+              text-anchor="middle"
+              font-size="13"
+              font-weight="600"
+              fill="#33302A"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              人間
+            </text>
+            <text
+              x="748"
+              y="244"
+              text-anchor="middle"
+              font-size="10"
+              fill="#5F594D"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              グラフビュー・バックリンクで
+            </text>
+            <text
+              x="748"
+              y="260"
+              text-anchor="middle"
+              font-size="10"
+              fill="#5F594D"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              判断の系譜を辿って読む
+            </text>
+
+            <!-- 戻り矢印（エージェント→蒸留） -->
+            <path
+              d="M748 156 C 748 305, 300 305, 150 268"
+              fill="none"
+              stroke="#B05C42"
+              stroke-width="1.2"
+              stroke-dasharray="5 4"
+              marker-end="url(#aht)"
+              opacity=".75"
+            />
+            <text
+              x="455"
+              y="318"
+              text-anchor="middle"
+              font-size="9.5"
+              fill="#B05C42"
+              font-family="Zen Kaku Gothic New, sans-serif"
+            >
+              一段落したら、判断・却下案・リスクを能動的に書き戻す（Proactive
+              Persistence）
+            </text>
+          </svg>
+        </div>
+        <p class="flow-cap rv">
+          読み・書き・索引のすべてが vault を向く。エージェントの読み口は
+          <code>ask</code>、書き口は <code>add-*</code> /
+          <code>commit-mutation</code> のみ。<br />人間は同じ vault を Obsidian
+          で開けばよく、エクスポートや同期は存在しない。
+        </p>
+      </section>
+
+      <!-- ═══════════ §04 ノード型 ═══════════ -->
+      <section id="nodes">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 04</span>
+          <h2>グラフ種別 ① — 12 のノード型</h2>
+        </div>
+        <p class="sec-sub">
+          3
+          つの系（構造・知識・横断）に分かれる。横断系は地質メタファーで命名されている。
+        </p>
+
+        <div class="legend rv">
+          <span
+            ><i style="background: var(--slate)"></i
+            >構造系（コードの実体）</span
+          >
+          <span
+            ><i style="background: var(--terra)"></i
+            >知識系（蒸留された判断と経緯）</span
+          >
+          <span
+            ><i style="background: var(--moss)"></i
+            >横断系（構造から独立に生きる意図）</span
+          >
+        </div>
+
+        <div class="node-group rv">
+          <div class="gh">
+            <h4>構造系</h4>
+            <span class="cnt">1 型</span
+            ><span class="desc"
+              >— 索引が機械的に生成する、グラフと実コードの接地面</span
+            >
+          </div>
+          <div class="cards">
+            <div class="ncard c-file">
+              <span class="ty">File</span><span class="ja">ファイル</span>
+              <p>
+                索引されたソースファイル。embedding の主担体で、シンボルや
+                import は独立ノードにせず File
+                の配列フィールドに持つ（ノード爆発の回避）。<b>要約を機械テンプレから「意味」の要約へ書き換えること</b>が検索品質の主レバー。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="node-group rv">
+          <div class="gh">
+            <h4>知識系</h4>
+            <span class="cnt">8 型</span
+            ><span class="desc"
+              >— 会話と作業から蒸留される、このスキルの本体</span
+            >
+          </div>
+          <div class="cards">
+            <div class="ncard c-know">
+              <span class="ty">Decision</span
+              ><span class="ja">採用した判断</span>
+              <p>
+                採用した設計判断。<b>なぜそう決めたか</b>を description
+                に書く。<code>supersedes</code> で却下案を、<code>refines</code>
+                で旧判断を継ぐ。覆された判断は <code>state: "superseded"</code>
+                のまま残り（系譜保存）、検索では減点される。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">RejectedOption</span
+              ><span class="ja">却下した案</span>
+              <p>
+                <b>一級市民</b
+                >。試して駄目だった案とその失敗モードを独立ノードで残す。再検討時に同じ議論・同じ失敗を繰り返さないための、このスキーマで最も特徴的な型。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Constraint</span><span class="ja">制約</span>
+              <p>
+                守るべき制約。<code>constrains</code>
+                で判断・ファイル・運用知識を縛る。「やってはいけない」を構造で持つ。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Goal</span><span class="ja">目的・到達点</span>
+              <p>
+                システムの目的因。<code>refines</code> で上位 Goal
+                を細分化する。判断が「何のためか」を遡るための錨。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Risk</span><span class="ja">リスク</span>
+              <p>
+                将来踏みそうな、再利用されるリスク。<code>risks_in</code>
+                で対象を指し、<code>reduces_risk</code>
+                で緩和する判断と結ばれる。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">OperationalKnowledge</span
+              ><span class="ja">運用知識</span>
+              <p>
+                再利用される運用知見・ワークアラウンド・ハマりどころ。CLI では
+                <code>add-ok</code> で書く。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Investigation</span><span class="ja">調査</span>
+              <p>
+                進行中／完了した調査エピソード。focus
+                継続（前回の続き）の主語であり、<code>led_to</code>
+                で判断を生む流れを残す。<code>state: "active" | "closed"</code>
+                を持ち、resume が拾うのは active のもの。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">ConversationChunk</span
+              ><span class="ja">会話の断片</span>
+              <p>
+                出所となる生の会話メモ。蒸留知識が
+                <code>derived_from</code>
+                で辿り着く一次情報。「なぜ」を後から検証する材料置き場。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="node-group rv">
+          <div class="gh">
+            <h4>横断系</h4>
+            <span class="cnt">3 型</span
+            ><span class="desc"
+              >— ファイル構造が変わっても生き残るべきアーキテクチャの意図</span
+            >
+          </div>
+          <div class="cards">
+            <div class="ncard c-cross">
+              <span class="ty">Stratum</span><span class="ja">地層</span
+              ><span class="alias">旧 Layer</span>
+              <p>
+                水平に積もる層＝アーキテクチャ層。「<b>どの層か</b>」（縦の位置）を持つ。
+              </p>
+            </div>
+            <div class="ncard c-cross">
+              <span class="ty">Pocket</span><span class="ja">鉱塊</span
+              ><span class="alias">旧 Component</span>
+              <p>
+                局所に凝集した塊＝パッケージ／モジュールのまとまり。「<b>どこにあるか</b>」（構造）を持つ。
+              </p>
+            </div>
+            <div class="ncard c-cross">
+              <span class="ty">Vein</span><span class="ja">鉱脈</span
+              ><span class="alias">旧 Concern</span>
+              <p>
+                層も塊も貫いて走る筋＝横断的関心事。「<b>何を横断的に気にしているか</b>」を持ち、構造にも層にも縛られない。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="rv">なぜ地質メタファーか — Stratum ≠ Vein ≠ Pocket</h3>
+        <p class="body rv">
+          3 種を 1
+          つの型に潰すと、ファイル移動やリファクタのたびに<b>アーキテクチャの意図が構造と心中します</b>。
+          地質の比喩はそのまま切り分けの軸になっています。3 種はいずれも
+          <code>evidenced_by</code> で File を指し、
+          意図を必ず実体に接地させます。ファイルが動いても、層・塊・関心は生き残ります。
+        </p>
+
+        <div class="geo-wrap rv">
+          <svg
+            viewBox="0 0 820 400"
+            font-family="Zen Kaku Gothic New, sans-serif"
+            aria-label="地質断面図: Stratum, Vein, Pocket の関係"
+          >
+            <defs>
+              <marker
+                id="gah"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="6.5"
+                markerHeight="6.5"
+                orient="auto-start-reverse"
+              >
+                <path d="M0 0 L10 5 L0 10 z" fill="#8B8374" />
+              </marker>
+              <clipPath id="ground">
+                <rect x="60" y="60" width="560" height="270" rx="8" />
+              </clipPath>
+            </defs>
+
+            <!-- 断面の枠 -->
+            <rect
+              x="60"
+              y="60"
+              width="560"
+              height="270"
+              rx="8"
+              fill="#F4EFE2"
+              stroke="#C7BCA3"
+            />
+            <g clip-path="url(#ground)">
+              <!-- 地層 (Stratum) -->
+              <path
+                d="M60 60 L620 60 L620 124 C 480 136, 340 116, 200 128 C 140 132, 90 128, 60 130 Z"
+                fill="#EAE0C8"
+              />
+              <path
+                d="M60 130 C 90 128, 140 132, 200 128 C 340 116, 480 136, 620 124 L620 196 C 470 208, 330 188, 190 200 C 135 204, 92 200, 60 202 Z"
+                fill="#DDD0B0"
+              />
+              <path
+                d="M60 202 C 92 200, 135 204, 190 200 C 330 188, 470 208, 620 196 L620 268 C 475 280, 335 260, 195 272 C 138 276, 92 272, 60 274 Z"
+                fill="#D0C09A"
+              />
+              <path
+                d="M60 274 C 92 272, 138 276, 195 272 C 335 260, 475 280, 620 268 L620 330 L60 330 Z"
+                fill="#C2B086"
+              />
+              <!-- 鉱脈 (Vein): 層を貫く斜めの筋 -->
+              <path
+                d="M120 330 C 200 270, 260 230, 330 180 C 400 130, 450 95, 505 60 L545 60 C 490 100, 438 140, 368 190 C 298 240, 240 280, 158 330 Z"
+                fill="#A9BD92"
+                opacity=".78"
+              />
+              <path
+                d="M120 330 C 200 270, 260 230, 330 180 C 400 130, 450 95, 505 60"
+                fill="none"
+                stroke="#5E7355"
+                stroke-width="1.4"
+                stroke-dasharray="6 4"
+                opacity=".7"
+              />
+              <path
+                d="M158 330 C 240 280, 298 240, 368 190 C 438 140, 490 100, 545 60"
+                fill="none"
+                stroke="#5E7355"
+                stroke-width="1.4"
+                stroke-dasharray="6 4"
+                opacity=".7"
+              />
+              <!-- 鉱塊 (Pocket) -->
+              <ellipse
+                cx="475"
+                cy="230"
+                rx="58"
+                ry="30"
+                fill="#8FA67C"
+                opacity=".9"
+                transform="rotate(-8 475 230)"
+              />
+              <ellipse
+                cx="225"
+                cy="105"
+                rx="44"
+                ry="23"
+                fill="#8FA67C"
+                opacity=".9"
+                transform="rotate(5 225 105)"
+              />
+            </g>
+
+            <!-- 地表線 -->
+            <line
+              x1="48"
+              y1="60"
+              x2="632"
+              y2="60"
+              stroke="#8B8374"
+              stroke-width="1.4"
+            />
+            <g stroke="#8B8374" stroke-width="1">
+              <line x1="80" y1="60" x2="74" y2="52" />
+              <line x1="120" y1="60" x2="114" y2="52" />
+              <line x1="160" y1="60" x2="154" y2="52" />
+              <line x1="200" y1="60" x2="194" y2="52" />
+              <line x1="240" y1="60" x2="234" y2="52" />
+              <line x1="280" y1="60" x2="274" y2="52" />
+              <line x1="320" y1="60" x2="314" y2="52" />
+              <line x1="360" y1="60" x2="354" y2="52" />
+              <line x1="400" y1="60" x2="394" y2="52" />
+              <line x1="440" y1="60" x2="434" y2="52" />
+              <line x1="480" y1="60" x2="474" y2="52" />
+              <line x1="560" y1="60" x2="554" y2="52" />
+              <line x1="600" y1="60" x2="594" y2="52" />
+            </g>
+
+            <!-- ラベル: Stratum -->
+            <g>
+              <line
+                x1="620"
+                y1="160"
+                x2="668"
+                y2="160"
+                stroke="#8B8374"
+                stroke-width="1"
+              />
+              <text
+                x="676"
+                y="152"
+                font-size="13"
+                font-weight="700"
+                fill="#33302A"
+                font-family="IBM Plex Mono, monospace"
+              >
+                Stratum
+              </text>
+              <text x="676" y="170" font-size="11" fill="#5F594D">
+                地層 — 水平に積もる層
+              </text>
+              <text x="676" y="186" font-size="10.5" fill="#8B8374">
+                「どの層か」(縦の位置)
+              </text>
+            </g>
+            <!-- ラベル: Vein -->
+            <g>
+              <line
+                x1="402"
+                y1="148"
+                x2="668"
+                y2="226"
+                stroke="#8B8374"
+                stroke-width="1"
+              />
+              <circle cx="402" cy="148" r="2.6" fill="#5E7355" />
+              <text
+                x="676"
+                y="222"
+                font-size="13"
+                font-weight="700"
+                fill="#33302A"
+                font-family="IBM Plex Mono, monospace"
+              >
+                Vein
+              </text>
+              <text x="676" y="240" font-size="11" fill="#5F594D">
+                鉱脈 — 層を貫いて走る筋
+              </text>
+              <text x="676" y="256" font-size="10.5" fill="#8B8374">
+                横断的関心事。構造にも
+              </text>
+              <text x="676" y="271" font-size="10.5" fill="#8B8374">
+                層にも縛られない意図
+              </text>
+            </g>
+            <!-- ラベル: Pocket -->
+            <g>
+              <line
+                x1="510"
+                y1="244"
+                x2="668"
+                y2="300"
+                stroke="#8B8374"
+                stroke-width="1"
+              />
+              <circle cx="510" cy="244" r="2.6" fill="#5E7355" />
+              <text
+                x="676"
+                y="296"
+                font-size="13"
+                font-weight="700"
+                fill="#33302A"
+                font-family="IBM Plex Mono, monospace"
+              >
+                Pocket
+              </text>
+              <text x="676" y="314" font-size="11" fill="#5F594D">
+                鉱塊 — 局所に凝集した塊
+              </text>
+              <text x="676" y="330" font-size="10.5" fill="#8B8374">
+                「どこにあるか」(構造)
+              </text>
+            </g>
+
+            <!-- evidenced_by: File への接地 -->
+            <g font-family="IBM Plex Mono, monospace">
+              <rect
+                x="120"
+                y="362"
+                width="118"
+                height="26"
+                rx="5"
+                fill="#DEE5EA"
+                stroke="#9FB2C2"
+              />
+              <text
+                x="179"
+                y="379"
+                text-anchor="middle"
+                font-size="10"
+                fill="#3D556C"
+              >
+                auth/session.ts
+              </text>
+              <rect
+                x="300"
+                y="362"
+                width="118"
+                height="26"
+                rx="5"
+                fill="#DEE5EA"
+                stroke="#9FB2C2"
+              />
+              <text
+                x="359"
+                y="379"
+                text-anchor="middle"
+                font-size="10"
+                fill="#3D556C"
+              >
+                api/middleware.ts
+              </text>
+              <rect
+                x="480"
+                y="362"
+                width="118"
+                height="26"
+                rx="5"
+                fill="#DEE5EA"
+                stroke="#9FB2C2"
+              />
+              <text
+                x="539"
+                y="379"
+                text-anchor="middle"
+                font-size="10"
+                fill="#3D556C"
+              >
+                infra/queue.ts
+              </text>
+            </g>
+            <g
+              stroke="#8B8374"
+              stroke-width="1.1"
+              stroke-dasharray="3 3"
+              fill="none"
+            >
+              <path
+                d="M179 360 C 179 340, 200 320, 218 300"
+                marker-end="url(#gah)"
+              />
+              <path
+                d="M359 360 C 359 340, 330 300, 310 240"
+                marker-end="url(#gah)"
+              />
+              <path
+                d="M539 360 C 539 348, 510 290, 488 252"
+                marker-end="url(#gah)"
+              />
+            </g>
+            <text
+              x="60"
+              y="382"
+              font-size="10.5"
+              fill="#8B8374"
+              font-family="IBM Plex Mono, monospace"
+              transform="rotate(0)"
+            >
+              evidenced_by ↑
+            </text>
+          </svg>
+        </div>
+        <p class="flow-cap rv">
+          横断 3 種はどれも <code>evidenced_by</code> で File
+          に接地する。ファイルが移動しても層・塊・鉱脈のノードは残り、<br />「この関心はどこに効いているか」を
+          File 側を張り替えるだけで追従できる。
+        </p>
+
+        <h3 class="rv">なぜ型を「先に」固定するのか — ドリフトの基準点</h3>
+        <p class="body rv">
+          本家 GraphRAG
+          のコミュニティ検出は、「いまのデータにとって、ちょうどいい塊」をその都度作り直します。
+          これは適応力ですが、裏返すと──バイブコーディングで構造が当初のコンセプトから少しずつズレていっても、
+          <b>塊のほうがズレに付いていくため、誰も検知できない</b
+          >ということです。
+          型とエッジ文法を先に彫っておくと、意図した形が測量の基準点のようにグラフに残り、ズレは基準からの差分として
+          見えるようになります。形を変えること自体は禁じません。ただし「黙って馴染む」のではなく、
+          <b>人間が気づき、確認してから変える</b>という手順に変わる。
+          だから大事なのは、この型が完璧か・ベストかであることよりも、まず<b>型があること</b>自体なのです。
+        </p>
+
+        <h3 class="rv">では、この 12 型は「王道」なのか</h3>
+        <p class="body rv">
+          我流です。設計にあたって「知識の型の、定番とされる分類」を哲学・認知科学側まで探しに行きましたが、
+          見つかったのは<b>「鉄板の発想源は数あれど、王道──誰も異を唱えない単一の基盤──は無い」</b>という事実でした。
+          分類は常に、それを立てた問いと用途のために組まれてきたものです。
+          ただし我流は思いつきと同じではありません。この 12
+          型は、確立した知的伝統からそれぞれ design constraint
+          を一つずつ抽出して組み上げています。
+        </p>
+
+        <ul class="trad rv">
+          <li>
+            <span class="src"
+              >カント『純粋理性批判』<small
+                >純粋悟性概念のカテゴリー表</small
+              ></span
+            ><span class="to"
+              >「否定」は実在と同格の一級カテゴリーである →
+              却下も判断と同格に。<b>RejectedOption を独立ノードにする</b></span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >Tulving<small>エピソード記憶と意味記憶の二系統</small></span
+            ><span class="to"
+              >経緯の記憶と結論の記憶は別系統 →
+              <b
+                >ConversationChunk・Investigation（経緯）と Decision
+                など（結論）を両建て</b
+              >で外部化する</span
+            >
+          </li>
+          <li>
+            <span class="src">Bartlett<small>再構成的記憶</small></span
+            ><span class="to"
+              >記憶は思い出すたびに作り替えられる → 再構成バイアスから守る<b
+                >外部の正本 = vault</b
+              >
+              を置く</span
+            >
+          </li>
+          <li>
+            <span class="src">Hutchins<small>分散認知</small></span
+            ><span class="to"
+              >認知は頭の中だけでなく道具や記録物に宿る →
+              <b>vault をエージェントの認知の物理基盤</b>として扱う</span
+            >
+          </li>
+          <li>
+            <span class="src">PROV-O<small>来歴記述のオントロジー</small></span
+            ><span class="to"
+              >出所は独立した関係として明示する →
+              <b>documented_by / derived_from</b>（出所必須コントラクト）</span
+            >
+          </li>
+          <li>
+            <span class="src">Toulmin<small>議論のモデル</small></span
+            ><span class="to"
+              >主張は根拠と前提で支える → <b>evidence / has_premise</b></span
+            >
+          </li>
+        </ul>
+
+        <p class="body rv">
+          一方で、「カントの何々がこのノード型に対応する」といった<b>対応表による正当化はしません</b>。
+          12 のノードから都合のよい 3 つを選ぶ組合せは 220
+          通りあり、後付けの対応表は
+          「権威に合わせて切り貼りしただけでは」という批判に耐えないからです。哲学はあくまで発想源に位置づけ、
+          型の正式な定義は「概念名と、適用をどう判定するかの手続き」で書く。そして分類の正しさは権威ではなく、
+          次章のエッジ文法と
+          <code>validateGraph</code> による<b>検証可能性</b>で支えます。
+        </p>
+
+        <h3 class="rv">ID 規約</h3>
+        <p class="body rv">
+          すべてのノードは
+          <code>&lt;typeSlug&gt;:&lt;system&gt;:&lt;slug&gt;</code> という ID
+          を持ちます（例:
+          <code>decision:graphrag:vault-single-source</code>）。<code
+            >&lt;system&gt;</code
+          >
+          は ID の名前空間ラベルで、 System
+          というノードが作られるわけではありません。スコープそのものは vault
+          の境界が担います（vault = scope）。
+        </p>
+      </section>
+
+      <!-- ═══════════ §05 エッジ ═══════════ -->
+      <section id="edges">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 05</span>
+          <h2>グラフ種別 ② — 14 のエッジ型と「文法」</h2>
+        </div>
+        <p class="sec-sub">
+          何が何に繋がってよいかは型ペア規則で強制される。これがグラフのスープ化を防ぐ一貫性契約。
+        </p>
+
+        <p class="body rv">
+          エッジは自由なリンクではありません。<code>validateGraph</code> が from
+          / to のノード型の組を検査し、 規則外のエッジは書き込み時に reject
+          されます。役割で 4 群に分けて読むと覚えやすい構成です。
+        </p>
+
+        <div class="legend rv">
+          <span
+            ><i style="background: var(--terra)"></i
+            ><span class="chip k" style="margin-left: -2px"
+              >知識系ノード</span
+            ></span
+          >
+          <span
+            ><i style="background: var(--slate)"></i
+            ><span class="chip f" style="margin-left: -2px">File</span></span
+          >
+          <span
+            ><i style="background: var(--moss)"></i
+            ><span class="chip x" style="margin-left: -2px"
+              >横断系ノード</span
+            ></span
+          >
+          <span
+            ><i style="background: var(--ochre)"></i
+            ><span class="chip g" style="margin-left: -2px"
+              >出所ノード</span
+            ></span
+          >
+        </div>
+
+        <div class="edge-groups">
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>接地・出所</h4>
+              <span>— 知識と意図を、実体と一次情報に必ず繋ぎとめる</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">documented_by</span
+                ><span class="pair"
+                  ><span class="chip k"
+                    >Decision | Rejected | Risk | OK | Investigation</span
+                  ><span class="arrow">→</span
+                  ><span class="chip f">File</span></span
+                >
+              </li>
+              <li>
+                <span class="en">evidenced_by</span
+                ><span class="pair"
+                  ><span class="chip x">Stratum | Vein | Pocket</span
+                  ><span class="arrow">→</span
+                  ><span class="chip f">File</span></span
+                >
+              </li>
+              <li>
+                <span class="en">derived_from</span
+                ><span class="pair"
+                  ><span class="chip k">蒸留知識 (Goal 含む)</span
+                  ><span class="arrow">→</span
+                  ><span class="chip g"
+                    >ConversationChunk | Investigation</span
+                  ></span
+                >
+                <span class="note"
+                  >出所必須コントラクトの担体。蒸留知識は raw_content
+                  を持つ出所へ辿れることが構造で保証される。</span
+                >
+              </li>
+              <li>
+                <span class="en">discussed_in</span
+                ><span class="pair"
+                  ><span class="chip g">ConversationChunk</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Investigation</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>系譜・歴史</h4>
+              <span>— 判断がどこから来て何を置き換えたかを辿る</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">led_to</span
+                ><span class="pair"
+                  ><span class="chip k">Investigation</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Decision</span></span
+                >
+                <span class="note"
+                  >調査が判断を生んだ流れ。「なぜこの設計に?」の答えはこのエッジを遡る。</span
+                >
+              </li>
+              <li>
+                <span class="en">rejected_in</span
+                ><span class="pair"
+                  ><span class="chip k">RejectedOption</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Investigation</span></span
+                >
+              </li>
+              <li>
+                <span class="en">supersedes</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">RejectedOption</span></span
+                >
+                <span class="note"
+                  >上書きの方向が型で固定されている。「採った案」と「捨てた案」が常にペアで残る。判断を覆す「方針転換」はここではなく
+                  <code>refines</code>（新→旧）+ 旧 Decision の
+                  <code>state: "superseded"</code> で表す — supersedes は却下案専用のまま。</span
+                >
+              </li>
+              <li>
+                <span class="en">refines</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Decision | OK</span
+                  >&nbsp;&nbsp;/&nbsp;&nbsp;<span class="chip k">Goal</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Goal</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>力学</h4>
+              <span>— 制約・方針・リスクが「何に効くか」を表す</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">constrains</span
+                ><span class="pair"
+                  ><span class="chip k">Constraint</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="chip f">File</span></span
+                >
+              </li>
+              <li>
+                <span class="en">sets_policy_for</span
+                ><span class="pair"
+                  ><span class="chip k">Decision</span
+                  ><span class="arrow">→</span><span class="chip f">File</span
+                  ><span class="chip k">Investigation | OK</span
+                  ><span class="chip x">Stratum | Vein | Pocket</span></span
+                >
+                <span class="note"
+                  >横断構造宛は「この部品／層／関心の<b>全体</b>に効く方針」。File
+                  集合に張ると後から増えたファイルに方針が黙って効かなくなるため、正直でいられる一番低い高度（File
+                  → Pocket → Stratum / Vein）を選ぶ。</span
+                >
+              </li>
+              <li>
+                <span class="en">risks_in</span
+                ><span class="pair"
+                  ><span class="chip k">Risk</span><span class="arrow">→</span
+                  ><span class="chip k">Decision | OK | Investigation</span
+                  ><span class="chip f">File</span
+                  ><span class="chip x">横断 3 種</span></span
+                >
+              </li>
+              <li>
+                <span class="en">reduces_risk</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Risk</span></span
+                >
+              </li>
+              <li>
+                <span class="en">has_premise</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK | Investigation</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k"
+                    >Decision | OK | Constraint | Risk | Goal</span
+                  ></span
+                >
+                <span class="note"
+                  >「この判断は何を前提にしているか」。前提が崩れたとき影響を受ける判断を逆引きできる。</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>暫定</h4>
+              <span>— mutation 前の一時マーカー</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">temporary_relation_candidate</span
+                ><span class="pair"
+                  ><span class="chip k">任意の知識ノード</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">任意の知識ノード</span></span
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <p class="body rv" style="margin-top: 24px">
+          なお、v3.3 で唯一の「整理用エッジ」だった
+          <code>contains</code> は撤去されました。所属の情報は vault
+          のフォルダ構造と ID
+          規約がすでに持っているためで、<b>グラフに残るエッジは意味関係のみ</b>です。同様に、シンボルや呼び出し関係は
+          独立ノードにしません（ノード数の爆発と精度低下を避け、File
+          の配列フィールドと要約に織り込む設計です）。
+        </p>
+      </section>
+
+      <!-- ═══════════ §06 読み方 ═══════════ -->
+      <section id="read">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 06</span>
+          <h2>読み方 ① — エージェントは ask で引く</h2>
+        </div>
+        <p class="sec-sub">
+          grep でも glob でもなく、まず ask。1
+          コマンドで必要な深さまで自動で潜る。
+        </p>
+
+        <p class="body rv">
+          エージェント（または CLI を叩く人間）の読み口は
+          <code>ask</code> 一つです。雑な自然文の質問を投げると、 内部で
+          <b>retrieval ladder</b> を自動で登り、必要な深さの結果だけを返します。
+          検索順位は lexical（完全一致・部分一致・単語カバー率）と
+          semantic（embedding の cosine）を 同じ重みで合算したものです。
+        </p>
+
+        <div class="term rv">
+          <span class="dim">$</span> node --experimental-strip-types
+          graphrag/cli.ts <span class="grn">ask</span>
+          <span class="yel">"なぜ vault が単一正本なのか"</span>
+          <span class="dim">$</span> node --experimental-strip-types
+          graphrag/cli.ts <span class="grn">ask</span>
+          <span class="yel">"認証まわりを触ると何に波及する?"</span> --limit 8
+        </div>
+
+        <div class="ladder rv">
+          <div>
+            <span class="st">stage 1</span>
+            <h5>brief</h5>
+            <p>
+              概要応答。確信度が高い一致があればここで止まる（最小コスト）。
+            </p>
+          </div>
+          <div>
+            <span class="st">stage 2</span>
+            <h5>search</h5>
+            <p>
+              ランク済みの近傍展開。ヒットの周辺ノードをエッジ伝いに広げる。
+            </p>
+          </div>
+          <div>
+            <span class="st">stage 3</span>
+            <h5>evidence</h5>
+            <p>
+              出所付きの answer
+              packet。どのノード・どのファイルが根拠かまで返す。
+            </p>
+          </div>
+        </div>
+
+        <h3 class="rv">
+          「無い」の判定と打ち切り — 連打しないための出力フィールド
+        </h3>
+        <div class="stop-rules">
+          <div class="stop rv">
+            <b><code>final_stage</code></b> — どこまで自動段上げしたか。<code
+              >evidence</code
+            >
+            まで行って空なら<b>本当に無い</b>。一時的な調査ギャップであり、慌てて新規ノードを作る理由にはならない。
+          </div>
+          <div class="stop rv">
+            <b><code>match_confidence</code></b> —
+            <code>high</code> なら採用。<code>low</code> /
+            <code>none</code> なら段上げ済みなので、<b
+              >別キーワードを 1 度だけ</b
+            >試す。連打しない。
+          </div>
+          <div class="stop rv">
+            <b><code>repeat_state</code></b> — 同じ問いの繰り返しを launcher
+            が数えている。<code>excessive</code>（3
+            回以上）になったらグラフ検索を打ち切り、コード・ドキュメントの直読みに移る。
+          </div>
+        </div>
+
+        <p class="body rv">
+          前提が欠けていると
+          <code>ask</code> は<b>黙ってフォールバックせず大声で止まります</b>。
+          vault が見つからない、embedding endpoint
+          に届かない、ベクトル索引が無い──いずれも明示エラーです。
+          「検索精度が落ちた状態で動き続けて、静かに間違った答えを返す」ことを設計として禁じているためです。
+        </p>
+      </section>
+
+      <!-- ═══════════ §07 Obsidian ═══════════ -->
+      <section id="obsidian">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 07</span>
+          <h2>読み方 ② — 人間は Obsidian で読む</h2>
+        </div>
+        <p class="sec-sub">
+          vault はただの Markdown フォルダ。Obsidian
+          で開けば、そのまま知識グラフのビューアになる。
+        </p>
+
+        <p class="body rv">
+          vault は <code>Decision/</code> <code>Risk/</code>
+          <code>RejectedOption/</code> …
+          と<b>ノード型ごとのフォルダ</b>に分かれた Markdown
+          ファイル群です。Obsidian で「Open folder as
+          vault」するだけで、エクスポートも変換も無しに読めます。
+          各ノートは次のような構造をしています。
+        </p>
+
+        <div class="note-anatomy">
+          <div class="obs-note rv">
+            <div class="bar">
+              <i></i><i></i><i></i>RejectedOption / flock(2)
+              による書き込み直列化ロック.md
+            </div>
+            <pre><span class="fm">---</span>
+<span class="key">id:</span> <span class="str">"rejected:graphrag-skill-dev:flock-lock"</span>   <span class="mark">… ①</span>
+<span class="key">type:</span> <span class="str">"RejectedOption"</span>
+<span class="key">title:</span> <span class="str">"flock(2) による書き込み直列化ロック"</span>
+<span class="key">summary:</span> <span class="str">"排他 flock でロックし、クラッシュ時は
+  カーネルが自動解放する案。Node/macOS で
+  素直に使えず却下。"</span>
+<span class="key">graph_edges:</span>                                  <span class="mark">… ②</span>
+  - <span class="key">type:</span> <span class="str">"rejected_in"</span>
+    <span class="key">from:</span> <span class="str">"rejected:…:flock-lock"</span>
+    <span class="key">to:</span> <span class="str">"investigation:…:mutation-v3-vault-write"</span>
+<span class="fm">---</span>
+
+<span class="mark">&gt; 生成物 — 直接編集しない。正本は vault…  … ③</span>
+
+<span class="hd"># flock(2) による書き込み直列化ロック</span>
+
+<span class="hd">## 説明</span>
+却下理由: macOS に flock CLI が無く、Node に
+組み込みも無い。ネイティブ依存が要り、ランタイム
+依存ゼロの方針から逸脱する。自作 lockfile
+(O_EXCL＋stale 検出) を採用。
+
+<span class="hd">## 関係</span>
+- rejected_in → <span class="wl">[[Investigation/mutation 層の
+  v3 化：vault 書き込み経路の設計]]</span>            <span class="mark">… ④</span></pre>
+          </div>
+          <ul class="anno rv">
+            <li>
+              <span class="tag-pin">①</span>
+              <div>
+                <b>frontmatter が正本。</b>id・type・title・summary
+                という機械可読データがここに載る。本文はこの frontmatter
+                から投影された「人間向けの読みやすい姿」で、往復シリアライズ（vault
+                → graph → vault が等価）が保証されている。
+              </div>
+            </li>
+            <li>
+              <span class="tag-pin">②</span>
+              <div>
+                <b>エッジも frontmatter に載る。</b
+                >このノートがグラフ上で何とどう繋がっているかが、ノートの中で完結して読める。
+              </div>
+            </li>
+            <li>
+              <span class="tag-pin">③</span>
+              <div>
+                <b>「直接編集しない」マーカー。</b>読みは自由だが、書き込みは
+                CLI（<code>add-*</code> /
+                <code>commit-mutation</code
+                >）経由のみ。手編集すると検証・索引・git commit
+                の担保を迂回してしまう。
+              </div>
+            </li>
+            <li>
+              <span class="tag-pin">④</span>
+              <div>
+                <b>関係は <code>[[wikilink]]</code> としても出力される。</b
+                >これがあるおかげで、Obsidian
+                のグラフビュー・バックリンクがそのまま機能する。
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <h3 class="rv">Obsidian での歩き方</h3>
+        <div class="obs-points">
+          <div class="op rv">
+            <div class="t"><span class="dot"></span>グラフビュー</div>
+            <p>
+              エッジは wikilink
+              になっているので、グラフビューがそのまま知識グラフの可視化になる。フォルダ（=ノード型）で色分けすると、判断の群れと調査の系譜が見えてくる。
+            </p>
+          </div>
+          <div class="op rv">
+            <div class="t"><span class="dot"></span>バックリンク</div>
+            <p>
+              Decision
+              のノートを開いてバックリンクを見ると「この判断を前提にしている判断」「この判断が緩和しているリスク」が逆引きできる。影響範囲の直感的な把握に効く。
+            </p>
+          </div>
+          <div class="op rv">
+            <div class="t"><span class="dot"></span>フォルダ = ノード型</div>
+            <p>
+              「却下した案だけ一覧したい」なら
+              <code>RejectedOption/</code>
+              フォルダを開けばいい。型がフォルダなので、Obsidian
+              標準のファイルツリーが型別フィルタとして機能する。
+            </p>
+          </div>
+          <div class="op rv">
+            <div class="t"><span class="dot"></span>git で履歴も枝も</div>
+            <p>
+              vault は git 管理なので、知識の変更履歴は
+              <code>git log</code>
+              で追える。並行作業はブランチで隔離し、合流は機械マージでなく
+              <code>branch-merge</code> の意味的な分析を通す。
+            </p>
+          </div>
+        </div>
+
+        <div class="warn rv">
+          <span class="wi">⚠️</span>
+          <div>
+            <b>読みは Obsidian でも、書きは必ず CLI で。</b>vault
+            の手編集は禁止です（lock・楽観排他・schema 検証・原子書込・git
+            commit
+            のすべてを迂回してしまうため）。同じ理由で、エージェントが「グラフを読む」を
+            grep やファイル直読みに翻訳するのも設計違反で、まず
+            <code>ask</code> を使います。Obsidian
+            は人間のための<b>閲覧窓</b>です。
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ §08 書き方 ═══════════ -->
+      <section id="write">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 08</span>
+          <h2>書き方 — 何を、いつ、どう永続するか</h2>
+        </div>
+        <p class="sec-sub">
+          「覚えて」と言われるのを待たない。一段落したら能動的に書き戻す。
+        </p>
+
+        <p class="body rv">
+          単発の知識は <code>add-decision</code> /
+          <code>add-rejected-option</code> / <code>add-risk</code> /
+          <code>add-ok</code> / <code>add-investigation</code> /
+          <code>add-constraint</code> / <code>add-goal</code>
+          という型付きコマンドで、引数だけで書けます。エッジも
+          <code>--premise</code>（前提）や <code>--constrains</code>（制約対象）等のフラグで同時に張れ、
+          <code>--aliases</code> で検索用の別名（日本語の一般語 + 英語のコード語）を積めます。
+          複数ノード・エッジの張り替えを伴う複雑な変更は mutation plan（JSON）を
+          <code>commit-mutation</code> に渡します。 どちらも書き込み前に
+          <b>既存ノードの重複確認を必ず先に</b>行い、新規よりも skip / update /
+          supersede を優先します（書き込み時にも重複ゲートが embedding
+          照合で最後の網を張りますが、事前確認の代わりにはなりません）。
+        </p>
+
+        <div class="term rv">
+          <span class="dim"
+            ># 採用判断を 1 件永続化（--evidence で File へ接地。schema
+            上必須）</span
+          >
+          <span class="dim">$</span> node --experimental-strip-types
+          graphrag/cli.ts <span class="grn">add-decision</span> \ --system myapp
+          --slug session-store-redis \ --title
+          <span class="yel">"セッションは Redis に置く"</span> \ --summary
+          <span class="yel">"sticky session を不要にするため外部化"</span> \
+          --evidence <span class="cy">file:myapp:src/auth/session.ts</span>
+
+          <span class="dim"
+            ># 失敗した試みを記録（これが最も価値のある書き込み）</span
+          >
+          <span class="dim">$</span> node --experimental-strip-types
+          graphrag/cli.ts <span class="grn">add-rejected-option</span> \
+          --system myapp --slug session-in-memory \ --title
+          <span class="yel">"インメモリセッション"</span> \ --summary
+          <span class="yel"
+            >"ローリングデプロイで全ユーザーがログアウトする"</span
+          >
+          \ --rejected-in-favor-of
+          <span class="cy">decision:myapp:session-store-redis</span>
+        </div>
+
+        <p class="body rv">
+          書き込みはすべて、次のパイプラインを通って vault
+          に届きます。途中で失敗すれば all-or-nothing
+          でロールバックされ、壊れた状態は公開されません。
+        </p>
+        <div class="pipeline rv">
+          <span class="pstep">lock</span><span class="psep">→</span>
+          <span class="pstep">OCC (楽観排他)</span><span class="psep">→</span>
+          <span class="pstep">schema 検証</span><span class="psep">→</span>
+          <span class="pstep">重複ゲート</span><span class="psep">→</span>
+          <span class="pstep">原子 delta 書込</span><span class="psep">→</span>
+          <span class="pstep">vector 索引更新</span><span class="psep">→</span>
+          <span class="pstep">git commit</span>
+        </div>
+
+        <p class="body rv">
+          書き込みの出力には<b>提案（suggestions）</b>が同梱されます —
+          「この判断はこの File を統べていそう」という binding 候補、よく似た既存判断との関係候補、
+          進行中の調査への <code>led_to</code> 候補、直前に読んだ判断の前提（has_premise）候補。
+          <b>提案はどれも自動では張られません</b>。採るか・理由を持って見送るかはその場の判断で、
+          bind されていない知識ノードの総数（binding_debt）は常に会計として見えます。
+          昔の vault にこの提案を一括で当て直す入口は <code>edge-suggest-policy</code> です。
+        </p>
+
+        <div class="keep-grid">
+          <div class="keep yes rv">
+            <h5>🪨 永続するもの — 地層に残す</h5>
+            <ul>
+              <li>採用した設計判断と<b>その理由</b></li>
+              <li>
+                試して駄目だった案と<b>失敗モード</b>（特に拾う。書かないと同じ失敗を繰り返す）
+              </li>
+              <li>守るべき制約・将来踏みそうなリスク</li>
+              <li>運用のハマりどころ・ワークアラウンド</li>
+              <li>調査の経緯（何を調べ、何が判断に繋がったか）</li>
+            </ul>
+          </div>
+          <div class="keep no rv">
+            <h5>🍃 永続しないもの — 風化に任せる</h5>
+            <ul>
+              <li>session 内でしか使わない一時的な探索メモ</li>
+              <li>数分で戻せる scratch（変数名いじり、lint 通しの一時変更）</li>
+              <li>その場限りの観察・未確定の推測</li>
+              <li>コードや git 履歴を読めば分かること</li>
+            </ul>
+          </div>
+        </div>
+
+        <p class="body rv">
+          書くタイミングは「ユーザーが結論を述べたとき」だけではありません。<b>実装や修正が一段落した・コミットする直前</b>という
+          無言の行為もトリガーです（Proactive
+          Persistence）。その変更の背後にある判断・捨てた代替案・踏んだリスクを、
+          依頼を待たずに書き戻します。逆に、グラフと実コードの食い違いに偶然気づいたときは、勝手に書き換えず
+          選択肢（update / delete / skip /
+          investigate）を提示してユーザーの判断を仰ぎます（Drift
+          Reconciliation）。
+        </p>
+
+        <h3 class="rv">グラフを背骨にしたレビュー（姉妹スキル）</h3>
+        <p class="body rv">
+          読み書きの土台の上に、グラフと照合する 3
+          つのレビュー用スキルが載っています。目的は QA ではなく
+          <b>コントローラビリティ</b
+          >──「大枠はおまかせ、でも過去の判断と制約の枠は超えるな」を機械的に支えることです。
+        </p>
+        <div class="sis">
+          <a href="../skills/graphrag-design-review/SKILL.md" class="rv"
+            ><span class="sn">graphrag-design-review</span>
+            <p>
+              実装前の設計案を、過去の Decision・Constraint・Goal
+              と照合してレビューする。
+            </p></a
+          >
+          <a href="../skills/graphrag-pr-review/SKILL.md" class="rv"
+            ><span class="sn">graphrag-pr-review</span>
+            <p>
+              PR / diff
+              をグラフと照合し、概念レベルのズレ（方針違反・暗黙の影響圏）を検出する。
+            </p></a
+          >
+          <a href="../skills/graphrag-review-doc/SKILL.md" class="rv"
+            ><span class="sn">graphrag-review-doc</span>
+            <p>
+              人間レビュアー向けに、変更を概念レベルで説明する HTML
+              資料を生成する。
+            </p></a
+          >
+        </div>
+      </section>
+
+      <!-- ═══════════ §09 OKF との関係 ═══════════ -->
+      <section id="okf">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 09</span>
+          <h2>OKF (Open Knowledge Format) との関係</h2>
+        </div>
+        <p class="sec-sub">
+          フォーマットの互換性と、フォーマットの外にある仕組みの話。
+        </p>
+
+        <p class="body rv">
+          2026 年、Google が
+          <a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md">Open Knowledge Format (OKF) v0.1</a>
+          を提唱しました。「YAML frontmatter 付き Markdown ファイルのディレクトリを git で管理する」という LLM Wiki パターンを、
+          ベンダー中立なフォーマット標準として定義するものです。
+        </p>
+
+        <h3 class="rv">vault は OKF 適合</h3>
+        <p class="body rv">
+          OKF v0.1 の適合条件は 3 つだけです。
+          graphrag-skill の vault はそのすべてを満たしており、<b>変換やエクスポートなしでそのまま OKF v0.1 に適合</b>しています。
+        </p>
+
+        <div class="okf-check rv">
+          <div class="okf-conds">
+            <div class="okf-row">
+              <span class="cond-no">条件 ①</span>
+              <span class="cond-desc">予約名以外の <code>.md</code> に解析可能な YAML frontmatter がある</span>
+              <span class="cond-how">全ノードファイルに frontmatter あり</span>
+              <span class="cond-ok">✓</span>
+            </div>
+            <div class="okf-row">
+              <span class="cond-no">条件 ②</span>
+              <span class="cond-desc">frontmatter に空でない <code>type</code> フィールドがある</span>
+              <span class="cond-how"><code>type</code> は schema 上の必須フィールド</span>
+              <span class="cond-ok">✓</span>
+            </div>
+            <div class="okf-row">
+              <span class="cond-no">条件 ③</span>
+              <span class="cond-desc">予約ファイル（<code>index.md</code> / <code>log.md</code>）が存在する場合は規定構造に従う</span>
+              <span class="cond-how">予約ファイルを使用していない</span>
+              <span class="cond-ok">✓</span>
+            </div>
+          </div>
+          <div class="okf-arrow">→</div>
+          <div class="okf-result">
+            <span class="check-all">3 / 3 適合</span>
+            <span class="check-label">vault はそのまま<br>OKF v0.1 に適合</span>
+          </div>
+        </div>
+
+        <h3 class="rv">フォーマットの外にあるもの</h3>
+        <p class="body rv">
+          graphrag-skill が提供しているのは、フォーマットではなく<b>仕組み</b>です。
+          意味を抽出すること、意味と意味を型付きエッジでつなぐこと、それを人間が管理可能な形式に固定すること、
+          そしてその一連の流れをスキルとして自動化すること──これらはすべてフォーマットの上位に位置する層であり、
+          OKF の仕様範囲には含まれていません。
+        </p>
+
+        <div class="vs rv">
+          <table>
+            <tr>
+              <th>層</th>
+              <th>OKF v0.1</th>
+              <th class="win">graphrag-skill</th>
+            </tr>
+            <tr>
+              <td>ファイル形式</td>
+              <td>YAML frontmatter + Markdown</td>
+              <td class="win">同じ（OKF 適合）</td>
+            </tr>
+            <tr>
+              <td>型の定義</td>
+              <td><code>type</code> は自由文字列。型の一覧や意味は未定義</td>
+              <td class="win">12 種の型付きノード。型ごとに必須フィールドと検証規則</td>
+            </tr>
+            <tr>
+              <td>関係の表現</td>
+              <td>Markdown リンクの地の文。関係の種類は機械的に取れない</td>
+              <td class="win">14 種の型付きエッジ。型ペア検証つき</td>
+            </tr>
+            <tr>
+              <td>整合性の検証</td>
+              <td>壊れたリンクも許容。未知フィールドは無視</td>
+              <td class="win"><code>validateGraph</code> で schema 検証、source backing 必須</td>
+            </tr>
+            <tr>
+              <td>書き込みの制御</td>
+              <td>規定なし</td>
+              <td class="win">lock → OCC → 検証 → 重複ゲート → 原子 delta → 索引 → git commit</td>
+            </tr>
+            <tr>
+              <td>検索</td>
+              <td>規定なし（消費者の実装次第）</td>
+              <td class="win">semantic + lexical 合算。retrieval ladder で段上げ</td>
+            </tr>
+          </table>
+        </div>
+
+        <p class="body rv">
+          つまり、OKF は vault が既に満たしている<b>ファイル形式の層</b>を標準化したものであり、
+          graphrag-skill がやっていることの大部分はその上の層にあります。
+          フォーマットが共通であること自体は良いことですが、
+          同じフォーマットの知識が実際に相互運用できるかどうかは、型・関係・検証の取り決めに依存します。
+        </p>
+
+        <p class="body rv">
+          現時点では、OKF はフォーマット仕様のみの公開です。
+          型の体系・型付きエッジの検索・検証つき書き込みといった、知識を実際に運用するための層を担うツール群はまだ存在しません。
+          graphrag-skill はその層を既に持っているため、<b>いま OKF に乗り換える理由はありません</b>。
+          フォーマットの互換性は既にあるので、OKF のエコシステムが成熟した時点で改めて判断すれば十分です。
+        </p>
+
+        <h3 class="rv">OKF が広く普及した場合</h3>
+        <p class="body rv">
+          OKF のエコシステムが成熟し、型付きエッジの検索や検証つきの書き込みまでカバーするツール群が揃った場合、
+          選択肢は大きく 2 つあります。
+        </p>
+
+        <div class="keep-grid">
+          <div class="keep yes rv">
+            <h5>A. このスキルを使い続ける</h5>
+            <ul>
+              <li>vault は OKF 適合なので、OKF 対応の閲覧ツールや可視化ツールをそのまま併用できる</li>
+              <li>型付きエッジ・検証・自動書き戻しの仕組みはこのスキルが引き続き担う</li>
+              <li><b>注意点:</b> OKF 対応の別ツールで vault にファイルを追加した場合、graphrag-skill の型制約・エッジ検証・重複ゲート等の保護は効かない。手動追加と同じ扱いになる</li>
+            </ul>
+          </div>
+          <div class="keep yes rv">
+            <h5>B. OKF エコシステムに全面移行する</h5>
+            <ul>
+              <li>OKF ツール群が型定義・関係の検索・検証つき書き込みまでカバーするようになった場合、このスキルの役割はそちらに委譲できる</li>
+              <li>vault のファイルは OKF 適合なので、移行時にデータの変換は不要</li>
+              <li>vault 固有のフィールド（<code>edges</code>、<code>aliases</code> 等）は OKF の「未知フィールドを許容する」ルールで保持されるため、データが壊れることはない</li>
+            </ul>
+          </div>
+        </div>
+
+        <p class="body rv">
+          いずれの場合も、<b>フォーマットの互換性は既にある</b>ので、将来の判断を急ぐ必要はありません。
+        </p>
+      </section>
+
+      <!-- ═══════════ §10 Token Capital との親和性 ═══════════ -->
+      <section id="token-capital">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 10</span>
+          <h2>Token Capital — AI 時代の知識資産とこのスキルの位置づけ</h2>
+        </div>
+        <p class="sec-sub">
+          汎用モデルを入れ替えても残る「ベテラン社員の頭の中」を、プレーンテキストで持つ。
+        </p>
+
+        <p class="body rv">
+          2026 年 6 月、Microsoft CEO の Satya Nadella は
+          <b>Human Capital（人の知識・判断・パターン認識）</b>と
+          <b>Token Capital（企業が構築・所有する AI 能力）</b>の複利的成長を論じました。
+          要旨は 3 つです。
+        </p>
+
+        <div class="keep-grid">
+          <div class="keep yes rv">
+            <h5>Learning Loop</h5>
+            <p>人と AI の間に認知ループを作り、使うたびに改善するシステム。
+            改善されたワークフローがより良い信号を生み、暗黙知の蓄積を加速する複利構造。</p>
+          </div>
+          <div class="keep yes rv">
+            <h5>Company Veteran テスト</h5>
+            <p>汎用モデルを入れ替えても、その企業固有の「ベテラン的知識」は失われないこと。
+            モデルに依存しない知識の所有が問われる。</p>
+          </div>
+          <div class="keep yes rv">
+            <h5>Hill Climbing Machine</h5>
+            <p>IP としての学習ループ。他の資産と異なり複利的に蓄積し、
+            早く始めた企業ほど追いつかれにくい優位を持つ。</p>
+          </div>
+        </div>
+
+        <h3 class="rv">このスキルが本質的に一致する点</h3>
+        <p class="body rv">
+          graphrag-skill はこのビジョンの語彙を借りずに、独立して同じ結論に到達しています。
+        </p>
+
+        <div class="keep-grid">
+          <div class="keep yes rv">
+            <h5>学習ループの構造化</h5>
+            <p><code>ask</code> で引く → 作業する → <code>add-*</code> で書き戻す。
+            このサイクルが Hill Climbing Machine の具体実装です。
+            単なるログではなく Decision / RejectedOption / Risk という型で構造化されているため、
+            「回るだけ」ではなく「登り続ける」ループになります。</p>
+          </div>
+          <div class="keep yes rv">
+            <h5>Company Veteran テスト合格</h5>
+            <p>vault は Obsidian Markdown で、モデルに一切依存しません。
+            Claude を GPT に替えても Gemini に替えても、
+            「なぜこの設計にしたか」「なぜこの案を却下したか」は失われません。
+            <b>ベテラン社員の頭の中をプレーンテキストで持つ</b>設計です。</p>
+          </div>
+          <div class="keep yes rv">
+            <h5>知識資産の自己所有</h5>
+            <p>ランタイム依存ゼロ・ローカル完結。
+            SaaS に知識を預けず、自分のリポジトリ内で完結します。
+            少数モデルへの価値集中を避け、各チームが自分の学習ループを持つ構造です。</p>
+          </div>
+        </div>
+
+        <h3 class="rv">スケールと前提の違い</h3>
+        <p class="body rv">
+          Nadella のビジョンは企業組織レベル（数千人規模の制度的記憶）を射程としており、
+          Private RL / Private Evals によるモデル自体の改善を含みます。
+          graphrag-skill はプロジェクト/リポジトリレベルで、
+          モデルを変えずコンテキスト（知識グラフ）を改善するアプローチです。
+        </p>
+        <p class="body rv">
+          この違いは「合わない」のではなく<b>レイヤーが違います</b>。
+          Fine-tuning / RL は十分な利用規模がないと投資が回収できず、
+          小〜中規模チームではコンテキストの充実が正しい投資配分です。
+          逆に、このスキルが持つ<b>モデル非依存性</b>（vault はプレーンテキスト）・<b>検証可能性</b>（全履歴が git で追え人間が読める）・<b>耐障害性</b>（クラウドが落ちても動く）は、
+          モデルの重みに知識を埋め込む方式では得にくい利点です。
+        </p>
+
+        <h3 class="rv">組織スケールへの道 — focused vault + 横断検索</h3>
+        <p class="body rv">
+          大きな組織で 1 つの vault に全知識をフラットに入れると、
+          「関係ない似たもの」がヒットします。
+          embedding の cosine は「意味が近い」を測りますが、「自分にとって関連がある」は測れません。
+          認証チームの Decision と決済チームの Decision は語彙が似ていても、互いの作業には関係がない。
+        </p>
+        <p class="body rv">
+          自然なアーキテクチャは、<b>チーム/ドメインごとの focused vault</b>（日常の ask はここに閉じる）と、
+          <b>必要な時だけ他の vault を覗く横断検索レイヤー</b>です。
+          Nadella のビジョンをフラクタルに適用した構造で、
+          1000 人規模を 1 つの巨大 vault でなくフェデレーションで扱います。
+          既に world ヒント分離の実測（VAULT.md の lexical が 7/7 で支配的）がこの方向を裏付けています。
+        </p>
+
+        <h3 class="rv">フィードバック — グラフのトポロジーを育てる</h3>
+        <p class="body rv">
+          学習ループが複利的に回るには、フィードバック信号が要ります。
+          ただし、それは「<code>ask</code> が何回使われたか」という利用トレースではありません。
+        </p>
+        <p class="body rv">
+          実際のフィードバックは、不具合や考慮漏れが見つかった時に判明します。
+          「本来 Vein/Pocket があって、そこから Constraint がエッジで繋がっていれば、
+          <code>ask</code> で引っ張れて防げた不具合だった」——
+          この<b>「あるべきグラフ構造の不在」の検出</b>がフィードバックの本質です。
+        </p>
+        <p class="body rv">
+          このスキルは、不具合や見落とし発見時に
+          「グラフに適切な構造があれば回避できたか？ あるべきノードが存在しない状態か？」
+          を自問し、不足する Vein/Pocket とエッジを補う<b>Topology Gap Review</b> を備えています。
+          検索精度の改善ではなく、グラフのトポロジー自体を育てる行為が学習ループを閉じます。
+        </p>
+      </section>
+    </main>
+
+    <footer class="site">
+      <div class="foot">
+        <div>
+          graphrag-skill — GraphRAG knowledge base for Claude Code（v3: vault
+          単一正本、外部 graph DB なし）
+        </div>
+        <div class="refs">
+          <span>正本スキーマ: <code>graphrag/schema.ts</code></span>
+          <span
+            >スキル定義: <code>skills/graphrag-knowledge/SKILL.md</code></span
+          >
+          <span
+            >スキーマの根拠: <code>references/carving-rationale.md</code></span
+          >
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      const io = new IntersectionObserver(
+        (es) => {
+          es.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add("on");
+              io.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.08, rootMargin: "0px 0px -40px 0px" },
+      );
+      document.querySelectorAll(".rv").forEach((el) => io.observe(el));
+    </script>
+  </body>
+</html>

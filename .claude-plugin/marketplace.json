@@ -23,6 +23,11 @@
       "name": "tailored-reviewer",
       "description": "Generate project-tailored AI review skills by collecting system-specific knowledge. Complements pr-review-toolkit with project-specific review perspectives that detect both short-term bugs and long-term detriments.",
       "source": "./plugins/tailored-reviewer"
+    },
+    {
+      "name": "graphrag-knowledge",
+      "description": "プロジェクトの永続知識グラフ(採用判断/却下案/制約/目的/リスク/運用知識)を vault(Obsidian Markdown)を単一正本として安全に読み書きするスキル + CLI。",
+      "source": "./plugins/graphrag-knowledge"
     }
   ]
 }

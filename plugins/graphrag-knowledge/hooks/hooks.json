@@ -1,0 +1,17 @@
+{
+  "description": "git commit 直前に、変更の背後にある判断・却下案・リスク・運用知識の graphrag への書き戻しを促す (常に非ブロッキング)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/proactive-persistence-reminder.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

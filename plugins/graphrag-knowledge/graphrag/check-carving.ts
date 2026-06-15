@@ -1,0 +1,808 @@
+// carving 品質ゲート (carving-rules.md「carving 提出前チェックリスト」の自動化)
+//
+// 機械的に判定できる歪みを警告/エラーとして出力する。
+// LLM レビューの前段。mutation apply 後に走らせて、警告ゼロを確認してから完了とする。
+//
+// 検査項目:
+//   0.  要約が機械テンプレ (summary_provisional) のまま残っていないか (ERROR)
+//   0b. carve 未完 (candidate:true 残存 / "band N/M"・"(N files)"・"candidate cN" の
+//       プレースホルダ title) が残っていないか (ERROR)。カスみたいな命名の確定を防ぐ。
+//   1. Layer slug が意味語か (連番 band0/band1/... は警告)
+//   2. role = documentation のファイルが Layer に居ないか (構造除外)
+//   3. 全実装ファイル (role ∈ source/test/config) が Component に所属
+//   4. 全実装ファイル + packaging が Layer に所属
+//   5. Component と Concern のメンバー Jaccard > 0.5 は二重表現疑い
+//   6. Concern の主 Component 占有率 > 70% は単一 Component 寄り疑い
+//   7. cross_component_in_degree シグナルが全 File で空 (indexer 再 index + sync 必要)
+//   8. 1 ファイルが ≧3 Concern に所属は単一動機原則違反疑い
+//   C3. allowed-orphan の設定化: .graphrag/carving.json (literal path 免除) を統合し、
+//       config 不正/stale を ERROR、builtin 重複と免除比率 >15% を WARN。免除会計を常時印字。
+//   C1. knowledge-floor: Goal 0 件 / Constraint 0 件は WARN (知識軸が未シーディング)。
+//   B2'. superseded-premise: 現役ノードが終端 state のノードへ has_premise している組は WARN。
+import fs from "node:fs";
+import { canonicalType } from "./schema.ts";
+import {
+  loadCarvingConfig,
+  resolveCarvingConfigPath,
+  staleConfigEntries,
+  type CarvingAllowedOrphan
+} from "./carving-config.ts";
+
+function parseArgs(argv: string[]) {
+  const p: any = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === "--") continue;
+    if (!a?.startsWith("--")) continue;
+    const k = a.slice(2);
+    const v = argv[i + 1];
+    if (v && !v.startsWith("--")) { p[k] = v; i += 1; } else p[k] = true;
+  }
+  return {
+    graphPath: typeof p.graph === "string" ? p.graph : process.env.GRAPHRAG_GRAPH_JSON_PATH,
+    vectorPath: typeof p["vector-index"] === "string" ? p["vector-index"] : process.env.GRAPHRAG_VECTOR_INDEX_PATH,
+    jaccardThreshold: Number.isFinite(Number(p["jaccard-threshold"])) ? Number(p["jaccard-threshold"]) : 0.4,
+    dominanceThreshold: Number.isFinite(Number(p["dominance-threshold"])) ? Number(p["dominance-threshold"]) : 0.7,
+    duplicateThreshold: Number.isFinite(Number(p["duplicate-threshold"])) ? Number(p["duplicate-threshold"]) : 0.92,
+    configPath: typeof p.config === "string" ? p.config : undefined,
+    json: Boolean(p.json),
+  };
+}
+
+function dot(a: number[], b: number[]): number {
+  let s = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i += 1) s += a[i] * b[i];
+  return s;
+}
+function vectorNorm(v: number[]): number {
+  let s = 0;
+  for (let i = 0; i < v.length; i += 1) s += v[i] * v[i];
+  return Math.sqrt(s);
+}
+function cosineSim(a: number[], b: number[], na: number, nb: number): number {
+  if (na === 0 || nb === 0) return 0;
+  return dot(a, b) / (na * nb);
+}
+
+type Severity = "ERROR" | "WARN" | "INFO";
+interface Finding {
+  severity: Severity;
+  rule: string;
+  message: string;
+  details?: any;
+}
+
+// allowed-orphan の三層 (下から):
+//   builtin — どのプロジェクトでも「構造的に Pocket に属さない」ものだけ (下記基準)。
+//   role 免除 — 明確に非実装の閉集合 (documentation / generated) のみ。config/entrypoint 等の
+//     role は role だけでは免除されず、builtin 汎用パターンに該当する場合のみ免除 (AND)。
+//   config — プロジェクト固有の免除は .graphrag/carving.json に literal path + reason で明記。
+//
+// builtin に残す基準 (どれにも該当しないパターンは builtin に置かず config に逃がす):
+//   a. composition root — 全部品を束ねる配線そのもので、どの部品の内側でもない
+//   b. 横断 utility / 共有定義 — logger / utils / shared/types|constants のように全部品が依る土台
+//   c. packaging — manifest / lock / ツール設定 / 環境変数 / 設定雛形。コードでなく梱包
+//   d. 自動生成・静的 asset — 人が設計しない出力物
+// 特定プロジェクト出自のパターン (windows-shell / winsw / *.utf8.bat / ui/index.css /
+// plans/*.html / tests/setup-* / ui/utils/browser.ts) は REMOVED_BUILTIN_ORPHAN_PATTERNS に
+// 移して免除から外した (carving-allow migrate が graph から config エントリ案を出す)。
+export const BUILTIN_ORPHAN_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  // a. composition root
+  { name: "composition-root-services", pattern: /\/services\.ts$/ },
+  { name: "composition-root-app", pattern: /\/App\.tsx$/ },
+  { name: "composition-root-main", pattern: /\/main\.tsx$/ },
+  { name: "composition-root-server-index", pattern: /\/server\/index\.ts$/ },
+  // b. 横断 utility / 共有定義
+  { name: "logger", pattern: /\/logger\.ts$/ },
+  { name: "utils", pattern: /\/utils\.ts$/ },
+  { name: "shared-types", pattern: /\/shared\/types\.ts$/ },
+  { name: "shared-constants", pattern: /\/shared\/constants\.ts$/ },
+  // c. packaging: build / test config 型定義・tooling 設定
+  { name: "ambient-types", pattern: /\/vite-env\.d\.ts$/ },
+  { name: "eslint-config", pattern: /\/eslint\.config\.(mjs|js|cjs)$/ },
+  { name: "vite-config", pattern: /\/vite\.config\.[mc]?[jt]s$/ },
+  { name: "vitest-config", pattern: /\/vitest\.config\.[mc]?[jt]s$/ },
+  { name: "playwright-config", pattern: /\/playwright\.config\.[mc]?[jt]s$/ },
+  { name: "prisma-config", pattern: /\/prisma\.config\.[mc]?[jt]s$/ },
+  // c. packaging: ルート直下にも置かれる manifest / lock / workspace。先頭スラッシュ必須だと
+  // repo ルートの package.json / tsconfig.base.json 等を取りこぼすため (^|\/) で両対応。
+  { name: "tsconfig", pattern: /(^|\/)tsconfig(\.[a-z]+)?\.json$/ },
+  { name: "package-manifest", pattern: /(^|\/)package\.json$/ },
+  { name: "lockfile", pattern: /(^|\/)(pnpm-lock\.ya?ml|package-lock\.json|yarn\.lock)$/ },
+  { name: "workspace-manifest", pattern: /(^|\/)pnpm-workspace\.ya?ml$/ },
+  // c. packaging: 環境変数ファイル。命名規約のみ: .env / app.env / .env.<environment> /
+  // app.env.example 等。末尾を環境名サフィックスに限定し、config.env.ts / data.env.json の
+  // ような「.env を名前に含むコード/データ実体」を免除しない (網羅性ゲートの取りこぼし防止)。
+  { name: "env-file", pattern: /(^|\/)[^/]*\.env(\.(example|sample|local|development|production|test|staging|template|defaults?))?$/i },
+  // c. packaging: 設定の雛形 (family.example.json 等) のみ。実装サンプル (.example.ts/.js) は
+  // コード実体なので免除せず Pocket 網羅性の対象に残す。
+  { name: "config-example", pattern: /\.example\.(json|ya?ml|toml)$/ },
+  { name: "claude-settings", pattern: /(^|\/)\.claude\/settings(\.[a-z]+)?\.json$/ },
+  { name: "dockerfile", pattern: /\/Dockerfile$/ },
+  { name: "dockerignore", pattern: /\.dockerignore$/ },
+  { name: "gitignore", pattern: /\.gitignore$/ },
+  { name: "gitattributes", pattern: /\.gitattributes$/ },
+  // d. 自動生成 / 静的 asset / DB migration
+  { name: "generated", pattern: /\/generated\// },
+  { name: "public-assets", pattern: /\/public\/.*\.(svg|png|jpg|ico|webp)$/ },
+  { name: "prisma-migrations", pattern: /\/prisma\/migrations\// },
+  { name: "prisma-schema", pattern: /\/prisma\/schema\.prisma$/ },
+];
+
+// builtin から外した特定プロジェクト出自のパターン。免除には使わない。
+// carving-allow migrate が graph 内の該当 File を config エントリ案に変換するために保持
+// (移行等価性: 旧 builtin で免除されていたファイルを黙って ERROR に落とさず移行先を示す)。
+export const REMOVED_BUILTIN_ORPHAN_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: "ui-utils-browser", pattern: /\/ui\/utils\/browser\.ts$/ },
+  { name: "theme-entry-css", pattern: /\/ui\/index\.css$/ },
+  { name: "windows-shell-script", pattern: /^[^/]+\.(bat|sh)$/ },
+  { name: "utf8-bat", pattern: /^[^/]+\.utf8\.bat$/ },
+  { name: "plans-html", pattern: /^plans\/.*\.html$/ },
+  { name: "winsw-service-xml", pattern: /\/winsw\/[^/]+\.xml$/ },
+  { name: "tests-setup", pattern: /\/tests\/setup-[^/]+\.ts$/ },
+];
+
+/** builtin 免除に該当すればそのパターン名、しなければ null (免除会計の根拠表示用)。 */
+export function builtinOrphanMatch(filePath: string): string | null {
+  for (const b of BUILTIN_ORPHAN_PATTERNS) if (b.pattern.test(filePath)) return b.name;
+  return null;
+}
+
+export function isAllowedOrphan(filePath: string): boolean {
+  return builtinOrphanMatch(filePath) !== null;
+}
+
+// role だけで免除してよいのは明確に非実装の閉集合のみ。ここを広げると roleFor の判定変更で
+// orphan 検出が黙って空になる (silent pass)。ui_component / api_route / entrypoint / config 等は
+// 実装なので、builtin パターンか config の literal path に該当しない限り Pocket 所属を要求する。
+const ROLE_ALONE_EXEMPT = new Set(["documentation", "generated"]);
+
+export function main(argv: string[] = process.argv.slice(2)): void {
+  const args = parseArgs(argv);
+  if (!args.graphPath) {
+    console.error("Refusing to check: graph.json path not specified.");
+    console.error("Pass --graph <path> or set GRAPHRAG_GRAPH_JSON_PATH env.");
+    process.exit(1);
+  }
+  const graph = JSON.parse(fs.readFileSync(args.graphPath, "utf8"));
+
+  const findings: Finding[] = [];
+
+  const files = graph.nodes.filter((n: any) => n.type === "File");
+  // canonical (Pocket/Vein/Stratum) と旧 alias (Component/Concern/Layer) の両方を拾う。
+  // 片方しか見ないと、indexer が canonical を吐くようになった graph でゲートが 0 件検出に
+  // なり、網羅性チェックが「歪みゼロ」と誤って通る (silent pass) ため canonicalType で正規化。
+  const components = graph.nodes.filter((n: any) => canonicalType(n.type) === "Pocket");
+  const concerns = graph.nodes.filter((n: any) => canonicalType(n.type) === "Vein");
+  const layers = graph.nodes.filter((n: any) => canonicalType(n.type) === "Stratum");
+
+  // ─────────────────────────────────────────────────────────────
+  // (C3) carving.json (プロジェクト固有 allowed-orphan) の読み込みと検証
+  // ─────────────────────────────────────────────────────────────
+  const graphFilePaths = new Set<string>(files.map((f: any) => String(f.path ?? "")));
+  const configPath = args.configPath ?? resolveCarvingConfigPath(args.graphPath);
+  const loadedConfig = loadCarvingConfig(configPath);
+  const configOrphans = new Map<string, CarvingAllowedOrphan>();
+  if (loadedConfig.exists) {
+    for (const err of loadedConfig.errors) {
+      findings.push({
+        severity: "ERROR",
+        rule: "carving-config-invalid",
+        message: `carving.json (${configPath}): ${err}`,
+      });
+    }
+    if (loadedConfig.config) {
+      const stale = staleConfigEntries(loadedConfig.config, graphFilePaths);
+      if (stale.length > 0) {
+        findings.push({
+          severity: "ERROR",
+          rule: "carving-config-stale",
+          message: `carving.json に graph に存在しない path の免除エントリが ${stale.length}件 (stale-exemption)。免除は腐らせず掃除する: carving-allow remove --path <p> で削除するか path を直す。`,
+          details: stale.slice(0, 30),
+        });
+      }
+      for (const entry of loadedConfig.config.allowed_orphans) {
+        configOrphans.set(entry.path, entry);
+        const dup = builtinOrphanMatch(entry.path);
+        if (dup) {
+          findings.push({
+            severity: "WARN",
+            rule: "config-duplicates-builtin",
+            message: `carving.json の免除 '${entry.path}' は builtin:${dup} と重複。config エントリは不要 (削除推奨)。`,
+          });
+        }
+      }
+    }
+  }
+
+  // 免除判定 + 会計の根拠種別。role 免除は非実装の閉集合のみ、それ以外は builtin → config の順。
+  function exemptionFor(f: any): string | null {
+    if (ROLE_ALONE_EXEMPT.has(f.role)) return `role:${f.role}`;
+    const builtin = builtinOrphanMatch(String(f.path ?? ""));
+    if (builtin) return `builtin:${builtin}`;
+    if (configOrphans.has(String(f.path ?? ""))) return `config:${f.path}`;
+    return null;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (0) 要約が機械テンプレ (summary_provisional) のまま残っていないか
+  // ─────────────────────────────────────────────────────────────
+  // index-codebase が出す summary は「構成要素のサマリ」(File なら symbol/import、
+  // Pocket/Stratum candidate なら束ねた File 群) の機械テンプレであって「意味」ではない。
+  // LLM が意味に書き換えるまで残る provisional は retrieval/concern-suggest の品質を直接
+  // 劣化させる (embedding が構成要素語に支配され縦串が言語/階層クラスタに退化)。空でない
+  // =完了に見えるので、File も Pocket/Stratum candidate も対称にゲートで明示的に弾く。
+  const provisionalNodes = graph.nodes.filter((n: any) => n.summary_provisional === true);
+  if (provisionalNodes.length > 0) {
+    const byType: Record<string, number> = {};
+    for (const n of provisionalNodes) byType[n.type] = (byType[n.type] || 0) + 1;
+    findings.push({
+      severity: "ERROR",
+      rule: "summary-provisional",
+      message: `要約が機械テンプレのまま (summary_provisional): ${provisionalNodes.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各ノードの「構成要素サマリ」を「意味」(何をする/何のため/どの関心) に書き換え summary_provisional を外す。テンプレのままだと concern-suggest が言語/階層クラスタに退化する。`,
+      details: provisionalNodes.slice(0, 30).map((n: any) => n.path || n.id),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (0b) carve 未完: candidate:true のまま / プレースホルダ命名が残っていないか
+  // ─────────────────────────────────────────────────────────────
+  // indexer が出す Pocket/Stratum 候補は candidate:true + 機械プレースホルダ命名
+  // ("Stratum band 0/3 (41 files)" / "Pocket candidate c1" 等)。概念化パスで意味命名し
+  // candidate:false にするのが carve。candidate が残る = 未 carve = 機械名が居座る。
+  // summary_provisional だけに頼ると、旧 indexer 製 (フラグ未導入) の candidate を取り
+  // 逃すため、candidate フラグ自体と命名パターンの両方を ERROR で弾く (format 非依存)。
+  const crosscut = [...components, ...concerns, ...layers];
+  const uncarved = crosscut.filter((n: any) => n.candidate === true);
+  if (uncarved.length > 0) {
+    const byType: Record<string, number> = {};
+    for (const n of uncarved) byType[canonicalType(n.type)] = (byType[canonicalType(n.type)] || 0) + 1;
+    findings.push({
+      severity: "ERROR",
+      rule: "candidate-uncarved",
+      message: `carve 未完の候補が残存 (candidate:true): ${uncarved.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各候補に「意味」の title/summary を与え、candidate:false にし、judgment_input を削除する (機械プレースホルダ命名のまま確定させない)。`,
+      details: uncarved.slice(0, 30).map((n: any) => `${n.id} (${n.title})`),
+    });
+  }
+  // 命名パターン: candidate フラグが落ちていても、title に機械プレースホルダの痕跡
+  // (band N/M, "(NN files)", "candidate cN", "(NN ファイル)") が残るものを弾く。
+  // indexer の実プレースホルダ: "Stratum band 0/3 (41 files)" / "Pocket candidate c1 (N files)"。
+  // candidate は `c` 接頭辞付き連番に限定し、"candidate 5 selection" のような正当名を誤爆しない。
+  const PLACEHOLDER_TITLE = /(band\s*\d+\s*\/\s*\d+)|(\(\s*\d+\s*(files?|ファイル)\s*\))|(candidate\s+c\d+)/i;
+  const placeholderTitled = crosscut.filter((n: any) => PLACEHOLDER_TITLE.test(String(n.title ?? "")));
+  if (placeholderTitled.length > 0) {
+    findings.push({
+      severity: "ERROR",
+      rule: "placeholder-title",
+      message: `機械プレースホルダ命名が title に残存: ${placeholderTitled.length}件。"band N/M" / "(N files)" / "candidate cN" 等はメンバーの構成要素であって意味ではない。その層/塊/鉱脈が「何を担うか」を表す意味命名に置き換える (carving-rules.md「意味ある命名」)。`,
+      details: placeholderTitled.slice(0, 30).map((n: any) => `${n.id} (${n.title})`),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (1) Layer slug が意味語か (連番 band0/band1/... 検出)
+  // ─────────────────────────────────────────────────────────────
+  for (const l of layers) {
+    const slug = (l.id || "").split(":").pop() || "";
+    if (/^band\d+$/.test(slug)) {
+      findings.push({
+        severity: "WARN",
+        rule: "meaningful-slug",
+        message: `Stratum (= Layer) slug が連番: ${slug} (意味語に rename 推奨。Pocket (= Component) と同じく carving-rules.md「意味slug 必須」が適用される)`,
+      });
+    }
+  }
+  for (const c of components) {
+    const slug = (c.id || "").split(":").pop() || "";
+    if (/^c\d+$/.test(slug)) {
+      findings.push({
+        severity: "WARN",
+        rule: "meaningful-slug",
+        message: `Pocket (= Component) slug が連番: ${slug}`,
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (2) role = documentation のファイルが Layer に居ないか (構造除外)
+  // ─────────────────────────────────────────────────────────────
+  const outEdges: Record<string, any[]> = {};
+  const inEdges: Record<string, any[]> = {};
+  for (const e of graph.edges) {
+    (outEdges[e.from] = outEdges[e.from] || []).push(e);
+    (inEdges[e.to] = inEdges[e.to] || []).push(e);
+  }
+  const fileById = new Map<string, any>(files.map((f: any) => [f.id, f]));
+
+  const docInLayer: string[] = [];
+  for (const l of layers) {
+    for (const e of outEdges[l.id] || []) {
+      if (e.type !== "evidenced_by") continue;
+      const f = fileById.get(e.to);
+      if (f && f.role === "documentation") docInLayer.push(`${l.id.split(":").pop()} ← ${f.path}`);
+    }
+  }
+  if (docInLayer.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "layer-no-doc",
+      message: `role=documentation の File が Stratum (= Layer) に所属している (${docInLayer.length}件)。Stratum は実行依存ピラミッドの位置を表すため、doc は除外して Decision/OK の documented_by 出所として扱うのが筋。`,
+      details: docInLayer.slice(0, 20),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (3) 全実装ファイルが Component に所属 (免除 = role 閉集合 / builtin / config の三層)
+  // ─────────────────────────────────────────────────────────────
+  const componentMembers = new Map<string, Set<string>>();
+  for (const c of components) {
+    const s = new Set<string>();
+    for (const e of outEdges[c.id] || []) {
+      if (e.type === "evidenced_by") s.add(e.to);
+    }
+    componentMembers.set(c.id, s);
+  }
+  const allComponentFiles = new Set<string>();
+  for (const s of componentMembers.values()) for (const x of s) allComponentFiles.add(x);
+
+  // 旧実装は role ∈ {source,test,config} だけを検査対象にしていたため、roleFor が
+  // ui_component / api_route / entrypoint と判定したファイルが Pocket 未所属でも素通りした
+  // (silent pass)。全 File を対象にし、免除は exemptionFor の三層だけに限定する。
+  // exemptions = Pocket 未所属で実際に免除が行使されたもの (免除会計の本体)。
+  const exemptions: { path: string; basis: string }[] = [];
+  const compOrphans: any[] = [];
+  for (const f of files) {
+    if (allComponentFiles.has(f.id)) continue;
+    const basis = exemptionFor(f);
+    if (basis) {
+      exemptions.push({ path: f.path, basis });
+      continue;
+    }
+    compOrphans.push(f.path);
+  }
+  if (compOrphans.length > 0) {
+    findings.push({
+      severity: "ERROR",
+      rule: "component-coverage",
+      message: `Pocket (= Component) 未所属の実装ファイル: ${compOrphans.length}件 (allowed-orphan 自動判定後)。carving-rules.md 網羅性ゲート違反。`,
+      details: compOrphans.slice(0, 30),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (4) 全実装ファイル + packaging が Layer に所属
+  // ─────────────────────────────────────────────────────────────
+  const layerMembers = new Map<string, Set<string>>();
+  for (const l of layers) {
+    const s = new Set<string>();
+    for (const e of outEdges[l.id] || []) {
+      if (e.type === "evidenced_by") s.add(e.to);
+    }
+    layerMembers.set(l.id, s);
+  }
+  const allLayerFiles = new Set<string>();
+  for (const s of layerMembers.values()) for (const x of s) allLayerFiles.add(x);
+
+  const layerOrphans: any[] = [];
+  for (const f of files) {
+    if (allLayerFiles.has(f.id)) continue;
+    // (3) と同じ三層免除 (documentation/generated は role 閉集合、generated/ は builtin が拾う)
+    if (exemptionFor(f)) continue;
+    // ビルド対象でない成果物も除外
+    if (/\/dist\//.test(f.path || "")) continue;
+    if (/\/node_modules\//.test(f.path || "")) continue;
+    layerOrphans.push(f.path);
+  }
+  if (layerOrphans.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "layer-coverage",
+      message: `Stratum (= Layer) 未所属の実装ファイル: ${layerOrphans.length}件 (allowed-orphan / documentation / generated 除外後)。`,
+      details: layerOrphans.slice(0, 30),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (5) Component と Concern のメンバー Jaccard
+  // ─────────────────────────────────────────────────────────────
+  const concernMembers = new Map<string, Set<string>>();
+  for (const c of concerns) {
+    const s = new Set<string>();
+    for (const e of outEdges[c.id] || []) {
+      if (e.type === "evidenced_by") s.add(e.to);
+    }
+    concernMembers.set(c.id, s);
+  }
+  function jaccard(a: Set<string>, b: Set<string>): number {
+    let inter = 0;
+    for (const x of a) if (b.has(x)) inter += 1;
+    const uni = a.size + b.size - inter;
+    return uni === 0 ? 0 : inter / uni;
+  }
+  // テストファイルは Component と Concern の両方に含まれて Jaccard を薄める要因。
+  // 「実装ファイル基準」で比較するため除外する。
+  const isImplFile = (fid: string) => {
+    const f = fileById.get(fid);
+    return f && f.role !== "test";
+  };
+  function implFiles(s: Set<string>): Set<string> {
+    return new Set([...s].filter(isImplFile));
+  }
+  for (const co of concerns) {
+    const cm = implFiles(concernMembers.get(co.id)!);
+    if (cm.size === 0) continue;
+    for (const comp of components) {
+      const pm = implFiles(componentMembers.get(comp.id)!);
+      const j = jaccard(cm, pm);
+      if (j >= args.jaccardThreshold) {
+        findings.push({
+          severity: "WARN",
+          rule: "concern-component-duplicate",
+          message: `Vein (= Concern) と Pocket (= Component) の Jaccard 重複が高い (実装ファイル基準): ${co.id.split(":").pop()} ∩ ${comp.id.split(":").pop()} = ${j.toFixed(2)} (≥${args.jaccardThreshold})。二重表現の疑い。Vein を取り下げるか別の動機に絞り込む。`,
+        });
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (6) Concern の主 Component 占有率
+  // ─────────────────────────────────────────────────────────────
+  // ファイル → Component 逆引き
+  const compOfFile = new Map<string, string>();
+  for (const [cid, members] of componentMembers) {
+    for (const fid of members) compOfFile.set(fid, cid);
+  }
+  for (const co of concerns) {
+    const cm = concernMembers.get(co.id)!;
+    if (cm.size < 3) continue; // 小すぎは別問題
+    const distrib: Record<string, number> = {};
+    for (const fid of cm) {
+      const comp = compOfFile.get(fid);
+      if (comp) distrib[comp] = (distrib[comp] || 0) + 1;
+    }
+    const total = Object.values(distrib).reduce((a, b) => a + b, 0);
+    if (total === 0) continue;
+    const sorted = Object.entries(distrib).sort((a, b) => b[1] - a[1]);
+    const dominant = sorted[0];
+    const ratio = dominant[1] / total;
+    if (ratio > args.dominanceThreshold) {
+      findings.push({
+        severity: "WARN",
+        rule: "concern-component-dominance",
+        message: `Vein (= Concern) '${co.id.split(":").pop()}' は ${(ratio * 100).toFixed(0)}% が単一 Pocket (= Component) '${dominant[0].split(":").pop()}' に閉じる (>${(args.dominanceThreshold * 100).toFixed(0)}%)。横断条件は形式的成立だが実質単一寄り。分割または取り下げ検討。`,
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (7) cross_component_in_degree シグナルが全 File で空
+  // ─────────────────────────────────────────────────────────────
+  const hasSignal = files.some((f: any) => typeof f.cross_component_in_degree === "number");
+  if (!hasSignal) {
+    findings.push({
+      severity: "INFO",
+      rule: "indexer-signal-missing",
+      message: `cross_component_in_degree シグナルが全 File で空。indexer 再 index + signal-only mutation で File ノードへマージしないと Vein (= Concern) 候補の縦串検出に使えない。`,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (X) Decision/OK/Risk の実装ファイル紐付け不在 (knowledge-impl-binding-missing)
+  // ─────────────────────────────────────────────────────────────
+  const isImplFileBinding = (toId: string) =>
+    toId.startsWith("file:") && !/docs\/knowhow\/|plans\/|docs\/design-decisions\//.test(toId);
+  const knowledgeTypes = new Set(["Decision", "OperationalKnowledge", "Risk"]);
+  const knowledgeNodes = files.length > 0 ? graph.nodes.filter((n: any) => knowledgeTypes.has(n.type)) : [];
+  const noImplBinding: string[] = [];
+  for (const k of knowledgeNodes) {
+    const oe = outEdges[k.id] || [];
+    const hasPolicy = oe.some((e: any) => e.type === "sets_policy_for" && isImplFileBinding(e.to));
+    const hasImplDoc = oe.some((e: any) => e.type === "documented_by" && isImplFileBinding(e.to));
+    if (!hasPolicy && !hasImplDoc) {
+      noImplBinding.push(`[${k.type}] ${k.id.split(":").pop()} - ${(k.title || "").slice(0, 60)}`);
+    }
+  }
+  if (noImplBinding.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "knowledge-impl-binding-missing",
+      message: `Decision / OperationalKnowledge / Risk のうち、実装ファイルへの sets_policy_for または documented_by 紐付けが無いものが ${noImplBinding.length} 件。knowhow / plans / design-decisions doc 経由しか紐付かない状態だと「この決定/知見がどのコードを動かしているか」が graph 上から辿れない。pnpm graph:edge:suggest-policy で候補を機械抽出して mutation 検討。`,
+      details: noImplBinding.slice(0, 30)
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (Z) 横断ノードへの方針/リスクエッジの次数集中 (crosscut-policy-hub)
+  // sets_policy_for / risks_in が横断構造 (Stratum/Vein/Pocket) を宛先に取れる
+  // 自由度の乱用ガード。一点への収束はミニ System 化 (雑な「全体」宛の再発) の
+  // 兆候として機械検出できる。正当に方針が集まる部品もありうるので ERROR にしない。
+  // ─────────────────────────────────────────────────────────────
+  const POLICY_HUB_THRESHOLD = 8;
+  const crosscutIds = new Set([...components, ...concerns, ...layers].map((n: any) => n.id));
+  const policyHubs: string[] = [];
+  for (const id of crosscutIds) {
+    const policyIn = (inEdges[id] || []).filter(
+      (e: any) => e.type === "sets_policy_for" || e.type === "risks_in"
+    ).length;
+    if (policyIn >= POLICY_HUB_THRESHOLD) {
+      policyHubs.push(`${id} ← sets_policy_for/risks_in ${policyIn}本`);
+    }
+  }
+  if (policyHubs.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "crosscut-policy-hub",
+      message: `横断ノードに方針/リスクエッジが ${POLICY_HUB_THRESHOLD} 本以上収束 (${policyHubs.length}件)。雑な「全体」宛 (ミニ System 化) の疑い。各エッジが「正直でいられる一番低い高度」か見直し、より狭い宛先 (File / 別 Pocket) に降ろせるものは降ろす。`,
+      details: policyHubs.slice(0, 20),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (Y) embedding 距離で表記揺れ重複疑い (node-duplicate-suspect)
+  // vector-index が指定されていれば実行。同型ノード間で similarity >= threshold のペアを抽出
+  // ─────────────────────────────────────────────────────────────
+  if (args.vectorPath) {
+    let vector: any;
+    try {
+      vector = JSON.parse(fs.readFileSync(args.vectorPath, "utf8"));
+    } catch {
+      findings.push({
+        severity: "INFO",
+        rule: "vector-index-unavailable",
+        message: `vector-index を読み込めなかった (path: ${args.vectorPath})。node-duplicate-suspect ルールは skip。`
+      });
+    }
+    if (vector) {
+      const rows: any[] = Array.isArray(vector.rows) ? vector.rows : [];
+      const embById = new Map<string, number[]>();
+      const normById = new Map<string, number>();
+      for (const r of rows) {
+        embById.set(r.node_id, r.vector);
+        normById.set(r.node_id, vectorNorm(r.vector));
+      }
+      // 同型ノード間 pair-wise similarity
+      const checkTypes = ["Decision", "OperationalKnowledge", "Risk", "Vein", "Pocket"];
+      const duplicates: string[] = [];
+      for (const tp of checkTypes) {
+        const sameType = graph.nodes.filter((n: any) => canonicalType(n.type) === tp);
+        for (let i = 0; i < sameType.length; i += 1) {
+          const a = sameType[i];
+          const aEmb = embById.get(a.id);
+          const aNorm = normById.get(a.id);
+          if (!aEmb || !aNorm) continue;
+          for (let j = i + 1; j < sameType.length; j += 1) {
+            const b = sameType[j];
+            const bEmb = embById.get(b.id);
+            const bNorm = normById.get(b.id);
+            if (!bEmb || !bNorm) continue;
+            const sim = cosineSim(aEmb, bEmb, aNorm, bNorm);
+            if (sim >= args.duplicateThreshold) {
+              duplicates.push(`[${tp}] ${a.id.split(":").pop()} ⇄ ${b.id.split(":").pop()} = sim ${sim.toFixed(3)}`);
+            }
+          }
+        }
+      }
+      if (duplicates.length > 0) {
+        findings.push({
+          severity: "WARN",
+          rule: "node-duplicate-suspect",
+          message: `embedding 距離で表記揺れ重複疑いのノードペアが ${duplicates.length} 件 (similarity >= ${args.duplicateThreshold})。worktree マージ後の同概念別命名 (例: 'auto-update' vs 'auto-updater') を検出。LLM 確認の上、片方削除 + edge 張り替えで統合。`,
+          details: duplicates.slice(0, 20)
+        });
+      }
+    }
+  } else {
+    findings.push({
+      severity: "INFO",
+      rule: "vector-index-not-provided",
+      message: `--vector-index 未指定 (or GRAPHRAG_VECTOR_INDEX_PATH 未設定)。node-duplicate-suspect ルールは skip。表記揺れ重複検出には vector-index を渡す。`
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (8) 1 ファイルが ≧3 Concern に所属 (動機混在疑い)
+  // ─────────────────────────────────────────────────────────────
+  const concernOfFile = new Map<string, string[]>();
+  for (const [cid, members] of concernMembers) {
+    for (const fid of members) {
+      if (!concernOfFile.has(fid)) concernOfFile.set(fid, []);
+      concernOfFile.get(fid)!.push(cid);
+    }
+  }
+  const tripleConcerns: any[] = [];
+  for (const [fid, cs] of concernOfFile) {
+    if (cs.length >= 3) {
+      const f = fileById.get(fid);
+      tripleConcerns.push(`${f?.path || fid} → ${cs.map((c: string) => c.split(":").pop()).join(", ")}`);
+    }
+  }
+  if (tripleConcerns.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "multi-concern-membership",
+      message: `1 ファイルが ≧3 Vein (= Concern) に所属: ${tripleConcerns.length}件。単一動機原則から、各 Vein が本当に別動機かレビュー必要。`,
+      details: tripleConcerns.slice(0, 20),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (C3) 免除会計 (常時印字) + 免除比率 WARN
+  // ─────────────────────────────────────────────────────────────
+  // 比率の分母 = 実装 File (role 閉集合免除を除く全 File)。分子 = builtin/config で
+  // 実際に免除されたもの (role 免除は定義上「実装でない」ので分子にも入れない)。
+  const roleCounts: Record<string, number> = {};
+  for (const f of files) {
+    const r = String(f.role ?? "unknown");
+    roleCounts[r] = (roleCounts[r] || 0) + 1;
+  }
+  const implFileTotal = files.filter((f: any) => !ROLE_ALONE_EXEMPT.has(f.role)).length;
+  const patternExemptions = exemptions.filter((e) => !e.basis.startsWith("role:"));
+  const configExemptCount = exemptions.filter((e) => e.basis.startsWith("config:")).length;
+  const exemptRatio = implFileTotal === 0 ? 0 : patternExemptions.length / implFileTotal;
+  const accounting = {
+    roles: roleCounts,
+    impl_file_total: implFileTotal,
+    exemptions,
+    config_path: loadedConfig.exists ? configPath : null,
+    config_entries: configOrphans.size,
+    config_exempt_count: configExemptCount,
+    exempt_ratio: Number(exemptRatio.toFixed(4)),
+  };
+  if (exemptRatio > 0.15) {
+    findings.push({
+      severity: "WARN",
+      rule: "exemption-ratio-high",
+      message: `allowed-orphan 免除が実装 File の ${(exemptRatio * 100).toFixed(1)}% (${patternExemptions.length}/${implFileTotal}, >15%)。免除で網羅性ゲートが空洞化していないか棚卸しし、Pocket に所属させられるものは所属させる。`,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (C1) knowledge-floor: 知識軸の床 (Goal / Constraint が 1 件も無い)
+  // ─────────────────────────────────────────────────────────────
+  const goalCount = graph.nodes.filter((n: any) => canonicalType(n.type) === "Goal").length;
+  const constraintCount = graph.nodes.filter((n: any) => canonicalType(n.type) === "Constraint").length;
+  if (goalCount === 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "knowledge-floor-goal-missing",
+      message: `Goal が 0 件。design-review の scope-creep / roadmap 観点が無効な状態。conceptual-pass の知識軸シーディングを実施せよ。`,
+    });
+  }
+  if (constraintCount === 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "knowledge-floor-constraint-missing",
+      message: `Constraint が 0 件。design-review の scope-creep / roadmap 観点が無効な状態。conceptual-pass の知識軸シーディングを実施せよ。`,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (B2') superseded-premise: 死んだ前提の検出
+  // 終端 state でない (= 現役の) ノードが、終端 state のノードへ has_premise している組。
+  // hard reject せず可視化: 前提の張り替え/依存側の見直しは LLM・人間の判断に委ねる。
+  // ─────────────────────────────────────────────────────────────
+  const TERMINAL_STATES = new Set(["superseded", "abandoned", "closed"]);
+  const nodeById = new Map<string, any>(graph.nodes.map((n: any) => [n.id, n]));
+  const deadPremises: string[] = [];
+  for (const e of graph.edges) {
+    if (e.type !== "has_premise") continue;
+    const from = nodeById.get(e.from);
+    const to = nodeById.get(e.to);
+    if (!from || !to) continue;
+    if (TERMINAL_STATES.has(String(from.state))) continue;
+    if (!TERMINAL_STATES.has(String(to.state))) continue;
+    deadPremises.push(`${e.from} -has_premise-> ${e.to} (premise state: ${to.state})`);
+  }
+  if (deadPremises.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "superseded-premise",
+      message: `現役ノードが終端 state (superseded/abandoned/closed) のノードを前提にしている: ${deadPremises.length}件。前提が死んでいる。refines 逆引きで後継を確認し、前提を後継に張り替えるか依存側の見直しを検討。`,
+      details: deadPremises.slice(0, 30),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (#9 拡張) constraint-binding-missing: Constraint で constrains エッジが 0 本のもの
+  // Constraint が constrains で宛先ノードに繋がっていないと、レビュー逆引き
+  // (「どのノードにこの制約が掛かるか」を辿るパス) が ACK 帯に出ない盲点になる。
+  // ─────────────────────────────────────────────────────────────
+  const constraintNodes = graph.nodes.filter((n: any) => canonicalType(n.type) === "Constraint");
+  const constraintUnbound: string[] = [];
+  for (const c of constraintNodes) {
+    const hasConstrains = (outEdges[c.id] || []).some((e: any) => e.type === "constrains");
+    if (!hasConstrains) {
+      constraintUnbound.push(`[Constraint] ${c.id.split(":").pop()} - ${(c.title || "").slice(0, 60)}`);
+    }
+  }
+  if (constraintUnbound.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "constraint-binding-missing",
+      message: `constrains エッジが 0 本の Constraint が ${constraintUnbound.length} 件。bind 無し Constraint はレビューの逆引きに出ない (ACK 帯の盲点)。constrains で宛先 Decision / File / OperationalKnowledge を明示する。`,
+      details: constraintUnbound.slice(0, 30),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // temporary-relation-remaining: temporary_relation_candidate エッジの残存
+  // 型付けされていない仮マーカー。放置されるとグラフの信頼性が下がる。
+  // ─────────────────────────────────────────────────────────────
+  const tempEdges = graph.edges.filter((e: any) => e.type === "temporary_relation_candidate");
+  if (tempEdges.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "temporary-relation-remaining",
+      message: `temporary_relation_candidate エッジが ${tempEdges.length} 本残存。仮マーカーのまま放置すると型付けされた関係が欠落する。各ペアの中身を確認し、正式なエッジ型 (refines / has_premise / supersedes 等) に昇格するか、関係が無ければ削除する。`,
+      details: tempEdges.slice(0, 20).map((e: any) => `${e.from} → ${e.to}`),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // knowledge-description-missing: 知識 6 型で description 欠落
+  // summary だけでは embedding の意味担体が薄く、ask の精度が落ちる。
+  // 対象型: Decision / RejectedOption / Constraint / Goal / Risk / OperationalKnowledge
+  // ─────────────────────────────────────────────────────────────
+  const KNOWLEDGE_DESC_TYPES = new Set([
+    "Decision", "RejectedOption", "Constraint", "Goal", "Risk", "OperationalKnowledge",
+  ]);
+  const descMissingNodes: string[] = [];
+  for (const n of graph.nodes) {
+    if (!KNOWLEDGE_DESC_TYPES.has(String(n.type))) continue;
+    const desc = n.description;
+    if (desc === undefined || desc === null || String(desc).trim() === "") {
+      descMissingNodes.push(`[${n.type}] ${String(n.id ?? "").split(":").pop()} - ${(String(n.title ?? "")).slice(0, 60)}`);
+    }
+  }
+  if (descMissingNodes.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "knowledge-description-missing",
+      message: `description 欠落の知識ノードが ${descMissingNodes.length} 件 (Decision / RejectedOption / Constraint / Goal / Risk / OperationalKnowledge)。summary だけでは embedding の意味担体が薄く、ask の精度に直結する。各ノードに背景・根拠・具体例を description に記述する。`,
+      details: descMissingNodes.slice(0, 30),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 出力
+  // ─────────────────────────────────────────────────────────────
+  const summary = {
+    total: findings.length,
+    errors: findings.filter(f => f.severity === "ERROR").length,
+    warnings: findings.filter(f => f.severity === "WARN").length,
+    infos: findings.filter(f => f.severity === "INFO").length,
+  };
+
+  if (args.json) {
+    console.log(JSON.stringify({ summary, accounting, findings }, null, 2));
+  } else {
+    console.log(`=== Carving check on ${args.graphPath} ===`);
+    console.log(`nodes: ${graph.nodes.length} | files: ${files.length} | components: ${components.length} | concerns: ${concerns.length} | layers: ${layers.length}`);
+    console.log();
+    // 免除会計 (常時印字): 免除がゼロでも「ゼロである」ことを見せる
+    console.log(`--- 免除会計 (allowed-orphan accounting) ---`);
+    console.log(`role 別 File 数: ${Object.entries(roleCounts).map(([r, c]) => `${r}:${c}`).join(", ") || "(File なし)"}`);
+    console.log(`免除: ${exemptions.length}件 (うち config 由来 ${configExemptCount}件) | 実装 File ${implFileTotal}件に占める builtin/config 免除比率: ${(exemptRatio * 100).toFixed(1)}%`);
+    console.log(`carving.json: ${loadedConfig.exists ? `${configPath} (${configOrphans.size} エントリ)` : "なし"}`);
+    for (const e of exemptions.slice(0, 20)) console.log(`  - ${e.path} (${e.basis})`);
+    if (exemptions.length > 20) console.log(`  ... and ${exemptions.length - 20} more`);
+    console.log();
+    for (const f of findings) {
+      console.log(`[${f.severity}] ${f.rule}`);
+      console.log(`  ${f.message}`);
+      if (f.details) {
+        const arr = Array.isArray(f.details) ? f.details : [String(f.details)];
+        for (const d of arr.slice(0, 10)) console.log(`    - ${d}`);
+        if (arr.length > 10) console.log(`    ... and ${arr.length - 10} more`);
+      }
+      console.log();
+    }
+    console.log(`=== summary: ${summary.errors} ERROR / ${summary.warnings} WARN / ${summary.infos} INFO ===`);
+  }
+
+  // ERROR があれば exit 1 (CI で fail させたい時用)
+  if (summary.errors > 0) process.exit(1);
+}
+
+if (process.argv[1] && process.argv[1].endsWith("check-carving.ts")) { main(); }
