@@ -44,14 +44,29 @@ carving-rules.md の該当節を必ず満たすこと。手順だけ追って ca
 - carve 完了の判定は機械ゲートで強制: `carving-check` の `candidate-uncarved` / `placeholder-title` /
   `summary-provisional` が **0 ERROR** になって初めて carve 完了(プレースホルダのまま確定すると止まる)。
 
-## 2. Vein(横断・概念グルーピング、鉱脈)
+## 2. Vein（横断関心のモデリング、鉱脈）
 
-- 新規 `Vein` ノード `vein:<sys>:<slug>`。
-- `Vein -evidenced_by-> File`(evidenced_by: crosscut→File 合法)。
-- モジュール境界=Pocket とは別。層や塊を貫いて横断するものだけ。
-- 詳細な切り分けルールは `carving-rules.md` の「Vein carving」を厳守(項目:
-  横断条件 ≧2 Pocket / 1 Vein = 1 動機 / Pocket との二重表現禁止)。判断基準と
-  閾値は carving-rules.md を正本とし、本ファイルでは再掲しない。
+**Pocket / Stratum との根本的な違い。** Pocket は依存コミュニティ、Stratum はトポロジ
+深さ帯 — どちらも indexer が決定論で候補を出し、LLM は命名と意味付けを担う。
+**Vein にはこの足場が無い。** 横断関心は構造距離に現れない。LLM 自身が
+「このシステムを貫く横断的な関心は何か」を概念的にモデリングする行為であり、
+carving 全体の中で最も LLM の創発的な理解力が問われるステップ。
+
+### 手順
+
+1. **全体像からの横断関心モデリング（主）。** Pocket / Stratum で構造が見えた
+   段階で、コードベース全体を俯瞰し「このシステムにはどのような横断的な関心が
+   走っているか」を問う。ドメイン知識・ソフトウェアアーキテクチャの一般的パターン
+   (認証/認可・観測性・エラーハンドリング・暗号化・i18n・設定管理・自動更新 等)
+   ・このシステム固有の特性を動員し、機械候補の有無にかかわらず横断関心を発見する。
+2. **機械ヒントでの見落とし確認（補助）。** `vein-hint`（embedding 近接
+   クラスタリング）の出力と `cross_component_in_degree ≥ 2` の構造シグナルを
+   自分のモデリングの盲点チェックとして突き合わせる。機械が拾って自分が見落として
+   いた横断があれば追加する。逆に、機械が出さなかった横断関心が存在しないとは限らない。
+3. 各 Vein について **横断条件（≧2 Pocket）・単一動機原則・Pocket との
+   二重表現禁止** を検証。品質ルールは `carving-rules.md`「Vein carving」を
+   正本とし、本ファイルでは再掲しない。
+4. 新規 `Vein` ノード `vein:<sys>:<slug>` + `Vein -evidenced_by-> File`。
 
 ## 3. ドキュメント蒸留
 
@@ -110,7 +125,7 @@ roadmap 観点が無効**になる(照合先の Goal が無ければ「目的か
 ### 5b. harvest-history の candidate を種にする(初回索引時の知識収穫)
 
 `harvest-history --root <repo> [--system <name>] [--out <path>]` は git 履歴から
-**決定論抽出のみ・書き込みなし**で candidate JSON を出す(concern-suggest と同じ思想。
+**決定論抽出のみ・書き込みなし**で candidate JSON を出す(vein-hint と同じ思想。
 採否は LLM が判断して typed-add する前提):
 
 - **revert コミット** → `RejectedOption` candidate(`suggested_slug` / `title` / `commits` /

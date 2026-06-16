@@ -91,13 +91,13 @@ node graphrag/cli.ts vault-import <vault-dir> [<out.json>]
 
 vault から graph.json を再構築。**round-trip 等価性検証用** (vault 編集 → import → 元 graph と diff)。日常運用では使わない。
 
-## concern-suggest — Vein (横断関心) 候補抽出
+## vein-hint — Vein の機械ヒント (embedding 近接クラスタリング)
 
 ```sh
-node graphrag/cli.ts concern-suggest --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
+node graphrag/cli.ts vein-hint --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
 ```
 
-embedding 距離で異なる Pocket をまたぐ File 群を Union-Find クラスタ化、Vein candidate JSON を出力。`carve` 内部で呼ぶ。閾値調整したい時のみ直叩き。
+embedding 距離で異なる Pocket をまたぐ File 群を Union-Find クラスタ化、candidate JSON を出力。**Vein 発見の主役は LLM の概念的モデリング** (`conceptual-pass.md` §2) であり、本コマンドはそのモデリング後の盲点チェック用。`carve` 内部で呼ぶ。閾値調整したい時のみ直叩き。
 
 ## edge-suggest-policy — binding / relations 候補の一括抽出
 
@@ -139,7 +139,7 @@ literal path のみ (glob/regex 文字はエラー)。`add` / `remove` は vault
 node graphrag/cli.ts harvest-history --root <repo> [--system <name>] [--out <path>]
 ```
 
-書き込みなし・決定論抽出のみ: (1) revert コミット → `RejectedOption` candidate (`suggested_slug` / `title` / `commits: [hash, subject, date]` / `note`)、(2) コメントマーカー HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk` candidate (`path` / `line` / `marker` / `text`)。concern-suggest と同じ思想の candidate JSON — 採否は LLM が個別判断して typed-add する。手順は `references/conceptual-pass.md` の「知識軸シーディング」。
+書き込みなし・決定論抽出のみ: (1) revert コミット → `RejectedOption` candidate (`suggested_slug` / `title` / `commits: [hash, subject, date]` / `note`)、(2) コメントマーカー HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk` candidate (`path` / `line` / `marker` / `text`)。vein-hint と同じ思想の candidate JSON — 採否は LLM が個別判断して typed-add する。手順は `references/conceptual-pass.md` の「知識軸シーディング」。
 
 ## staleness-check — 知識ノードの陳腐化候補の機械抽出
 

@@ -5,7 +5,7 @@
 //   (1) revert コミット → RejectedOption candidate
 //   (2) HACK|FIXME|WORKAROUND|XXX マーカー → OperationalKnowledge/Risk candidate
 // を機械的に列挙するだけ。candidate を本当にノード化するかは LLM が履歴・コードを
-// 見て判断し typed-add する (concern-suggest と同じ思想: 機械は提示、確定は LLM)。
+// 見て判断し typed-add する (vein-hint と同じ思想: 機械は提示、確定は LLM)。
 //
 // git 呼び出し (log / ls-files) と file 読みは関数注入 — テストは合成データで決定論的に。
 import fs from "node:fs";

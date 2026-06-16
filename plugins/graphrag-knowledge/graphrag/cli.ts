@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 const PRIMITIVE_VERBS = [
   "brief", "search", "evidence", "index", "vector-index",
   "vault-build", "vault-import",
-  "concern-suggest", "edge-suggest-policy", "carving-check",
+  "vein-hint", "edge-suggest-policy", "carving-check",
   "branch-merge", "world-refresh",
   "carving-allow", "harvest-history", "staleness-check"
 ] as const;
@@ -45,7 +45,7 @@ const PRIMITIVE_FILE_MAP: Record<PrimitiveVerb, { file: string; exportName?: str
   "vector-index": { file: "./build-vector-index.ts" },
   "vault-build": { file: "./build-vault.ts" },
   "vault-import": { file: "./import-vault.ts" },
-  "concern-suggest": { file: "./suggest-concerns.ts" },
+  "vein-hint": { file: "./suggest-vein-hints.ts" },
   "edge-suggest-policy": { file: "./suggest-policy-edges.ts" },
   "carving-check": { file: "./check-carving.ts" },
   "branch-merge": { file: "./branch-merge.ts" },

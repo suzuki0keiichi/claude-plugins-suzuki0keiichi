@@ -33,7 +33,7 @@ import { recordAskHits } from "./cli-ask-state.ts";
 import { canonicalType } from "./schema.ts";
 import { indexCodebase, resolvePreviousGraph } from "./index-codebase.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
-import { main as runConcernSuggest } from "./suggest-concerns.ts";
+import { main as runVeinHint } from "./suggest-vein-hints.ts";
 import { main as runEdgeSuggestPolicy } from "./suggest-policy-edges.ts";
 import { main as runCarvingCheck } from "./check-carving.ts";
 import { existsSync, mkdirSync, writeFileSync, statSync } from "node:fs";
@@ -486,14 +486,14 @@ async function runCarve(argv: string[]) {
   }
 
   if (vectorIndexReady) {
-    process.stderr.write(`[carve] stage 2/3: concern-suggest + edge-suggest-policy (vector index: ${vectorIndexPath})\n`);
-    process.stderr.write(`--- concern-suggest output ---\n`);
-    runConcernSuggest(["--graph", indexOutPath, "--vector-index", vectorIndexPath]);
+    process.stderr.write(`[carve] stage 2/3: vein-hint + edge-suggest-policy (vector index: ${vectorIndexPath})\n`);
+    process.stderr.write(`--- vein-hint output ---\n`);
+    runVeinHint(["--graph", indexOutPath, "--vector-index", vectorIndexPath]);
     process.stderr.write(`--- edge-suggest-policy output ---\n`);
     runEdgeSuggestPolicy(["--graph", indexOutPath, "--vector-index", vectorIndexPath, "--missing-only"]);
   } else {
     process.stderr.write(`[carve] stage 2/3: SKIPPED (vector index unavailable: ${vectorIndexSkipNote ?? "not found"}). `);
-    process.stderr.write(`embedding endpoint を立ててから carve を再実行すると concern + policy edge suggestions まで通る。\n`);
+    process.stderr.write(`embedding endpoint を立ててから carve を再実行すると vein-hint + policy edge suggestions まで通る。\n`);
   }
 
   process.stderr.write(`[carve] stage 3/3: carving-check\n`);
@@ -503,7 +503,7 @@ async function runCarve(argv: string[]) {
   runCarvingCheck(checkArgs);
 
   process.stderr.write(`\n[carve] done. next:\n`);
-  process.stderr.write(`  1. concern + policy edge 候補を見て mutation plan を組み立てる (LLM)\n`);
+  process.stderr.write(`  1. vein-hint + policy edge 候補を見て mutation plan を組み立てる (LLM)\n`);
   process.stderr.write(`  2. node graphrag/cli.ts commit-mutation <plan.json> で vault に適用 (OCC/validate/索引/git commit)\n`);
   process.stderr.write(`  3. 必要なら carve を再実行して carving-check の error をゼロにしてから完了とする\n`);
 }

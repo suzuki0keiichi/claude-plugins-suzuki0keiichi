@@ -230,7 +230,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   // ─────────────────────────────────────────────────────────────
   // index-codebase が出す summary は「構成要素のサマリ」(File なら symbol/import、
   // Pocket/Stratum candidate なら束ねた File 群) の機械テンプレであって「意味」ではない。
-  // LLM が意味に書き換えるまで残る provisional は retrieval/concern-suggest の品質を直接
+  // LLM が意味に書き換えるまで残る provisional は retrieval/vein-hint の品質を直接
   // 劣化させる (embedding が構成要素語に支配され縦串が言語/階層クラスタに退化)。空でない
   // =完了に見えるので、File も Pocket/Stratum candidate も対称にゲートで明示的に弾く。
   const provisionalNodes = graph.nodes.filter((n: any) => n.summary_provisional === true);
@@ -240,7 +240,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "ERROR",
       rule: "summary-provisional",
-      message: `要約が機械テンプレのまま (summary_provisional): ${provisionalNodes.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各ノードの「構成要素サマリ」を「意味」(何をする/何のため/どの関心) に書き換え summary_provisional を外す。テンプレのままだと concern-suggest が言語/階層クラスタに退化する。`,
+      message: `要約が機械テンプレのまま (summary_provisional): ${provisionalNodes.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各ノードの「構成要素サマリ」を「意味」(何をする/何のため/どの関心) に書き換え summary_provisional を外す。テンプレのままだと vein-hint が言語/階層クラスタに退化する。`,
       details: provisionalNodes.slice(0, 30).map((n: any) => n.path || n.id),
     });
   }
