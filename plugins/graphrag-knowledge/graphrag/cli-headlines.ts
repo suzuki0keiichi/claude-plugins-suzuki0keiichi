@@ -110,12 +110,21 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
     throw new Error("typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
   }
 
-  // vault isolation check: readonly なら書き込みを拒否、未設定なら出力に添付
+  // vault isolation check: 外部 vault で mode 未設定 or readonly なら書き込みを拒否
   const isolation = detectVaultIsolation();
   if (isolation.mode === "readonly") {
     throw new Error(
       `Vault is in readonly mode (GRAPHRAG_VAULT_MODE=readonly). ` +
       `Writes are blocked. To allow writes, set GRAPHRAG_VAULT_MODE=direct in .graphrag/.env.`
+    );
+  }
+  if (isolation.vault_external && isolation.mode === null) {
+    throw new Error(
+      `Vault is external (${process.env.GRAPHRAG_VAULT_DIR}) but GRAPHRAG_VAULT_MODE is not configured. ` +
+      `Refusing to write — ask the user which mode to use, then set it in .graphrag/.env:\n` +
+      `  GRAPHRAG_VAULT_MODE=readonly   — read only, block all writes\n` +
+      `  GRAPHRAG_VAULT_MODE=direct     — write to the shared vault as-is\n` +
+      `  GRAPHRAG_VAULT_MODE=worktree   — create a vault worktree for isolated writes (run vault-worktree --name <name> first)`
     );
   }
 

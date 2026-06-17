@@ -63,7 +63,7 @@ primitive (段別細粒度操作) は §Primitive verbs 一覧 + `${CLAUDE_PLUGI
 - **launcher は起動時に `.env` を 1 回読む**。全 verb (primitive / headline) が同じ env を見るので、verb ごとに env 不一致が起きない。verb 個別の env 上書きは CLI flag のみ。
 - **出力先**は規約パス `.graphrag/vault` に置くだけで足り (env / `.env` 不要)、別の場所に置きたい時だけ env で上書きする (詳細は `${CLAUDE_PLUGIN_ROOT}/references/port-site.md`):
   - `GRAPHRAG_VAULT_DIR` = vault 正本パス (例 `./.graphrag/vault`)。env / `.graphrag/.env` / `.env` / `.graphrag/vault` 規約のいずれでも解決できない状態で `ask` / `commit-mutation` / `add-*` を叩くと**エラー停止**。
-  - `GRAPHRAG_VAULT_MODE` = `readonly` | `direct` (vault が外部リポジトリにある場合の書き込みポリシー)。`readonly` は書き込み verb をエラー停止させる。`direct` は共有 vault にそのまま書く。未設定で vault が外部の場合、CLI は書き込み出力に `vault_isolation` フィールドを添えて LLM にユーザー確認を促す。
+  - `GRAPHRAG_VAULT_MODE` = `readonly` | `direct` | `worktree` (vault が外部リポジトリにある場合の書き込みポリシー)。`readonly` は書き込み verb をエラー停止させる。`direct` は共有 vault にそのまま書く。`worktree` は vault リポにも git worktree を作って隔離書き込みする (事前に `vault-worktree --name <name>` で作成)。**未設定で vault が外部の場合、CLI は書き込みをエラー停止させ LLM にユーザー確認を強制する**。
   - `GRAPHRAG_GRAPH_JSON_PATH` = graph.json (索引器出力・往復検証用) 入出力パス (例 `./.graphrag/graph.json`)。`index` / `carve` / `vault-build` / `vault-import` を使う時のみ必要。
 
 ## focus 継続と read-only triage
@@ -299,9 +299,9 @@ vault writer の検証段で、op:create の知識/横断ノード (Decision/Rej
   → `add-rejected-option --title "<試した案>" --summary "<失敗モード>" --rejected-in-favor-of <選んだ Decision id>`
   → 経緯が複数イベントなら `add-investigation` も併発し led_to で接続
 
-### 書き込み出力の vault_isolation の扱い方
+### 書き込みの vault isolation ガード
 
-`add-*` / `commit-mutation` の出力に `vault_isolation` が含まれる場合、vault がプロジェクト外 (別リポジトリ) にある。`vault_isolation.mode` が `null` (未設定) なら CLI の `message` をユーザーに伝え、`GRAPHRAG_VAULT_MODE` を `.graphrag/.env` に設定してもらう (`readonly` = 読み専用で書き込み拒否、`direct` = 共有 vault にそのまま書く)。**mode が設定済みなら確認不要** — CLI が自動で従う (readonly ならエラー停止、direct なら書き込み実行)。
+vault が外部リポジトリにあり `GRAPHRAG_VAULT_MODE` が未設定の場合、`add-*` / `commit-mutation` は**エラー停止**する。エラーメッセージに従い、ユーザーに mode を確認して `.graphrag/.env` に設定する (`readonly` = 読み専用で書き込み拒否、`direct` = 共有 vault にそのまま書く、`worktree` = vault リポにも worktree を作って隔離書き込み)。**mode 設定済みなら CLI が自動で従うため確認不要**。
 
 ### 書き込み出力の suggestions の扱い方
 
