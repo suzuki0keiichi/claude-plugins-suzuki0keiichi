@@ -24,7 +24,7 @@ import { runDuplicateCheck } from "./duplicate-check.ts";
 import { embedQueryForVectorIndex } from "./vector.ts";
 import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { readRecentHitIds } from "./cli-ask-state.ts";
-import { canonicalType } from "./schema.ts";
+import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
 function writeFileAtomic(abs: string, content: string): void {
   mkdirSync(path.dirname(abs), { recursive: true });
@@ -228,7 +228,7 @@ function countBindingDebt(graph: { nodes?: any[]; edges?: any[] }): number {
   return debt;
 }
 
-const PREMISE_CANDIDATE_TYPES = new Set(["Decision", "Constraint", "Goal", "OperationalKnowledge"]);
+// schema.categories.premiseCandidate から構築 (buildSuggestions 内で参照)。
 
 /**
  * apply 成功後の suggestions オブジェクトを組む。全フィールド suggest-only・非致命。
@@ -245,6 +245,7 @@ async function buildSuggestions(args: {
   vectorIndex: { rows?: any[] } | null | undefined;
   embed: ((text: string) => Promise<number[]>) | null;
   recentHitIds: string[];
+  schema?: SchemaDefinition;
 }): Promise<any> {
   const createdIds = new Set(
     (args.plan.nodes ?? [])
@@ -285,7 +286,7 @@ async function buildSuggestions(args: {
   const premise_candidates = args.recentHitIds
     .filter((id) => !createdIds.has(id))
     .map((id) => nodeById.get(id))
-    .filter((n) => n && PREMISE_CANDIDATE_TYPES.has(canonicalType(n.type) ?? ""))
+    .filter((n) => n && new Set((args.schema ?? DEFAULT_SCHEMA).categories.premiseCandidate).has(canonicalType(n.type, args.schema) ?? ""))
     .map((n) => ({ node_id: n.id, node_type: canonicalType(n.type), title: n.title }));
 
   return {
@@ -314,6 +315,7 @@ export async function applyMutationToVault(args: {
   baseSha?: string;
   reason?: string;
   git?: boolean;
+  schema?: SchemaDefinition;
   buildIndex?: (a: { vault: string; out: string }) => Promise<unknown> | unknown;
   vectorDeps?: any;
   // 書き込み時重複ゲートの DI (buildIndex と同様、テストで FS/endpoint 非依存にする)。
@@ -362,7 +364,7 @@ export async function applyMutationToVault(args: {
     }
     const current = importVault(vaultDir);
     const plan = normalizeMutationPlan(args.plan);
-    const v = validateMutation({ currentGraph: current, plan, enforceSourceBacking: true });
+    const v = validateMutation({ currentGraph: current, plan, enforceSourceBacking: true, schema: args.schema });
     if (!v.valid) {
       const err: any = new Error("Refusing to mutate invalid graph");
       err.failures = v.failures;
@@ -504,6 +506,7 @@ export async function applyMutationToVault(args: {
       vectorIndex: suggestIndex,
       embed,
       recentHitIds,
+      schema: args.schema,
     });
   } catch (e: any) {
     // 想定外の失敗でも apply は確定済み。suggestions を空骨格にして返す。

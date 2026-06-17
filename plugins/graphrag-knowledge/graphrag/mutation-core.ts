@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { validateGraph } from "./schema.ts";
+import { validateGraph, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
 export async function loadMutationPlan(planPath) {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
@@ -37,7 +37,9 @@ function normalizeDuplicateAck(value: unknown): string[] {
   return value;
 }
 
-export function validateMutation({ currentGraph, plan, enforceSourceBacking = false }) {
+export function validateMutation({ currentGraph, plan, enforceSourceBacking = false, schema }: {
+  currentGraph: any; plan: any; enforceSourceBacking?: boolean; schema?: SchemaDefinition;
+}) {
   const duplicatePlanNodeIds = duplicates(plan.nodes.map((node) => node.id));
   const duplicatePlanEdgeIds = duplicates(plan.edges.map((edge) => edge.id));
   const currentNodeIds = new Set((currentGraph.nodes ?? []).map((node) => node.id));
@@ -84,9 +86,9 @@ export function validateMutation({ currentGraph, plan, enforceSourceBacking = fa
   const audit = { cascadedEdgeIds: [] as string[] };
   const nextGraph = applyMutationToGraph(currentGraph, plan, audit);
   if (enforceSourceBacking) {
-    failures.push(...sourceBackingFailures({ plan, nextGraph }));
+    failures.push(...sourceBackingFailures({ plan, nextGraph, schema }));
   }
-  failures.push(...validateGraph(nextGraph));
+  failures.push(...validateGraph(nextGraph, schema));
 
   return {
     valid: failures.length === 0,
@@ -255,18 +257,8 @@ function immutableUpdateFailures({ currentGraph, plan }) {
   return failures;
 }
 
-// Exactly the EDGE_TYPE_RULES.derived_from from-list. Constraint is excluded
-// on purpose: the schema gives Constraint no outgoing edge to a source
-// (ConversationChunk/Investigation); its provenance is the incoming
-// has_premise from a source-backed Decision/OperationalKnowledge. Requiring a
-// direct source link for Constraint would be structurally impossible. Legacy
-// Constraint damage-control still happens in migrate-raw-content.ts.
-const DISTILLED_NODE_TYPES = new Set([
-  "Decision",
-  "RejectedOption",
-  "Risk",
-  "OperationalKnowledge"
-]);
+// categories.distilled (source backing 必須型) から取得。
+// Constraint は除外 (schema が Constraint に source への outgoing edge を持たないため)。
 
 type GraphNodeLike = {
   id: string;
@@ -292,7 +284,8 @@ function isQualifyingSource(node: GraphNodeLike | undefined) {
   return false;
 }
 
-function sourceBackingFailures({ plan, nextGraph }: { plan: { nodes: { id: string; op?: string }[] }; nextGraph: { nodes?: GraphNodeLike[]; edges?: GraphEdgeLike[] } }) {
+function sourceBackingFailures({ plan, nextGraph, schema }: { plan: { nodes: { id: string; op?: string }[] }; nextGraph: { nodes?: GraphNodeLike[]; edges?: GraphEdgeLike[] }; schema?: SchemaDefinition }) {
+  const DISTILLED_NODE_TYPES = new Set((schema ?? DEFAULT_SCHEMA).categories.distilled);
   const nodesById = new Map<string, GraphNodeLike>((nextGraph.nodes ?? []).map((node) => [node.id, node]));
   const outgoing = new Map<string, string[]>();
   for (const edge of nextGraph.edges ?? []) {

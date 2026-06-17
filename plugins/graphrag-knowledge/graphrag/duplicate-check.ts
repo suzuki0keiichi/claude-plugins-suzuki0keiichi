@@ -1,4 +1,4 @@
-import { canonicalType } from "./schema.ts";
+import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 import { cosineSimilarity } from "./vector.ts";
 import { mutationOp } from "./mutation-core.ts";
 
@@ -88,12 +88,14 @@ export async function runDuplicateCheck(args: {
   vectorIndex: { rows?: any[] } | null | undefined;
   embed: (text: string) => Promise<number[]>;
   threshold?: number;
+  schema?: SchemaDefinition;
 }): Promise<DuplicateCheckResult> {
   const threshold = args.threshold ?? DUPLICATE_SUSPECT_THRESHOLD;
+  const dupCheckTypes = new Set((args.schema ?? DEFAULT_SCHEMA).categories.duplicateCheck);
   const candidates = (args.plan.nodes ?? []).filter((node) => {
     if (mutationOp(node) !== "create") return false;
-    const type = canonicalType(node.type);
-    return type !== undefined && DUPLICATE_CHECK_TYPE_SET.has(type);
+    const type = canonicalType(node.type, args.schema);
+    return type !== undefined && dupCheckTypes.has(type);
   });
   if (candidates.length === 0) {
     return { status: "ok", suspects: [], failures: [], relations: [] };

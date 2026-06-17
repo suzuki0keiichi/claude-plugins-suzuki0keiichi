@@ -6,7 +6,7 @@ import { buildVaultFiles } from "./build-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { indexCodebase } from "./index-codebase.ts";
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -186,6 +186,17 @@ async function withVaultEnv<T>(vault: string, stateDir: string, fn: () => Promis
   const prevState = process.env.GRAPHRAG_STATE_DIR;
   process.env.GRAPHRAG_VAULT_DIR = vault;
   process.env.GRAPHRAG_STATE_DIR = stateDir;
+  // vault isolation: テスト用 vault の .graphrag/.env に mode を書く
+  // (detectVaultIsolation は cwd の .graphrag/.env を "local" 扱いにする)
+  const repo = path.dirname(vault);
+  const graphragDir = path.join(repo, ".graphrag");
+  mkdirSync(graphragDir, { recursive: true });
+  const envPath = path.join(graphragDir, ".env");
+  const envExisted = existsSync(envPath);
+  const prevEnvContent = envExisted ? readFileSync(envPath, "utf8") : null;
+  writeFileSync(envPath, "GRAPHRAG_VAULT_MODE=direct\n");
+  const prevCwd = process.cwd();
+  process.chdir(repo);
   // embedding endpoint は設定しない: 索引ビルドは非致命なので mutation は commit される。
   const prevEndpoint = process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
   const prevProvider = process.env.GRAPHRAG_VECTOR_PROVIDER;
@@ -194,6 +205,8 @@ async function withVaultEnv<T>(vault: string, stateDir: string, fn: () => Promis
   try {
     return await fn();
   } finally {
+    process.chdir(prevCwd);
+    if (prevEnvContent !== null) writeFileSync(envPath, prevEnvContent); else if (existsSync(envPath)) unlinkSync(envPath);
     if (prevVault === undefined) delete process.env.GRAPHRAG_VAULT_DIR; else process.env.GRAPHRAG_VAULT_DIR = prevVault;
     if (prevState === undefined) delete process.env.GRAPHRAG_STATE_DIR; else process.env.GRAPHRAG_STATE_DIR = prevState;
     if (prevEndpoint === undefined) delete process.env.GRAPHRAG_EMBEDDING_ENDPOINT; else process.env.GRAPHRAG_EMBEDDING_ENDPOINT = prevEndpoint;
@@ -373,6 +386,10 @@ test("add-decision: 重複 suspect は拒否され、--dup-ack で承認する�
     provider_options: { endpoint: `${mock.base}/embeddings`, model: "nomic-embed-text" },
     rows: [{ node_id: "decision:s:old", dimensions: 2, vector: [1, 0], text_hash: "seed" }]
   }));
+  // vault isolation: テスト用 vault の .graphrag/.env に mode を書き、cwd を vault repo に変更
+  writeFileSync(path.join(stateDir, ".env"), "GRAPHRAG_VAULT_MODE=direct\n");
+  const prevCwd = process.cwd();
+  process.chdir(repo);
   const prevEnv = {
     GRAPHRAG_VAULT_DIR: process.env.GRAPHRAG_VAULT_DIR,
     GRAPHRAG_STATE_DIR: process.env.GRAPHRAG_STATE_DIR,
@@ -396,6 +413,7 @@ test("add-decision: 重複 suspect は拒否され、--dup-ack で承認する�
     await dispatchHeadline("add-decision", [...addArgs, "--dup-ack", "decision:s:old"]);
     assert.ok(importVault(vault).nodes.some((n) => n.id === "decision:s:new"), "--dup-ack で承認すると書ける");
   } finally {
+    process.chdir(prevCwd);
     for (const [k, v] of Object.entries(prevEnv)) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }

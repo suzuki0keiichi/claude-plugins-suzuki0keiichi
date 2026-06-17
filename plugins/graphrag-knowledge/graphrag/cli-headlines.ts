@@ -31,7 +31,8 @@ import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph } from "./retrieval.ts";
 import { embedForIndex } from "./vector.ts";
 import { recordAskHits } from "./cli-ask-state.ts";
-import { canonicalType } from "./schema.ts";
+import { canonicalType, type SchemaDefinition } from "./schema.ts";
+import { resolveSchema } from "./schema-registry.ts";
 import { indexCodebase, resolvePreviousGraph } from "./index-codebase.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
 import { main as runVeinHint } from "./suggest-vein-hints.ts";
@@ -132,9 +133,10 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
     );
   }
 
+  const schema = resolveSchema(vaultDir);
   const dupAck = dupAckFlag(f);
   if (dupAck) plan.duplicate_ack = dupAck;
-  const result = await applyMutationToVault({ plan, vaultDir, baseSha: baseShaFlag(f), reason: plan.reason });
+  const result = await applyMutationToVault({ plan, vaultDir, schema, baseSha: baseShaFlag(f), reason: plan.reason });
 
   const output: any = { applied: true, plan_reason: plan.reason, result };
   if (isolation.vault_external) {
@@ -435,6 +437,8 @@ export async function runAsk(argv: string[]) {
     }
   }
 
+  const askSchema = vaultDir ? resolveSchema(vaultDir) : undefined;
+
   process.stdout.write(JSON.stringify({
     question,
     call_number: callNumber,
@@ -442,6 +446,7 @@ export async function runAsk(argv: string[]) {
     next_action_hint: shouldEscalate(briefOutcome)
       ? "別キーワードを 1 度試す → それでも空ならコード/doc 直読みに切り替える (excessive 検出は launcher が --call-number を構造的に加算しているので過信せず)"
       : "brief 結果で十分。LLM はここから判断を進めてよい",
+    ...(askSchema?.llmReference ? { schema_summary: { id: askSchema.id, reference: askSchema.llmReference } } : {}),
     ...(worldHints !== undefined ? { world_hints: worldHints } : {}),
     stages
   }, null, 2) + "\n");
@@ -458,9 +463,10 @@ async function runCommitMutation(argv: string[]) {
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) throw new Error("commit-mutation: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
 
+  const schema = resolveSchema(vaultDir);
   const plan = await loadMutationPlan(planPath);
   const baseSha = typeof f["base-sha"] === "string" ? f["base-sha"] : undefined;
-  const result = await applyMutationToVault({ plan, vaultDir, baseSha, reason: plan.reason });
+  const result = await applyMutationToVault({ plan, vaultDir, schema, baseSha, reason: plan.reason });
 
   process.stdout.write(JSON.stringify({
     plan_path: planPath,

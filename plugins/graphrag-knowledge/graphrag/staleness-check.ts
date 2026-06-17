@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
-import { canonicalType } from "./schema.ts";
+import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
 export interface StalenessDeps {
   /** generated_at (since) 以降に path を触ったコミット (新しい順) */
@@ -38,8 +38,8 @@ export interface StalenessResult {
   note: string;
 }
 
-// 知識ノードのうち「コードを前提に書かれる」4 型のみ対象 (Investigation 等は対象外)
-const STALENESS_NODE_TYPES = new Set(["Decision", "Constraint", "Risk", "OperationalKnowledge"]);
+// 知識ノードのうち「コードを前提に書かれる」型のみ対象 (Investigation 等は対象外)
+// schema.categories.staleness から取得する (runStalenessCheck 内で構築)。
 // File を宛先に取りうる evidence/効力エッジのみ辿る
 const STALENESS_EDGE_TYPES = new Set(["documented_by", "sets_policy_for", "constrains"]);
 
@@ -63,10 +63,11 @@ function defaultGitLogSince(
 }
 
 export function stalenessCheck(
-  options: { vaultDir: string; root: string; thresholdCommits?: number },
+  options: { vaultDir: string; root: string; thresholdCommits?: number; schema?: SchemaDefinition },
   deps: StalenessDeps = {}
 ): StalenessResult {
   const threshold = options.thresholdCommits ?? 5;
+  const STALENESS_NODE_TYPES = new Set((options.schema ?? DEFAULT_SCHEMA).categories.staleness);
   const gitLogSince = deps.gitLogSince ?? defaultGitLogSince;
   const graph = importVault(options.vaultDir);
 

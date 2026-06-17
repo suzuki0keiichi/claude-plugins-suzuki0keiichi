@@ -1,3 +1,24 @@
+// --- SchemaDefinition: プリセットで差し替え可能なスキーマ定義 -----------------
+
+export interface SchemaDefinition {
+  id: string;
+  nodeTypes: readonly string[];
+  edgeTypes: readonly string[];
+  edgeTypeRules: Record<string, TypeRule[]>;
+  stateVocabulary: Partial<Record<string, readonly string[]>>;
+  aliases: Record<string, string>;
+  categories: {
+    knowledge: readonly string[];
+    crosscut: readonly string[];
+    distilled: readonly string[];       // source backing 必須
+    duplicateCheck: readonly string[];  // 重複検査対象
+    staleness: readonly string[];       // 陳腐化検査対象
+    premiseCandidate: readonly string[]; // has_premise 候補
+    relation: readonly string[];        // relation suggestion 対象
+  };
+  llmReference: string;
+}
+
 // v3.3: root scope 型 (System/Product/Project/Business) は撤去 (vault=scope)。
 // scope は vault 境界自体が担い、種別はグラフのノード型ではなく vault の属性 (自己紹介)。
 export const NODE_TYPES = [
@@ -82,8 +103,9 @@ export const NODE_TYPE_ALIASES: Record<string, NodeType> = {
   Component: "Pocket"
 };
 
-export function canonicalType(t: string | undefined): NodeType | undefined {
-  return t ? (NODE_TYPE_ALIASES[t] ?? t as NodeType) : undefined;
+export function canonicalType(t: string | undefined, schema?: SchemaDefinition): NodeType | undefined {
+  const aliases = schema ? schema.aliases : NODE_TYPE_ALIASES;
+  return t ? ((aliases[t] ?? t) as NodeType) : undefined;
 }
 
 // state 語彙 (型ごとの閉集合)。ここに無い型に state があれば validation failure、
@@ -146,7 +168,8 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
   ]
 };
 
-export function validateGraph(graph: GraphLike = {}): string[] {
+export function validateGraph(graph: GraphLike = {}, schema?: SchemaDefinition): string[] {
+  const s = schema ?? DEFAULT_SCHEMA;
   const ids = new Set<string | undefined>();
   const edgeIds = new Set<string | undefined>();
   const failures: string[] = [];
@@ -154,14 +177,14 @@ export function validateGraph(graph: GraphLike = {}): string[] {
 
   for (const node of graph.nodes ?? []) {
     if (!node.id) failures.push("node id is required");
-    const nodeType = canonicalType(node.type);
-    if (node.type && !NODE_TYPES.includes(nodeType as NodeType)) failures.push(`unknown node type: ${node.type}`);
+    const nodeType = canonicalType(node.type, s);
+    if (node.type && !s.nodeTypes.includes(nodeType as string)) failures.push(`unknown node type: ${node.type}`);
     if (ids.has(node.id)) failures.push(`duplicate node id: ${node.id}`);
     ids.add(node.id);
     nodesById.set(node.id, { ...node, type: nodeType });
 
     if (node.state !== undefined && node.state !== null) {
-      const vocabulary = nodeType ? STATE_VOCABULARY[nodeType] : undefined;
+      const vocabulary = nodeType ? s.stateVocabulary[nodeType] : undefined;
       if (!vocabulary) {
         failures.push(`node ${node.id} (${node.type}) must not have state: ${node.state}`);
       } else if (!vocabulary.includes(node.state as string)) {
@@ -177,13 +200,13 @@ export function validateGraph(graph: GraphLike = {}): string[] {
     if (edgeIds.has(edge.id)) failures.push(`duplicate edge id: ${edge.id}`);
     edgeIds.add(edge.id);
     const edgeType = edge.type as EdgeType | undefined;
-    if (edgeType && !EDGE_TYPES.includes(edgeType)) failures.push(`unknown edge type: ${edgeType}`);
+    if (edgeType && !s.edgeTypes.includes(edgeType)) failures.push(`unknown edge type: ${edgeType}`);
     if (!ids.has(edge.from)) failures.push(`edge ${edge.id} has missing from node: ${edge.from}`);
     if (!ids.has(edge.to)) failures.push(`edge ${edge.id} has missing to node: ${edge.to}`);
-    if (ids.has(edge.from) && ids.has(edge.to) && edgeType && EDGE_TYPES.includes(edgeType)) {
+    if (ids.has(edge.from) && ids.has(edge.to) && edgeType && s.edgeTypes.includes(edgeType)) {
       const fromType = nodesById.get(edge.from)?.type;
       const toType = nodesById.get(edge.to)?.type;
-      if (!edgeTypeAllows(edgeType, fromType, toType)) {
+      if (!edgeTypeAllows(edgeType, fromType, toType, s)) {
         failures.push(`edge ${edge.id} has invalid type pair for ${edgeType}: ${fromType} -> ${toType}`);
       }
     }
@@ -195,9 +218,11 @@ export function validateGraph(graph: GraphLike = {}): string[] {
 function edgeTypeAllows(
   edgeType: EdgeType,
   fromType: NodeType | undefined,
-  toType: NodeType | undefined
+  toType: NodeType | undefined,
+  schema?: SchemaDefinition
 ): boolean {
-  return (EDGE_TYPE_RULES[edgeType] ?? []).some(([allowedFrom, allowedTo]) =>
+  const rules = (schema ?? DEFAULT_SCHEMA).edgeTypeRules;
+  return (rules[edgeType] ?? []).some(([allowedFrom, allowedTo]) =>
     matchesType(allowedFrom, fromType) && matchesType(allowedTo, toType)
   );
 }
@@ -205,3 +230,27 @@ function edgeTypeAllows(
 function matchesType(allowed: AllowedType, actual: NodeType | undefined): boolean {
   return Array.isArray(allowed) ? allowed.includes(actual) : allowed === actual;
 }
+
+// --- DEFAULT_SCHEMA: 現行 system スキーマをそのまま SchemaDefinition に包む ----
+
+export const DEFAULT_SCHEMA: SchemaDefinition = {
+  id: "system",
+  nodeTypes: NODE_TYPES,
+  edgeTypes: EDGE_TYPES,
+  edgeTypeRules: EDGE_TYPE_RULES,
+  stateVocabulary: STATE_VOCABULARY,
+  aliases: NODE_TYPE_ALIASES,
+  categories: {
+    knowledge: ANY_KNOWLEDGE_NODE,
+    crosscut: ANY_CROSSCUT_NODE,
+    distilled: ["Decision", "RejectedOption", "Risk", "OperationalKnowledge"],
+    duplicateCheck: [
+      "Decision", "RejectedOption", "Constraint", "Goal", "Risk",
+      "OperationalKnowledge", "Investigation", "Vein", "Pocket", "Stratum"
+    ],
+    staleness: ["Decision", "Constraint", "Risk", "OperationalKnowledge"],
+    premiseCandidate: ["Decision", "Constraint", "Goal", "OperationalKnowledge"],
+    relation: ["Decision", "OperationalKnowledge", "Risk", "Constraint", "Goal", "RejectedOption"],
+  },
+  llmReference: ""  // 現行は SKILL.md に静的記載、将来 ask 出力に同梱
+};

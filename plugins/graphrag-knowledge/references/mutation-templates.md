@@ -168,3 +168,17 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 加えて vault writer の検証段に**書き込み時重複ゲート** (`duplicate_check`) がある: op:create の知識/横断ノード (File と ConversationChunk 以外) を `title+" "+summary` の embedding で同型既存ノードと照合 (cosine 0.92)。ヒット時は `duplicate_ack` が全 suspect を覆っていなければ all-or-nothing で reject (`failures` に `duplicate-suspect: <new-id> ~ <existing-id> (similarity 0.94)` 形式)。embedding endpoint 不達 / vector index 不在は非致命スキップ。typed-add からは `--dup-ack <id[,id...]>` で注入する。ゲートは最後の網 — `ask` での事前重複確認は依然必須。
 
 エラー時は `commit-mutation` (vault writer) が `failures` 配列付き Error を投げ、vault は変更されない (all-or-nothing)。
+
+---
+
+## 書き込み出力の suggestions
+
+`add-*` / `commit-mutation` は書き込み後、出力に `suggestions` オブジェクトを添える (全て **suggest-only・非致命**。index / endpoint 不在時は各提案を空+reason 付きで skip し、書き込みは決して止めない)。**提案は判断して確定するか、理由を持って見送る。自動では張られない** — これが境界 (エッジの自動付与はしない・確定は LLM/人間)。
+
+- `suggestions.binding`: 作成した Decision/OK/Risk/Constraint について、vector index の File と embedding 照合した紐付け候補 (型ごと固定: Decision→sets_policy_for / Risk→risks_in / OK→documented_by / Constraint→constrains)。各候補に similarity と「そのまま実行できる確定手段」(typed-add フラグ or plan 断片) が付く → 妥当なら **その手段で確定**する。
+- `suggestions.relations`: 同型ノードの cosine が [0.80, 0.92) 帯にある関係候補 (refines / has_premise / supersede のどれかは **LLM が判断** と note 付き)。中身を見て該当する関係を張るか見送る。
+- `suggestions.led_to`: Decision 作成時に graph 内の `state:"active"` な Investigation を列挙 → その調査から導かれた Decision なら led_to を張る。
+- `suggestions.premise_candidates`: ask-trail の直近ヒットのうち Decision/Constraint/Goal/OK 型 → 前提なら has_premise を張る。
+- `suggestions.binding_debt`: bind 無し knowledge ノード総数 (carving-check #9 と同定義、Constraint 拡張込み) を整数 1 つで。増えていたら未紐付けの知識が溜まっている合図。
+
+いずれも「判断して確定 or 理由を持って見送る」。提案をそのまま無言で放置しない (見送るなら見送る理由が言える状態にする)。
