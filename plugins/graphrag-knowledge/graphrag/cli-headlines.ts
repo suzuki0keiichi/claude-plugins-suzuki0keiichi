@@ -110,7 +110,7 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
     throw new Error("typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
   }
 
-  // vault isolation check: 外部 vault で mode 未設定 or readonly なら書き込みを拒否
+  // vault isolation check: 外部 vault でローカル mode が無い or readonly なら書き込みを拒否
   const isolation = detectVaultIsolation();
   if (isolation.mode === "readonly") {
     throw new Error(
@@ -119,9 +119,13 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
     );
   }
   if (isolation.vault_external && isolation.mode === null) {
+    const cwdEnvPath = path.join(process.cwd(), ".graphrag", ".env");
     throw new Error(
-      `Vault is external (${process.env.GRAPHRAG_VAULT_DIR}) but GRAPHRAG_VAULT_MODE is not configured. ` +
-      `Refusing to write — ask the user which mode to use, then set it in .graphrag/.env:\n` +
+      `Vault is external (${process.env.GRAPHRAG_VAULT_DIR}) but this directory has no local GRAPHRAG_VAULT_MODE. ` +
+      (isolation.mode_source === "inherited"
+        ? `(A parent directory has a mode setting, but each worktree needs its own decision.) `
+        : ``) +
+      `Refusing to write — ask the user which mode to use, then set it in ${cwdEnvPath}:\n` +
       `  GRAPHRAG_VAULT_MODE=readonly   — read only, block all writes\n` +
       `  GRAPHRAG_VAULT_MODE=direct     — write to the shared vault as-is\n` +
       `  GRAPHRAG_VAULT_MODE=worktree   — create a vault worktree for isolated writes (run vault-worktree --name <name> first)`

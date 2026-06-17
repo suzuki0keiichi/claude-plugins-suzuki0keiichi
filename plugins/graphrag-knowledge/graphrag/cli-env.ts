@@ -81,12 +81,13 @@ export function discoverAndLoadGraphragEnv(cwd: string = process.cwd()): void {
 
 // ── vault isolation detection ──────────────────────────────────
 
-export type VaultMode = "readonly" | "direct";
+export type VaultMode = "readonly" | "direct" | "worktree";
 
 export interface VaultIsolation {
   in_worktree: boolean;
   vault_external: boolean;
   mode: VaultMode | null;
+  mode_source: "local" | "inherited" | "none";
   message: string | null;
 }
 
@@ -106,44 +107,70 @@ function isWorktree(dir: string): boolean {
   } catch { return false; }
 }
 
+function parseVaultMode(raw: string | undefined): VaultMode | null {
+  if (raw === "readonly") return "readonly";
+  if (raw === "direct") return "direct";
+  if (raw === "worktree") return "worktree";
+  return null;
+}
+
+/**
+ * cwd 直下の `.graphrag/.env` から GRAPHRAG_VAULT_MODE を読む。
+ * walk-up で親から継承された process.env の値は使わない。
+ * mode はワークツリーごとの意思決定なので、cwd ローカルの設定だけが有効。
+ */
+function readLocalVaultMode(cwd: string): { mode: VaultMode | null; source: "local" | "inherited" | "none" } {
+  const localEnvPath = path.join(cwd, ".graphrag", ".env");
+  if (existsSync(localEnvPath) && !statSync(localEnvPath).isDirectory()) {
+    const parsed = parseDotEnv(readFileSync(localEnvPath, "utf8"));
+    const mode = parseVaultMode(parsed["GRAPHRAG_VAULT_MODE"]);
+    if (mode !== null) return { mode, source: "local" };
+  }
+  const envMode = parseVaultMode(process.env.GRAPHRAG_VAULT_MODE);
+  if (envMode !== null) return { mode: envMode, source: "inherited" };
+  return { mode: null, source: "none" };
+}
+
 /**
  * cwd と vault の関係を検出し、vault_mode を判定する。
  *
- * - in_worktree: cwd が git worktree (.git がファイル) かどうか
- * - vault_external: vault が cwd と同じ git リポジトリに属さないかどうか
- * - mode: GRAPHRAG_VAULT_MODE env (readonly | direct | null=未設定)
- * - message: LLM に伝えるべき状況説明 (問題なければ null)
- *
- * mode が未設定かつ vault が外部の場合のみ message を生成する。
- * mode が設定済みなら CLI がそれに従うため、LLM への確認は不要。
+ * mode の判定は cwd 直下の `.graphrag/.env` を優先。
+ * walk-up で親から拾った process.env の GRAPHRAG_VAULT_MODE は
+ * mode_source: "inherited" として区別し、外部 vault の場合は
+ * inherited mode でも安全ゲートを通す（ローカル設定を要求する）。
  */
 export function detectVaultIsolation(cwd: string = process.cwd()): VaultIsolation {
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
-  const rawMode = process.env.GRAPHRAG_VAULT_MODE;
-  const mode: VaultMode | null =
-    rawMode === "readonly" ? "readonly" :
-    rawMode === "direct" ? "direct" : null;
+  const { mode, source } = readLocalVaultMode(cwd);
 
   const worktree = isWorktree(cwd);
   if (!vaultDir) {
-    return { in_worktree: worktree, vault_external: false, mode, message: null };
+    return { in_worktree: worktree, vault_external: false, mode, mode_source: source, message: null };
   }
 
   const cwdRepo = gitToplevel(cwd);
   const vaultRepo = gitToplevel(vaultDir);
   const external = !!(cwdRepo && vaultRepo && cwdRepo !== vaultRepo);
 
+  const needsLocalDecision = external && source !== "local";
+
   let message: string | null = null;
-  if (external && mode === null) {
+  if (needsLocalDecision) {
     message =
-      `vault is external (${vaultDir} — repo: ${vaultRepo}), ` +
-      `but GRAPHRAG_VAULT_MODE is not configured. ` +
-      `Ask the user: set GRAPHRAG_VAULT_MODE=readonly (read only, no writes) ` +
-      `or GRAPHRAG_VAULT_MODE=direct (write to shared vault as-is) ` +
-      `in .graphrag/.env, then retry.`;
+      `vault is external (${vaultDir}). ` +
+      (source === "inherited"
+        ? `GRAPHRAG_VAULT_MODE=${mode} is inherited from a parent directory, but each worktree needs its own decision. `
+        : `GRAPHRAG_VAULT_MODE is not configured. `) +
+      `Set GRAPHRAG_VAULT_MODE in this directory's .graphrag/.env (${path.join(cwd, ".graphrag", ".env")}).`;
   }
 
-  return { in_worktree: worktree, vault_external: external, mode, message };
+  return {
+    in_worktree: worktree,
+    vault_external: external,
+    mode: needsLocalDecision ? null : mode,
+    mode_source: source,
+    message
+  };
 }
 
 /**
