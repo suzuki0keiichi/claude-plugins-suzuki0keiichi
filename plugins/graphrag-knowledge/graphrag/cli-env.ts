@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { execSync } from "node:child_process";
 import path from "node:path";
 
 /**
@@ -76,6 +77,73 @@ export function discoverAndLoadGraphragEnv(cwd: string = process.cwd()): void {
     if (parent === dir) return;
     dir = parent;
   }
+}
+
+// ── vault isolation detection ──────────────────────────────────
+
+export type VaultMode = "readonly" | "direct";
+
+export interface VaultIsolation {
+  in_worktree: boolean;
+  vault_external: boolean;
+  mode: VaultMode | null;
+  message: string | null;
+}
+
+function gitToplevel(dir: string): string | null {
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: dir, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+  } catch { return null; }
+}
+
+function isWorktree(dir: string): boolean {
+  const dotGit = path.join(dir, ".git");
+  if (!existsSync(dotGit)) return false;
+  try {
+    return statSync(dotGit).isFile();
+  } catch { return false; }
+}
+
+/**
+ * cwd と vault の関係を検出し、vault_mode を判定する。
+ *
+ * - in_worktree: cwd が git worktree (.git がファイル) かどうか
+ * - vault_external: vault が cwd と同じ git リポジトリに属さないかどうか
+ * - mode: GRAPHRAG_VAULT_MODE env (readonly | direct | null=未設定)
+ * - message: LLM に伝えるべき状況説明 (問題なければ null)
+ *
+ * mode が未設定かつ vault が外部の場合のみ message を生成する。
+ * mode が設定済みなら CLI がそれに従うため、LLM への確認は不要。
+ */
+export function detectVaultIsolation(cwd: string = process.cwd()): VaultIsolation {
+  const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
+  const rawMode = process.env.GRAPHRAG_VAULT_MODE;
+  const mode: VaultMode | null =
+    rawMode === "readonly" ? "readonly" :
+    rawMode === "direct" ? "direct" : null;
+
+  const worktree = isWorktree(cwd);
+  if (!vaultDir) {
+    return { in_worktree: worktree, vault_external: false, mode, message: null };
+  }
+
+  const cwdRepo = gitToplevel(cwd);
+  const vaultRepo = gitToplevel(vaultDir);
+  const external = !!(cwdRepo && vaultRepo && cwdRepo !== vaultRepo);
+
+  let message: string | null = null;
+  if (external && mode === null) {
+    message =
+      `vault is external (${vaultDir} — repo: ${vaultRepo}), ` +
+      `but GRAPHRAG_VAULT_MODE is not configured. ` +
+      `Ask the user: set GRAPHRAG_VAULT_MODE=readonly (read only, no writes) ` +
+      `or GRAPHRAG_VAULT_MODE=direct (write to shared vault as-is) ` +
+      `in .graphrag/.env, then retry.`;
+  }
+
+  return { in_worktree: worktree, vault_external: external, mode, message };
 }
 
 /**
