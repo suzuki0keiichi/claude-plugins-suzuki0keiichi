@@ -47,20 +47,22 @@ primitive (段別細粒度操作) は §Primitive verbs 一覧 + `${CLAUDE_PLUGI
 
 ## Anti-patterns (やってはいけない)
 
-- **「グラフを読む/辿る」を grep / glob / read に翻訳しない**。「グラフを読んで辿って」「過去どう判断したか」「なぜこの設計か」「影響範囲・波及」「前回の続き」等の依頼は、**vault の所在をファイル検索で探したり vault の `.md` を直接読んだりせず、まず `ask "<質問>"` で引く**。CLI は cwd から上方向に `.graphrag/vault` を**自動発見**するので、vault パスを知らなくても・env を設定しなくても `ask` は通る。見つからなければ大声でエラー停止する (§セットアップ前提) ので、黙ってファイル探索にフォールバックしない。env が ambient に見えないことを理由に grep に逃げるのは設計違反。
+- **「グラフを読む/辿る」を grep / glob / read に翻訳しない**。「グラフを読んで辿って」「過去どう判断したか」「なぜこの設計か」「影響範囲・波及」「前回の続き」等の依頼は、**vault の所在をファイル検索で探したり vault の `.md` を直接読んだりせず、まず `ask "<質問>"` で引く**。CLI は `.graphrag/.env` (walk-up) → `.env` → `.graphrag/vault` (walk-up) の順で vault を**自動発見**するので、vault パスを知らなくても `ask` は通る。見つからなければ大声でエラー停止する (§セットアップ前提) ので、黙ってファイル探索にフォールバックしない。env が ambient に見えないことを理由に grep に逃げるのは設計違反。
 - **`graphrag/*.ts` のソースコードを grep / read しない**。LLM が必要とする情報は本ファイルと `references/` で完結する。`schema.ts` を読んで型を再導出するな (§スキーマ早見で十分)。`mutate-vault.ts` を読んで mutation plan 形を再導出するな (typed-add で大半が不要、残りは `${CLAUDE_PLUGIN_ROOT}/references/mutation-templates.md`)。CLI の呼び方を再導出するな (`node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts <verb>` ラッパで十分)。
 - **Cypher / 生クエリを書かない**。LLM が触れる書き口は typed-add 引数と mutation plan JSON のみ。
 - **`vault/` を直接編集しない**。正本は vault だが、手編集せず `commit-mutation` / `add-*` 経由で書く (CLI が lock / OCC / 原子公開 / git commit を担保する)。
 - **重複ノードを作らない**。新規前に `ask` で**必ず**既存確認。`skip` / `update` / `supersede` / `review` を新規より優先。書き込み時には重複ゲート (`duplicate_check`、§Mutation Plan) が embedding 近接で最後の網を張るが、**ゲートがあるからと `ask` での事前確認を省かない** (ゲートは同型ノードの cosine 0.92 以上しか捉えない)。suspect を理解した上で別物として作る時だけ `--dup-ack <id[,id...]>` で明示的に通す。
 - **session 内に閉じた "あれをやりたい" だけでグラフを汚さない**。永続するのは session を越えて再利用される結論・制約・リスク・運用知識のみ (詳細は §何を永続するか)。
+- **vault の書き先を確認せずに書かない (worktree / サブディレクトリ事故)**。vault は cwd から上方向に自動発見される (§セットアップ前提)。worktree・サブディレクトリ・異なるブランチのチェックアウトで cwd が変わると、**意図しない vault に書く / vault が見つからない / 別リポジトリの vault を掴む** 事故が起きる。特に vault がプロジェクト外 (別リポジトリ) にある構成では、cwd が変わった瞬間に auto-discovery が vault を見失う。**session 内で初めて書く前に `inspect` で `vault_dir` を確認する**。想定と違えば `--vault <path>` フラグで明示するか、`.graphrag/.env` に `GRAPHRAG_VAULT_DIR` を書く (§セットアップ前提)。
+- **vault ファイルを `git merge` しない**。知識グラフの並行作業をブランチで隔離した後、**git のファイル単位 merge は使わない**。git merge は「同じ判断を別の言葉で書いた重複」「系譜の無い Decision の衝突」「意味的に矛盾するエッジの両取り」を検出できない。merge は必ず `branch-merge` → 判断パケット読み → `commit-mutation` で main の vault に意味単位で適用する (§並行作業の枝分かれと意味的 merge、`${CLAUDE_PLUGIN_ROOT}/references/branch-merge.md`)。git merge / rebase で vault ファイルが機械的に統合された状態は**壊れた vault**であり、修復コストは意味的 merge の数倍かかる。
 
 ## セットアップ前提 (満たさないと retrieval は大声で停止する)
 
-- **vault ディレクトリ**が在ること。読み・書き・索引は全て vault を見る。外部 graph DB は不要 (v3 は vault のみ)。vault の解決順は **shell env `GRAPHRAG_VAULT_DIR` > プロジェクトの `.env` > 規約パス `.graphrag/vault` の自動発見** (cwd から上方向に探索, クロスプラットフォーム)。**`.graphrag/vault` に置けば env も `.env` も要らず素で `ask` が通る** (利用先の他ツール `.env` と干渉させたくない時の既定手段)。どれでも見つからなければ大声で停止する (黙って lexical fallback しない)。
+- **vault ディレクトリ**が在ること。読み・書き・索引は全て vault を見る。外部 graph DB は不要 (v3 は vault のみ)。vault の解決順は **shell env `GRAPHRAG_VAULT_DIR` > `.graphrag/.env` (cwd から上方向に walk-up) > プロジェクトの `.env` > 規約パス `.graphrag/vault` の自動発見** (cwd から上方向に探索, クロスプラットフォーム)。**`.graphrag/vault` に置けば env も `.env` も要らず素で `ask` が通る** (利用先の他ツール `.env` と干渉させたくない時の既定手段)。**vault が外部リポジトリにある場合は `.graphrag/.env` に `GRAPHRAG_VAULT_DIR=<絶対パス>` を書く**のが最も安定する (`.graphrag/.env` は walk-up で発見されるため、worktree やサブディレクトリからでも親の設定を拾える。リポジトリには `.gitignore` に `.graphrag/.env` を足しておく)。どれでも見つからなければ大声で停止する (黙って lexical fallback しない)。
 - OpenAI 互換 embedding endpoint。設定が無ければ Ollama (`http://localhost:11434/v1`) と LM Studio (`http://localhost:1234/v1`) を自動検出。埋め込みモデルは `nomic-embed-text` に pin。endpoint が到達不能、または pin したモデルを `/v1/models` に出していない場合は、**欠落扱いで明示エラー停止**する。ごまかして探索を継続しない。
 - **launcher は起動時に `.env` を 1 回読む**。全 verb (primitive / headline) が同じ env を見るので、verb ごとに env 不一致が起きない。verb 個別の env 上書きは CLI flag のみ。
 - **出力先**は規約パス `.graphrag/vault` に置くだけで足り (env / `.env` 不要)、別の場所に置きたい時だけ env で上書きする (詳細は `${CLAUDE_PLUGIN_ROOT}/references/port-site.md`):
-  - `GRAPHRAG_VAULT_DIR` = vault 正本パス (例 `./.graphrag/vault`)。env / `.env` / `.graphrag/vault` 規約のいずれでも解決できない状態で `ask` / `commit-mutation` / `add-*` を叩くと**エラー停止**。
+  - `GRAPHRAG_VAULT_DIR` = vault 正本パス (例 `./.graphrag/vault`)。env / `.graphrag/.env` / `.env` / `.graphrag/vault` 規約のいずれでも解決できない状態で `ask` / `commit-mutation` / `add-*` を叩くと**エラー停止**。
   - `GRAPHRAG_GRAPH_JSON_PATH` = graph.json (索引器出力・往復検証用) 入出力パス (例 `./.graphrag/graph.json`)。`index` / `carve` / `vault-build` / `vault-import` を使う時のみ必要。
 
 ## focus 継続と read-only triage

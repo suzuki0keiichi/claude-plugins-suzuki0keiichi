@@ -53,6 +53,32 @@ export function loadDotEnvFromCwd(cwd: string = process.cwd()): void {
 }
 
 /**
+ * cwd から上方向へ `.graphrag/.env` を探し、見つけたら applyDotEnv する。
+ *
+ * graphrag 専用の env ファイル。プロジェクトの `.env` と分離できるので
+ * 他ツールと干渉しない。worktree・サブディレクトリからでも親の
+ * `.graphrag/.env` を拾えるよう walk-up する。
+ *
+ * 典型: vault が外部リポジトリにある時に
+ *   GRAPHRAG_VAULT_DIR=/path/to/other-repo/.graphrag/vault
+ * と書いておく。gitignore に `.graphrag/.env` を足せばリポには残らない。
+ */
+export function discoverAndLoadGraphragEnv(cwd: string = process.cwd()): void {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const candidate = path.join(dir, ".graphrag", ".env");
+    if (existsSync(candidate) && !statSync(candidate).isDirectory()) {
+      const text = readFileSync(candidate, "utf8");
+      applyDotEnv(parseDotEnv(text));
+      return;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return;
+    dir = parent;
+  }
+}
+
+/**
  * `GRAPHRAG_VAULT_DIR` が (env / .env で) 未設定の時に限り、cwd から上方向へ
  * `.graphrag/vault` ディレクトリを探し、見つかれば process.env に焼く。
  *
