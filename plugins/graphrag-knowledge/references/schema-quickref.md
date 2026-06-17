@@ -16,15 +16,15 @@
   - `Investigation` = 目的を持った調査 (state: active/closed で閉じられる)。
   - `ConversationChunk` = 生の対話記録。AI との会話・会議メモ・Slack 議論など、時点のエピソード記録。Investigation が「まとまった調査行為」なのに対し、ConversationChunk は「その場の生ログ」。閉じる概念が無い。
 - **軸2 / 横断構造 (3)**: ソフトウェア構造を3つの直交した軸で捉える。
-  - `Stratum` (= Layer, 地層) = 深さの層。app 層・infra 層など水平に積もる依存ピラミッド。
-  - `Vein` (= Concern, 鉱脈) = 横串の関心。auth・logging など層を貫いて走る共通関心。
-  - `Pocket` (= Component, 鉱塊) = 部品。payment module など局所に凝集した実装の塊。
-  - 正式名は地質メタファー (Stratum/Vein/Pocket) だが、**Layer / Concern / Component も alias として使える** (`canonicalType` が正規化する)。チーム内で通じやすい方で呼んでよい。**indexer は canonical 地質名 (`Pocket`/`Stratum`、id `pocket:`/`stratum:`) で出す**。
+  - `Layer` (alias: Stratum) = 深さの層。app 層・infra 層など水平に積もる依存ピラミッド。
+  - `Concern` (alias: Vein) = 横串の関心。auth・logging など層を貫いて走る共通関心。
+  - `Component` (alias: Pocket) = 部品。payment module など局所に凝集した実装の塊。
+  - 地質メタファー名 (Stratum/Vein/Pocket) は alias として使える (`canonicalType` が Layer/Concern/Component に正規化する)。**indexer は canonical 名 (`Component`/`Layer`、id `component:`/`layer:`) で出す**。
 
 ## エッジ型 (14) と許容組 (from-type → to-type)
 
 - `documented_by`: Decision|RejectedOption|Risk|OK|Investigation → File
-- `evidenced_by`: Stratum|Vein|Pocket → File
+- `evidenced_by`: Layer|Concern|Component → File
 - `derived_from`: Decision|RejectedOption|Risk|OK|**Goal**|Investigation → ConversationChunk|Investigation (**出自**=「この知識はどの会話/調査から生まれたか」の歴史記録。`has_premise` との違い: has_premise は論理依存「消えたら壊れる」、derived_from は出自「どこから来たか」。Investigation が両方の宛先に現れるが、意味は異なる)
 - `discussed_in`: ConversationChunk → Investigation
 - `led_to`: Investigation → Decision
@@ -33,9 +33,9 @@
 - `refines`: Decision|OK → Decision|OK / **Goal → Goal**
 - `has_premise`: Decision|OK|Investigation → Decision|OK|Constraint|Risk|**Goal**
 - `constrains`: Constraint → Decision|File|OK
-- `sets_policy_for`: Decision → File|Investigation|OK|**Stratum|Vein|Pocket** (横断構造宛=「この部品/層/関心の全体に効く方針」。正直でいられる一番低い高度を選ぶ: File→Pocket→Stratum/Vein。vault 全体規範は CLAUDE.md/AGENTS.md へ)
+- `sets_policy_for`: Decision → File|Investigation|OK|**Layer|Concern|Component** (横断構造宛=「この部品/層/関心の全体に効く方針」。正直でいられる一番低い高度を選ぶ: File→Component→Layer/Concern。vault 全体規範は CLAUDE.md/AGENTS.md へ)
 - `reduces_risk`: Decision|OK → Risk
-- `risks_in`: Risk → Decision|File|OK|Investigation|**Stratum|Vein|Pocket** (横断構造宛=「この部品/層/関心に宿るリスク」。高度のはしごは sets_policy_for と同じ)
+- `risks_in`: Risk → Decision|File|OK|Investigation|**Layer|Concern|Component** (横断構造宛=「この部品/層/関心に宿るリスク」。高度のはしごは sets_policy_for と同じ)
 - `temporary_relation_candidate`: 任意の知識ノード → 任意の知識ノード (mutation 前の暫定マーカー)
 
 ## ID 規約

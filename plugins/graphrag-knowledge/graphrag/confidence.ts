@@ -117,7 +117,7 @@ export function confidenceMessage(confidence: MatchConfidence): string | null {
   if (confidence === "low") {
     return "Weak hit. Graph may not cover this concept. Try one alternative keyword; if still no hit, switch to code/doc direct reading instead of repeating graph queries.";
   }
-  // v3-safe wording: must not name specific node types (the old "Concern/
-  // Component/Layer" message went stale when axis-2 became Stratum/Vein/Pocket).
+  // v3-safe wording: must not name specific node types (the old message
+  // went stale when canonical names changed; keep type-agnostic).
   return "No matching evidence in graph. Try one alternative keyword; if still no hit, switch to code/doc direct reading instead of repeating graph queries.";
 }

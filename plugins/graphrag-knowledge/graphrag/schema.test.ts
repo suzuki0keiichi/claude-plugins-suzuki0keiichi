@@ -81,9 +81,9 @@ test("Decision has_premise Goal is valid", () => {
 
 test("all legacy crosscut aliases validate as canonical", () => {
   for (const [alias, canonical] of [
-    ["Layer", "Stratum"],
-    ["Concern", "Vein"],
-    ["Component", "Pocket"]
+    ["Stratum", "Layer"],
+    ["Vein", "Concern"],
+    ["Pocket", "Component"]
   ] as const) {
     const failures = validateGraph({
       nodes: [
@@ -96,17 +96,17 @@ test("all legacy crosscut aliases validate as canonical", () => {
   }
 });
 
-test("crosscut types are Stratum/Vein/Pocket and evidence File", () => {
-  for (const t of ["Stratum", "Vein", "Pocket"]) {
+test("crosscut types are Layer/Concern/Component and evidence File", () => {
+  for (const t of ["Layer", "Concern", "Component"]) {
     assert.ok(NODE_TYPES.includes(t), `NODE_TYPES must include ${t}`);
   }
   const failures = validateGraph({
     nodes: [
-      { id: "vein:acme:auth", type: "Vein" },
+      { id: "concern:acme:auth", type: "Concern" },
       { id: "file:acme:a.ts", type: "File" }
     ],
     edges: [
-      { id: "e:1", type: "evidenced_by", from: "vein:acme:auth", to: "file:acme:a.ts" }
+      { id: "e:1", type: "evidenced_by", from: "concern:acme:auth", to: "file:acme:a.ts" }
     ]
   });
   assert.deepEqual(failures, []);
@@ -149,22 +149,22 @@ test("validateGraph rejects duplicate edge ids", () => {
 });
 
 
-test("sets_policy_for and risks_in allow crosscut targets (Stratum/Vein/Pocket)", () => {
+test("sets_policy_for and risks_in allow crosscut targets (Layer/Concern/Component)", () => {
   const failures = validateGraph({
     nodes: [
       { id: "decision:s:idempotent-payment", type: "Decision" },
       { id: "risk:s:cache-consistency", type: "Risk" },
-      { id: "pocket:s:payment", type: "Pocket" },
-      { id: "stratum:s:app", type: "Stratum" },
-      { id: "vein:s:logging", type: "Vein" }
+      { id: "component:s:payment", type: "Component" },
+      { id: "layer:s:app", type: "Layer" },
+      { id: "concern:s:logging", type: "Concern" }
     ],
     edges: [
-      { id: "e1", type: "sets_policy_for", from: "decision:s:idempotent-payment", to: "pocket:s:payment" },
-      { id: "e2", type: "sets_policy_for", from: "decision:s:idempotent-payment", to: "stratum:s:app" },
-      { id: "e3", type: "sets_policy_for", from: "decision:s:idempotent-payment", to: "vein:s:logging" },
-      { id: "e4", type: "risks_in", from: "risk:s:cache-consistency", to: "pocket:s:payment" },
-      { id: "e5", type: "risks_in", from: "risk:s:cache-consistency", to: "stratum:s:app" },
-      { id: "e6", type: "risks_in", from: "risk:s:cache-consistency", to: "vein:s:logging" }
+      { id: "e1", type: "sets_policy_for", from: "decision:s:idempotent-payment", to: "component:s:payment" },
+      { id: "e2", type: "sets_policy_for", from: "decision:s:idempotent-payment", to: "layer:s:app" },
+      { id: "e3", type: "sets_policy_for", from: "decision:s:idempotent-payment", to: "concern:s:logging" },
+      { id: "e4", type: "risks_in", from: "risk:s:cache-consistency", to: "component:s:payment" },
+      { id: "e5", type: "risks_in", from: "risk:s:cache-consistency", to: "layer:s:app" },
+      { id: "e6", type: "risks_in", from: "risk:s:cache-consistency", to: "concern:s:logging" }
     ]
   });
   assert.deepEqual(failures, []);
@@ -174,14 +174,14 @@ test("constrains does not allow crosscut targets (extension deferred until neede
   const failures = validateGraph({
     nodes: [
       { id: "constraint:s:gdpr", type: "Constraint" },
-      { id: "pocket:s:payment", type: "Pocket" }
+      { id: "component:s:payment", type: "Component" }
     ],
     edges: [
-      { id: "e1", type: "constrains", from: "constraint:s:gdpr", to: "pocket:s:payment" }
+      { id: "e1", type: "constrains", from: "constraint:s:gdpr", to: "component:s:payment" }
     ]
   });
   assert.deepEqual(failures, [
-    "edge e1 has invalid type pair for constrains: Constraint -> Pocket"
+    "edge e1 has invalid type pair for constrains: Constraint -> Component"
   ]);
 });
 

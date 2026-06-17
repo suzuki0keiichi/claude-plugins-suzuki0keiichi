@@ -1,8 +1,8 @@
-// Vein ヒントの意味的近接抽出 (embedding 経由)
+// Concern ヒントの意味的近接抽出 (embedding 経由)
 //
 // 目的: indexer の構造シグナル (cross_component_in_degree) は import で繋がる
-// 縦串しか拾えない。「機能セット型 Vein」(認証/暗号化/自動更新 等、複数 Layer を
-// 縦断する機能塊) や「共通概念型 Vein」(観測性/i18n/エラー処理 等、import で
+// 縦串しか拾えない。「機能セット型 Concern」(認証/暗号化/自動更新 等、複数 Layer を
+// 縦断する機能塊) や「共通概念型 Concern」(観測性/i18n/エラー処理 等、import で
 // 繋がるとは限らない概念) を統一的に拾うため、各 File の embedding ベクトル間の
 // cosine 距離でクラスタリングする。
 //
@@ -106,7 +106,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
 
   // provisional 要約ガード: File 要約が機械テンプレ (summary_provisional) のまま残ると、
   // embedding が言語/構造語に支配され、クラスタが "typescript" / "components" 等に退化して
-  // 縦串 (Vein) 抽出が無意味になる。既定では拒否し、本物要約に書き換えてから走らせる。
+  // 縦串 (Concern) 抽出が無意味になる。既定では拒否し、本物要約に書き換えてから走らせる。
   const allFiles = graph.nodes.filter((n: any) => n.type === "File");
   const provisionalFiles = allFiles.filter((n: any) => n.summary_provisional === true);
   if (provisionalFiles.length > 0 && !args.allowProvisional) {
@@ -115,7 +115,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       `機械テンプレ (summary_provisional) のままです。`
     );
     console.error(
-      "テンプレ要約だと embedding が言語・階層語で固まり、縦串 (Vein) 候補が無意味になります。"
+      "テンプレ要約だと embedding が言語・階層語で固まり、縦串 (Concern) 候補が無意味になります。"
     );
     console.error(
       "各 File を読んで本物の要約に書き換え summary_provisional を外してから再実行してください " +
@@ -124,7 +124,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     process.exit(1);
   }
 
-  // File ノードと所属 Pocket を逆引き (旧 component: id の既存グラフにも後方互換で対応)
+  // File ノードと所属 Component を逆引き (旧 component: id の既存グラフにも後方互換で対応)
   const componentOfFile = new Map<string, string>();
   const fileNodes = new Map<string, any>();
   for (const n of graph.nodes) {

@@ -1,7 +1,7 @@
 // Generic codebase indexer. Redesigned from the originating project's essence
 // (see references/indexer-redesign-notes.md), NOT a blind port. No project-specific
-// rules. Targets the existing schema only (System / File + Vein / Pocket
-// / Stratum candidates; contains / evidenced_by edges). Symbols/imports stay as
+// rules. Targets the existing schema only (System / File + Concern / Component
+// / Layer candidates; contains / evidenced_by edges). Symbols/imports stay as
 // File fields (see references/carving-rationale.md), woven into the embedding
 // summary. Output feeds graph:falkor:sync / build-vault / graph:vector:index.
 
@@ -90,7 +90,7 @@ function listFiles(root: string): string[] {
       if (entry.isDirectory()) walk(abs);
       // git ls-files は POSIX `/` を返す。非 git の walk フォールバックも同じく `/` に
       // 正規化する (Windows の `\` のままだと import 解決が path.posix を使うため壊れ、
-      // 依存コミュニティ=Pocket 検出が機能しなくなる)。
+      // 依存コミュニティ=Component 検出が機能しなくなる)。
       else if (entry.isFile()) acc.push(path.relative(root, abs).split(path.sep).join("/"));
     }
   };
@@ -194,7 +194,7 @@ function describeRole(role: string): string {
   } as Record<string, string>)[role] ?? role;
 }
 
-// Generic Pocket candidates: package/module roots. No project-specific rules.
+// Generic Component candidates: package/module roots. No project-specific rules.
 const COMPONENT_MARKERS = ["package.json", "pyproject.toml", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "CMakeLists.txt"];
 
 export function indexCodebase(opts: { root: string; systemName?: string; previous?: any; trustPreviousSummaries?: boolean }) {
@@ -297,7 +297,7 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
     depOut.set(fid, outs);
   }
 
-  // Pocket (旧 Component) = dependency communities (graph distance), not heuristics.
+  // Component = dependency communities (graph distance), not heuristics.
   const rawCommunities = labelPropagation(adj);
 
   // ディレクトリ純度による後処理分割:
@@ -334,15 +334,15 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
   for (const members of communities) {
     if (members.length < 3) continue;
     ci += 1;
-    const cid = `pocket:${slug(systemName)}:c${ci}`;
+    const cid = `component:${slug(systemName)}:c${ci}`;
     const sampleRels = members.map((m) => relById.get(m)).filter(Boolean);
     nodes.push({
-      id: cid, type: "Pocket", candidate: true,
+      id: cid, type: "Component", candidate: true,
       // candidate summary は構成要素サマリ (どの File が束ねられたか) の機械生成テンプレで
       // あって「意味」ではない。LLM が judgment_input を見て機能境界を命名し意味の summary に
       // 書き換えるまで summary_provisional=true で未完を自己申告する (File summary と対称)。
       summary_provisional: true,
-      title: `Pocket candidate c${ci} (${members.length} files)`,
+      title: `Component candidate c${ci} (${members.length} files)`,
       summary: `依存グラフのコミュニティ検出で抽出した結合の強いファイル群(${members.length}件)。機能境界の命名・要約は LLM 判定に委ねる。`,
       signals: { kind: "dependency-community", evidence_count: members.length },
       judgment_input: {
@@ -364,7 +364,7 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
   // 起点として参照する (詳細は carving-rules.md 参照)。
   const compOfFile = new Map<string, string>();
   for (let i = 0; i < communities.length; i += 1) {
-    const cid = `pocket:${slug(systemName)}:c${i + 1}`;
+    const cid = `component:${slug(systemName)}:c${i + 1}`;
     for (const fid of communities[i]) compOfFile.set(fid, cid);
   }
   const importersByTarget = new Map<string, Set<string>>();
@@ -384,7 +384,7 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
     node.imported_from_components = [...comps];
   }
 
-  // Stratum (旧 Layer) = position in the dependency DAG (graph topology), banded.
+  // Layer = position in the dependency DAG (graph topology), banded.
   const depthOf = dependencyDepth(depOut);
   const maxDepth = Math.max(0, ...depthOf.values());
   const BANDS = maxDepth >= 3 ? 4 : maxDepth + 1;
@@ -397,13 +397,13 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
   }
   for (const [b, ids] of [...byBand.entries()].sort((x, y) => x[0] - y[0])) {
     if (ids.length < 4) continue;
-    const lid = `stratum:${slug(systemName)}:band${b}`;
+    const lid = `layer:${slug(systemName)}:band${b}`;
     nodes.push({
-      id: lid, type: "Stratum", candidate: true,
+      id: lid, type: "Layer", candidate: true,
       // candidate summary は構成要素サマリ (深さ帯にどの File が居るか) の機械生成テンプレ。
       // LLM がアーキ層の意味を命名し summary に書き換えるまで provisional (File と対称)。
       summary_provisional: true,
-      title: `Stratum band ${b}/${BANDS - 1} (${ids.length} files)`,
+      title: `Layer band ${b}/${BANDS - 1} (${ids.length} files)`,
       summary: `依存トポロジの深さ帯 band ${b}(0=基盤・依存される側 〜 大=入口・依存する側)。アーキ層の命名は LLM 判定に委ねる。`,
       signals: { kind: "dependency-topology-band", depth_band: b, evidence_count: ids.length },
       judgment_input: {

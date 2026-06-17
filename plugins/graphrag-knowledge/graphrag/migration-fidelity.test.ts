@@ -13,7 +13,7 @@ function fakeProvider(dim = 3) {
 test("autoQueriesFromGraph derives one query per node title (deduped, non-empty)", () => {
   const g = { nodes: [
     { id: "a", type: "Decision", title: "認証基盤" },
-    { id: "b", type: "Vein", title: "認証基盤" }, // 重複 title
+    { id: "b", type: "Concern", title: "認証基盤" }, // 重複 title
     { id: "c", type: "File", title: "" }          // 空は除外
   ], edges: [] };
   const qs = autoQueriesFromGraph(g);
@@ -64,16 +64,16 @@ test("compareAcrossMigration detects a field dropped by migration (canonical typ
   const v2 = { nodes: [
     { id: "concern:acme:auth", type: "Concern", title: "認証", summary: "横断関心" }
   ], edges: [] };
-  // after: type/id は正しく canonical 化されているが summary が脱落
+  // after: type/id は既に canonical だが summary が脱落
   const afterMissing = { nodes: [
-    { id: "vein:acme:auth", type: "Vein", title: "認証" }
+    { id: "concern:acme:auth", type: "Concern", title: "認証" }
   ], edges: [] };
   const loss = compareAcrossMigration(v2, afterMissing);
   assert.ok(loss.some((l) => l.includes("summary")), loss.join("; "));
 
   // 正しい canonical 化 (全フィールド保存) なら劣化ゼロ
   const afterOk = { nodes: [
-    { id: "vein:acme:auth", type: "Vein", title: "認証", summary: "横断関心" }
+    { id: "concern:acme:auth", type: "Concern", title: "認証", summary: "横断関心" }
   ], edges: [] };
   assert.deepEqual(compareAcrossMigration(v2, afterOk), []);
 });
@@ -87,7 +87,7 @@ test("runFidelityCheck detects field loss end-to-end is impossible to fake here,
   assert.deepEqual(r.recallLoss, [], r.recallLoss.join("; "));
   // v2 を基準にしているので、戻り値も v2 を保持
   assert.equal(r.v2.nodes[0].id, "concern:acme:auth");
-  assert.equal(r.after.nodes[0].id, "vein:acme:auth");
+  assert.equal(r.after.nodes[0].id, "concern:acme:auth");
 });
 
 test("runFidelityCheck recognizes semantic overrides as intentional (no false loss)", async () => {

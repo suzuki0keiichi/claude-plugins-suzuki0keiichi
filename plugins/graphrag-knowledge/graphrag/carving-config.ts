@@ -1,7 +1,7 @@
 // .graphrag/carving.json — allowed-orphan のプロジェクト固有免除を設定化する (carving ゲート C3)。
 //
 // builtin パターン (check-carving の BUILTIN_ORPHAN_PATTERNS) が「どのプロジェクトでも
-// 構造的に Pocket に属さないもの」だけを持つのに対し、プロジェクト固有の免除は
+// 構造的に Component に属さないもの」だけを持つのに対し、プロジェクト固有の免除は
 // この設定に literal path + reason + added で明記する。
 //   - literal path のみ (glob/regex 文字は ERROR)。パターン免除を許すと免除の射程が
 //     書いた本人にも読めなくなり、網羅性ゲートが黙って空洞化する。

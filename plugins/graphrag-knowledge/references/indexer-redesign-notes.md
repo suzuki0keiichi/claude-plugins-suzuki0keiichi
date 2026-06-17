@@ -1,9 +1,9 @@
 # indexer 再設計ノート(エッセンス + 未成熟点)
 
 > ⚠️ **歴史記録 (2026-05-18 時点) + eval ログ**。本文中の `Concern` / `Component` / `Layer` は
-> v3 で地質メタファー (`Vein` / `Pocket` / `Stratum`) に改名された (旧名は alias)。
+> v3 で地質メタファー別名 (`Vein` / `Pocket` / `Stratum`) も持つが、canonical は `Layer` / `Concern` / `Component`。
 > 本文中の `System` ノードと `contains` エッジは **v3.3 で撤去済み** (現行 indexer は
-> File/Pocket/Stratum ノードと `evidenced_by` のみ生成する)。
+> File/Component/Layer ノードと `evidenced_by` のみ生成する)。
 > eval は当時 scratch FalkorDB graph で実測したもの (v3 の正本は vault)。
 > 設計指針 (足場=決定論 / 解釈=LLM、interpretation-guidance + role 重み) は現行も有効。日付付き実測値は記録として改変しない。
 

@@ -63,7 +63,7 @@ test("buildVectorIndex builds from a vault directory (importVault path)", async 
     nodes: [
       { id: "system:acme", type: "System", title: "Acme" },
       { id: "goal:acme:p99", type: "Goal", title: "p99", summary: "性能" },
-      { id: "vein:acme:auth", type: "Vein", title: "認証" }
+      { id: "concern:acme:auth", type: "Concern", title: "認証" }
     ],
     edges: [{ id: "e1", type: "contains", from: "system:acme", to: "goal:acme:p99" }]
   };
@@ -73,18 +73,18 @@ test("buildVectorIndex builds from a vault directory (importVault path)", async 
     const ids = new Set(payload.rows.map((r) => r.node_id));
     assert.equal(payload.rows.length, 3, "every vault node embedded");
     assert.ok(ids.has("goal:acme:p99"));
-    assert.ok(ids.has("vein:acme:auth"));
+    assert.ok(ids.has("concern:acme:auth"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("nodeVectorText captures v3-type nodes (Goal/Vein/Stratum/Pocket)", () => {
+test("nodeVectorText captures v3-type nodes (Goal/Concern/Layer/Component)", () => {
   const goal = nodeVectorText({ id: "goal:acme:p99", type: "Goal", title: "p99 < 200ms", summary: "性能ゴール" });
   assert.ok(goal.includes("Goal"));
   assert.ok(goal.includes("p99 < 200ms"));
   assert.ok(goal.includes("性能ゴール"));
-  for (const t of ["Stratum", "Vein", "Pocket"]) {
+  for (const t of ["Layer", "Concern", "Component"]) {
     const txt = nodeVectorText({ id: `x:${t}`, type: t, title: `T-${t}` });
     assert.ok(txt.includes(t), `nodeVectorText must include type ${t}`);
     assert.ok(txt.includes(`T-${t}`));
@@ -117,14 +117,14 @@ test("buildVectorIndex rejects vault + base together (loud, no silent broken del
 
 test("buildVectorIndex prefers vault over graph when both are given", async () => {
   const dir = writeVault({
-    nodes: [{ id: "vein:acme:auth", type: "Vein", title: "認証" }],
+    nodes: [{ id: "concern:acme:auth", type: "Concern", title: "認証" }],
     edges: []
   });
   try {
     // graph は存在しないパスだが vault 優先なので loadGraph は呼ばれず成功するはず
     const payload = await buildVectorIndex({ vault: dir, graph: "/nonexistent.json" }, { provider: fakeProvider(3) });
     assert.equal(payload.rows.length, 1);
-    assert.equal(payload.rows[0].node_id, "vein:acme:auth");
+    assert.equal(payload.rows[0].node_id, "concern:acme:auth");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -180,9 +180,9 @@ test("main builds the index and writes it next to the vault (atomic), injected p
     generated_at: "2026-05-29T00:00:00.000Z",
     nodes: [
       { id: "system:acme", type: "System", title: "Acme" },
-      { id: "vein:acme:auth", type: "Vein", title: "認証" }
+      { id: "concern:acme:auth", type: "Concern", title: "認証" }
     ],
-    edges: [{ id: "e1", type: "contains", from: "system:acme", to: "vein:acme:auth" }]
+    edges: [{ id: "e1", type: "contains", from: "system:acme", to: "concern:acme:auth" }]
   })) {
     const abs = path.join(vaultDir, f.relPath);
     mkdirSync(path.dirname(abs), { recursive: true });
@@ -208,9 +208,9 @@ test("buildVectorIndex requires a vault (no falkor/json fallback)", async () => 
 });
 
 test("nodeVectorText excludes node id (keeps embedding stable across id canonicalization)", () => {
-  const txt = nodeVectorText({ id: "concern:acme:auth", type: "Vein", title: "認証", summary: "横断" });
+  const txt = nodeVectorText({ id: "concern:acme:auth", type: "Concern", title: "認証", summary: "横断" });
   assert.ok(!txt.includes("concern:acme:auth"), "id must be excluded from embedding text");
-  assert.ok(txt.includes("Vein"), "type kept");
+  assert.ok(txt.includes("Concern"), "type kept");
   assert.ok(txt.includes("認証"), "title kept");
 });
 

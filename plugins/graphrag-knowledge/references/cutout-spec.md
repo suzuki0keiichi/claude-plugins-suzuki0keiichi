@@ -2,7 +2,7 @@
 
 > ⚠️ **歴史記録 (2026-05-18 時点)**。これは gestalty→skill スピンアウト当時の方針確定を残した記録で、
 > 当時の「FalkorDB が正本 / 軸2 = Concern・Component・Layer / Requirement 型」を前提に書かれている。
-> **v3 で正本は vault に一本化**され、軸2は地質メタファー (Stratum/Vein/Pocket)、Requirement は Goal に吸収された。
+> **v3 で正本は vault に一本化**され、軸2は Layer/Concern/Component (alias: Stratum/Vein/Pocket)、Requirement は Goal に吸収された。
 > 現行の正は `SKILL.md` / `CLAUDE.md`。本文は当時の判断の「なぜ」を保全するため改変しない。
 
 作成日: 2026-05-18 / 状態: 方針確定(実装未着手)

@@ -61,8 +61,8 @@ test("削除ノードのファイルは孤児として消える", () => {
 });
 
 test("型フォルダが空になったら掃除される (旧型フォルダの空残骸防止)", () => {
-  // ichibaya 実例: 全 Component ノードが Pocket に改名されると Component/*.md は消えるが、
-  // 空の Component/ ディレクトリが残骸として残っていた。delta 書き込みで掃除する。
+  // ichibaya 実例: 全 Pocket ノードが Component に改名されると Pocket/*.md は消えるが、
+  // 空の Pocket/ ディレクトリが残骸として残っていた。delta 書き込みで掃除する。
   const dir = seedVault(); // Decision (=> Decision/ フォルダ)
   assert.ok(existsSync(path.join(dir, "Decision")), "前提: Decision フォルダが存在");
   const next = {

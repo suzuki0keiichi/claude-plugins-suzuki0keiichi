@@ -9,7 +9,7 @@
 //       プレースホルダ title) が残っていないか (ERROR)。カスみたいな命名の確定を防ぐ。
 //   1. Layer slug が意味語か (連番 band0/band1/... は警告)
 //   2. role = documentation のファイルが Layer に居ないか (構造除外)
-//   3. 全実装ファイル (role ∈ source/test/config) が Component に所属
+//   3. 全実装ファイルが Component に所属
 //   4. 全実装ファイル + packaging が Layer に所属
 //   5. Component と Concern のメンバー Jaccard > 0.5 は二重表現疑い
 //   6. Concern の主 Component 占有率 > 70% は単一 Component 寄り疑い
@@ -74,7 +74,7 @@ interface Finding {
 }
 
 // allowed-orphan の三層 (下から):
-//   builtin — どのプロジェクトでも「構造的に Pocket に属さない」ものだけ (下記基準)。
+//   builtin — どのプロジェクトでも「構造的に Component に属さない」ものだけ (下記基準)。
 //   role 免除 — 明確に非実装の閉集合 (documentation / generated) のみ。config/entrypoint 等の
 //     role は role だけでは免除されず、builtin 汎用パターンに該当する場合のみ免除 (AND)。
 //   config — プロジェクト固有の免除は .graphrag/carving.json に literal path + reason で明記。
@@ -116,7 +116,7 @@ export const BUILTIN_ORPHAN_PATTERNS: ReadonlyArray<{ name: string; pattern: Reg
   // ような「.env を名前に含むコード/データ実体」を免除しない (網羅性ゲートの取りこぼし防止)。
   { name: "env-file", pattern: /(^|\/)[^/]*\.env(\.(example|sample|local|development|production|test|staging|template|defaults?))?$/i },
   // c. packaging: 設定の雛形 (family.example.json 等) のみ。実装サンプル (.example.ts/.js) は
-  // コード実体なので免除せず Pocket 網羅性の対象に残す。
+  // コード実体なので免除せず Component 網羅性の対象に残す。
   { name: "config-example", pattern: /\.example\.(json|ya?ml|toml)$/ },
   { name: "claude-settings", pattern: /(^|\/)\.claude\/settings(\.[a-z]+)?\.json$/ },
   { name: "dockerfile", pattern: /\/Dockerfile$/ },
@@ -155,7 +155,7 @@ export function isAllowedOrphan(filePath: string): boolean {
 
 // role だけで免除してよいのは明確に非実装の閉集合のみ。ここを広げると roleFor の判定変更で
 // orphan 検出が黙って空になる (silent pass)。ui_component / api_route / entrypoint / config 等は
-// 実装なので、builtin パターンか config の literal path に該当しない限り Pocket 所属を要求する。
+// 実装なので、builtin パターンか config の literal path に該当しない限り Component 所属を要求する。
 const ROLE_ALONE_EXEMPT = new Set(["documentation", "generated"]);
 
 export function main(argv: string[] = process.argv.slice(2)): void {
@@ -170,12 +170,12 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   const findings: Finding[] = [];
 
   const files = graph.nodes.filter((n: any) => n.type === "File");
-  // canonical (Pocket/Vein/Stratum) と旧 alias (Component/Concern/Layer) の両方を拾う。
+  // canonical (Component/Concern/Layer) と旧 alias (Pocket/Vein/Stratum) の両方を拾う。
   // 片方しか見ないと、indexer が canonical を吐くようになった graph でゲートが 0 件検出に
   // なり、網羅性チェックが「歪みゼロ」と誤って通る (silent pass) ため canonicalType で正規化。
-  const components = graph.nodes.filter((n: any) => canonicalType(n.type) === "Pocket");
-  const concerns = graph.nodes.filter((n: any) => canonicalType(n.type) === "Vein");
-  const layers = graph.nodes.filter((n: any) => canonicalType(n.type) === "Stratum");
+  const components = graph.nodes.filter((n: any) => canonicalType(n.type) === "Component");
+  const concerns = graph.nodes.filter((n: any) => canonicalType(n.type) === "Concern");
+  const layers = graph.nodes.filter((n: any) => canonicalType(n.type) === "Layer");
 
   // ─────────────────────────────────────────────────────────────
   // (C3) carving.json (プロジェクト固有 allowed-orphan) の読み込みと検証
@@ -229,10 +229,10 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   // (0) 要約が機械テンプレ (summary_provisional) のまま残っていないか
   // ─────────────────────────────────────────────────────────────
   // index-codebase が出す summary は「構成要素のサマリ」(File なら symbol/import、
-  // Pocket/Stratum candidate なら束ねた File 群) の機械テンプレであって「意味」ではない。
+  // Component/Layer candidate なら束ねた File 群) の機械テンプレであって「意味」ではない。
   // LLM が意味に書き換えるまで残る provisional は retrieval/vein-hint の品質を直接
   // 劣化させる (embedding が構成要素語に支配され縦串が言語/階層クラスタに退化)。空でない
-  // =完了に見えるので、File も Pocket/Stratum candidate も対称にゲートで明示的に弾く。
+  // =完了に見えるので、File も Component/Layer candidate も対称にゲートで明示的に弾く。
   const provisionalNodes = graph.nodes.filter((n: any) => n.summary_provisional === true);
   if (provisionalNodes.length > 0) {
     const byType: Record<string, number> = {};
@@ -248,8 +248,8 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   // ─────────────────────────────────────────────────────────────
   // (0b) carve 未完: candidate:true のまま / プレースホルダ命名が残っていないか
   // ─────────────────────────────────────────────────────────────
-  // indexer が出す Pocket/Stratum 候補は candidate:true + 機械プレースホルダ命名
-  // ("Stratum band 0/3 (41 files)" / "Pocket candidate c1" 等)。概念化パスで意味命名し
+  // indexer が出す Component/Layer 候補は candidate:true + 機械プレースホルダ命名
+  // ("Layer band 0/3 (41 files)" / "Component candidate c1" 等)。概念化パスで意味命名し
   // candidate:false にするのが carve。candidate が残る = 未 carve = 機械名が居座る。
   // summary_provisional だけに頼ると、旧 indexer 製 (フラグ未導入) の candidate を取り
   // 逃すため、candidate フラグ自体と命名パターンの両方を ERROR で弾く (format 非依存)。
@@ -267,7 +267,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   }
   // 命名パターン: candidate フラグが落ちていても、title に機械プレースホルダの痕跡
   // (band N/M, "(NN files)", "candidate cN", "(NN ファイル)") が残るものを弾く。
-  // indexer の実プレースホルダ: "Stratum band 0/3 (41 files)" / "Pocket candidate c1 (N files)"。
+  // indexer の実プレースホルダ: "Layer band 0/3 (41 files)" / "Component candidate c1 (N files)"。
   // candidate は `c` 接頭辞付き連番に限定し、"candidate 5 selection" のような正当名を誤爆しない。
   const PLACEHOLDER_TITLE = /(band\s*\d+\s*\/\s*\d+)|(\(\s*\d+\s*(files?|ファイル)\s*\))|(candidate\s+c\d+)/i;
   const placeholderTitled = crosscut.filter((n: any) => PLACEHOLDER_TITLE.test(String(n.title ?? "")));
@@ -289,7 +289,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "WARN",
         rule: "meaningful-slug",
-        message: `Stratum (= Layer) slug が連番: ${slug} (意味語に rename 推奨。Pocket (= Component) と同じく carving-rules.md「意味slug 必須」が適用される)`,
+        message: `Layer slug が連番: ${slug} (意味語に rename 推奨。Component と同じく carving-rules.md「意味slug 必須」が適用される)`,
       });
     }
   }
@@ -299,7 +299,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "WARN",
         rule: "meaningful-slug",
-        message: `Pocket (= Component) slug が連番: ${slug}`,
+        message: `Component slug が連番: ${slug}`,
       });
     }
   }
@@ -327,7 +327,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "layer-no-doc",
-      message: `role=documentation の File が Stratum (= Layer) に所属している (${docInLayer.length}件)。Stratum は実行依存ピラミッドの位置を表すため、doc は除外して Decision/OK の documented_by 出所として扱うのが筋。`,
+      message: `role=documentation の File が Layer に所属している (${docInLayer.length}件)。Layer は実行依存ピラミッドの位置を表すため、doc は除外して Decision/OK の documented_by 出所として扱うのが筋。`,
       details: docInLayer.slice(0, 20),
     });
   }
@@ -347,9 +347,9 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   for (const s of componentMembers.values()) for (const x of s) allComponentFiles.add(x);
 
   // 旧実装は role ∈ {source,test,config} だけを検査対象にしていたため、roleFor が
-  // ui_component / api_route / entrypoint と判定したファイルが Pocket 未所属でも素通りした
+  // ui_component / api_route / entrypoint と判定したファイルが Component 未所属でも素通りした
   // (silent pass)。全 File を対象にし、免除は exemptionFor の三層だけに限定する。
-  // exemptions = Pocket 未所属で実際に免除が行使されたもの (免除会計の本体)。
+  // exemptions = Component 未所属で実際に免除が行使されたもの (免除会計の本体)。
   const exemptions: { path: string; basis: string }[] = [];
   const compOrphans: any[] = [];
   for (const f of files) {
@@ -365,7 +365,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "ERROR",
       rule: "component-coverage",
-      message: `Pocket (= Component) 未所属の実装ファイル: ${compOrphans.length}件 (allowed-orphan 自動判定後)。carving-rules.md 網羅性ゲート違反。`,
+      message: `Component 未所属の実装ファイル: ${compOrphans.length}件 (allowed-orphan 自動判定後)。carving-rules.md 網羅性ゲート違反。`,
       details: compOrphans.slice(0, 30),
     });
   }
@@ -398,7 +398,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "layer-coverage",
-      message: `Stratum (= Layer) 未所属の実装ファイル: ${layerOrphans.length}件 (allowed-orphan / documentation / generated 除外後)。`,
+      message: `Layer 未所属の実装ファイル: ${layerOrphans.length}件 (allowed-orphan / documentation / generated 除外後)。`,
       details: layerOrphans.slice(0, 30),
     });
   }
@@ -439,7 +439,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         findings.push({
           severity: "WARN",
           rule: "concern-component-duplicate",
-          message: `Vein (= Concern) と Pocket (= Component) の Jaccard 重複が高い (実装ファイル基準): ${co.id.split(":").pop()} ∩ ${comp.id.split(":").pop()} = ${j.toFixed(2)} (≥${args.jaccardThreshold})。二重表現の疑い。Vein を取り下げるか別の動機に絞り込む。`,
+          message: `Concern と Component の Jaccard 重複が高い (実装ファイル基準): ${co.id.split(":").pop()} ∩ ${comp.id.split(":").pop()} = ${j.toFixed(2)} (≥${args.jaccardThreshold})。二重表現の疑い。Concern を取り下げるか別の動機に絞り込む。`,
         });
       }
     }
@@ -470,7 +470,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "WARN",
         rule: "concern-component-dominance",
-        message: `Vein (= Concern) '${co.id.split(":").pop()}' は ${(ratio * 100).toFixed(0)}% が単一 Pocket (= Component) '${dominant[0].split(":").pop()}' に閉じる (>${(args.dominanceThreshold * 100).toFixed(0)}%)。横断条件は形式的成立だが実質単一寄り。分割または取り下げ検討。`,
+        message: `Concern '${co.id.split(":").pop()}' は ${(ratio * 100).toFixed(0)}% が単一 Component '${dominant[0].split(":").pop()}' に閉じる (>${(args.dominanceThreshold * 100).toFixed(0)}%)。横断条件は形式的成立だが実質単一寄り。分割または取り下げ検討。`,
       });
     }
   }
@@ -483,7 +483,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "INFO",
       rule: "indexer-signal-missing",
-      message: `cross_component_in_degree シグナルが全 File で空。indexer 再 index + signal-only mutation で File ノードへマージしないと Vein (= Concern) 候補の縦串検出に使えない。`,
+      message: `cross_component_in_degree シグナルが全 File で空。indexer 再 index + signal-only mutation で File ノードへマージしないと Concern 候補の縦串検出に使えない。`,
     });
   }
 
@@ -514,7 +514,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
 
   // ─────────────────────────────────────────────────────────────
   // (Z) 横断ノードへの方針/リスクエッジの次数集中 (crosscut-policy-hub)
-  // sets_policy_for / risks_in が横断構造 (Stratum/Vein/Pocket) を宛先に取れる
+  // sets_policy_for / risks_in が横断構造 (Layer/Concern/Component) を宛先に取れる
   // 自由度の乱用ガード。一点への収束はミニ System 化 (雑な「全体」宛の再発) の
   // 兆候として機械検出できる。正当に方針が集まる部品もありうるので ERROR にしない。
   // ─────────────────────────────────────────────────────────────
@@ -533,7 +533,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "crosscut-policy-hub",
-      message: `横断ノードに方針/リスクエッジが ${POLICY_HUB_THRESHOLD} 本以上収束 (${policyHubs.length}件)。雑な「全体」宛 (ミニ System 化) の疑い。各エッジが「正直でいられる一番低い高度」か見直し、より狭い宛先 (File / 別 Pocket) に降ろせるものは降ろす。`,
+      message: `横断ノードに方針/リスクエッジが ${POLICY_HUB_THRESHOLD} 本以上収束 (${policyHubs.length}件)。雑な「全体」宛 (ミニ System 化) の疑い。各エッジが「正直でいられる一番低い高度」か見直し、より狭い宛先 (File / 別 Component) に降ろせるものは降ろす。`,
       details: policyHubs.slice(0, 20),
     });
   }
@@ -562,7 +562,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         normById.set(r.node_id, vectorNorm(r.vector));
       }
       // 同型ノード間 pair-wise similarity
-      const checkTypes = ["Decision", "OperationalKnowledge", "Risk", "Vein", "Pocket"];
+      const checkTypes = ["Decision", "OperationalKnowledge", "Risk", "Concern", "Component"];
       const duplicates: string[] = [];
       for (const tp of checkTypes) {
         const sameType = graph.nodes.filter((n: any) => canonicalType(n.type) === tp);
@@ -621,7 +621,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "multi-concern-membership",
-      message: `1 ファイルが ≧3 Vein (= Concern) に所属: ${tripleConcerns.length}件。単一動機原則から、各 Vein が本当に別動機かレビュー必要。`,
+      message: `1 ファイルが ≧3 Concern に所属: ${tripleConcerns.length}件。単一動機原則から、各 Concern が本当に別動機かレビュー必要。`,
       details: tripleConcerns.slice(0, 20),
     });
   }
@@ -653,7 +653,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "exemption-ratio-high",
-      message: `allowed-orphan 免除が実装 File の ${(exemptRatio * 100).toFixed(1)}% (${patternExemptions.length}/${implFileTotal}, >15%)。免除で網羅性ゲートが空洞化していないか棚卸しし、Pocket に所属させられるものは所属させる。`,
+      message: `allowed-orphan 免除が実装 File の ${(exemptRatio * 100).toFixed(1)}% (${patternExemptions.length}/${implFileTotal}, >15%)。免除で網羅性ゲートが空洞化していないか棚卸しし、Component に所属させられるものは所属させる。`,
     });
   }
 

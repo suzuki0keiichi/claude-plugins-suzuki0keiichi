@@ -44,7 +44,7 @@ test("isAllowedOrphan: 通常の実装ソースは許容しない", () => {
     "src/config.env.ts",
     "src/data.env.json",
   ]) {
-    assert.equal(isAllowedOrphan(p), false, `${p} は Pocket 所属が要るので allowed-orphan でない`);
+    assert.equal(isAllowedOrphan(p), false, `${p} は Component 所属が要るので allowed-orphan でない`);
   }
 });
 
@@ -74,10 +74,10 @@ test("carving-check: candidate:true 残存と プレースホルダ title を ER
       { id: "system:s", type: "System", title: "S", summary: "s" },
       // 旧 indexer 相当: candidate:true・プレースホルダ title・summary_provisional フラグ無し
       {
-        id: "stratum:s:band0",
-        type: "Stratum",
+        id: "layer:s:band0",
+        type: "Layer",
         candidate: true,
-        title: "Stratum band 0/3 (41 files)",
+        title: "Layer band 0/3 (41 files)",
         summary: "依存トポロジの深さ帯 band 0",
       },
     ],
@@ -89,25 +89,25 @@ test("carving-check: candidate:true 残存と プレースホルダ title を ER
   assert.match(out, /placeholder-title/, "プレースホルダ title を検出");
 });
 
-test("carving-check: 意味命名された Stratum は candidate/placeholder ルールを発火しない", () => {
+test("carving-check: 意味命名された Layer は candidate/placeholder ルールを発火しない", () => {
   const graph = {
     nodes: [
       { id: "system:s", type: "System", title: "S", summary: "s" },
       {
-        id: "stratum:s:foundation",
-        type: "Stratum",
+        id: "layer:s:foundation",
+        type: "Layer",
         title: "基盤層 — 設定・データの土台",
         summary: "上位が共通依存する最下層",
       },
       // 正当な意味命名に "candidate" や数字を含むケース → 誤爆しないこと (c 接頭辞の連番のみ弾く)
       {
-        id: "pocket:s:candidate-selection",
-        type: "Pocket",
+        id: "component:s:candidate-selection",
+        type: "Component",
         title: "候補選定ロジック (candidate 5 通りから選ぶ)",
         summary: "ユーザー入力から候補を絞り込む",
       },
     ],
-    edges: [{ id: "e1", type: "contains", from: "system:s", to: "stratum:s:foundation" }],
+    edges: [{ id: "e1", type: "contains", from: "system:s", to: "layer:s:foundation" }],
   };
   const { out } = runCheck(graph);
   assert.doesNotMatch(out, /candidate-uncarved/, "意味命名済みなら candidate-uncarved は出ない");
@@ -120,9 +120,9 @@ function fileNode(p: string, role: string) {
   return { id: `file:${p}`, type: "File", path: p, role, title: p, summary: `${p} の要約` };
 }
 
-/** Pocket 1 個 + メンバー File 群 + orphan File 群の最小 graph。 */
+/** Component 1 個 + メンバー File 群 + orphan File 群の最小 graph。 */
 function graphWithPocket(memberFiles: any[], orphanFiles: any[], extraNodes: any[] = []) {
-  const pocket = { id: "pocket:s:core", type: "Pocket", title: "中核ロジック", summary: "中核" };
+  const pocket = { id: "component:s:core", type: "Component", title: "中核ロジック", summary: "中核" };
   return {
     nodes: [pocket, ...memberFiles, ...orphanFiles, ...extraNodes],
     edges: memberFiles.map((f, i) => ({ id: `ev${i}`, type: "evidenced_by", from: pocket.id, to: f.id })),
