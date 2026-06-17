@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
-import { loadDotEnvFromCwd, discoverVaultDir } from "./cli-env.ts";
+import { discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir } from "./cli-env.ts";
 import { pathToFileURL } from "node:url";
 
 const PRIMITIVE_VERBS = [
@@ -71,11 +71,12 @@ async function dispatchHeadline(verb: HeadlineVerb, argv: string[]) {
 }
 
 export async function runCli(argv: string[]) {
-  // 共通 init: .env を 1 度読む (verb 個別の env 上書きは CLI flag のみ)。
-  // → graph:brief だけが env を読んでいた既存バグを構造的に解消。
+  // 共通 init: env を 1 度読む (verb 個別の env 上書きは CLI flag のみ)。
+  // 優先順位: shell env > .graphrag/.env (walk-up) > cwd .env > .graphrag/vault auto-discovery。
+  // .graphrag/.env は worktree・サブディレクトリからでも親を拾えるよう walk-up する。
+  discoverAndLoadGraphragEnv();
   loadDotEnvFromCwd();
-  // GRAPHRAG_VAULT_DIR が (env / .env で) まだ未設定なら、cwd 上方向の `.graphrag/vault`
-  // を発見して焼く。root .env に依存せず素で `ask` が通る (見つからなければ未設定のまま)。
+  // GRAPHRAG_VAULT_DIR がまだ未設定なら、cwd 上方向の `.graphrag/vault` を発見して焼く。
   discoverVaultDir();
 
   const [verb, ...rest] = argv;

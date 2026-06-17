@@ -13,6 +13,7 @@
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { applyMutationToVault } from "./mutate-vault.ts";
+import { detectVaultIsolation } from "./cli-env.ts";
 import { loadMutationPlan } from "./mutation-core.ts";
 import {
   buildAddDecisionPlan,
@@ -108,10 +109,38 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
   if (!vaultDir) {
     throw new Error("typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
   }
+
+  // vault isolation check: 外部 vault でローカル mode が無い or readonly なら書き込みを拒否
+  const isolation = detectVaultIsolation();
+  if (isolation.mode === "readonly") {
+    throw new Error(
+      `Vault is in readonly mode (GRAPHRAG_VAULT_MODE=readonly). ` +
+      `Writes are blocked. To allow writes, set GRAPHRAG_VAULT_MODE=direct in .graphrag/.env.`
+    );
+  }
+  if (isolation.vault_external && isolation.mode === null) {
+    const cwdEnvPath = path.join(process.cwd(), ".graphrag", ".env");
+    throw new Error(
+      `Vault is external (${process.env.GRAPHRAG_VAULT_DIR}) but this directory has no local GRAPHRAG_VAULT_MODE. ` +
+      (isolation.mode_source === "inherited"
+        ? `(A parent directory has a mode setting, but each worktree needs its own decision.) `
+        : ``) +
+      `Refusing to write — ask the user which mode to use, then set it in ${cwdEnvPath}:\n` +
+      `  GRAPHRAG_VAULT_MODE=readonly   — read only, block all writes\n` +
+      `  GRAPHRAG_VAULT_MODE=direct     — write to the shared vault as-is\n` +
+      `  GRAPHRAG_VAULT_MODE=worktree   — create a vault worktree for isolated writes (run vault-worktree --name <name> first)`
+    );
+  }
+
   const dupAck = dupAckFlag(f);
   if (dupAck) plan.duplicate_ack = dupAck;
   const result = await applyMutationToVault({ plan, vaultDir, baseSha: baseShaFlag(f), reason: plan.reason });
-  process.stdout.write(JSON.stringify({ applied: true, plan_reason: plan.reason, result }, null, 2) + "\n");
+
+  const output: any = { applied: true, plan_reason: plan.reason, result };
+  if (isolation.vault_external) {
+    output.vault_isolation = isolation;
+  }
+  process.stdout.write(JSON.stringify(output, null, 2) + "\n");
 }
 
 function baseShaFlag(f: Record<string, any>): string | undefined {
@@ -590,6 +619,7 @@ async function runInspect(_argv: string[]) {
   process.stdout.write(JSON.stringify({
     env: {
       GRAPHRAG_VAULT_DIR: vaultDir ?? null,
+      GRAPHRAG_VAULT_MODE: process.env.GRAPHRAG_VAULT_MODE ?? null,
       GRAPHRAG_GRAPH_JSON_PATH: graphJsonPath ?? null,
       GRAPHRAG_VECTOR_INDEX_PATH: process.env.GRAPHRAG_VECTOR_INDEX_PATH ?? null,
       GRAPHRAG_EMBEDDING_ENDPOINT: process.env.GRAPHRAG_EMBEDDING_ENDPOINT ?? null,
@@ -603,6 +633,7 @@ async function runInspect(_argv: string[]) {
       world: inspectFileInfo(worldDir ? path.join(worldDir, WORLD_FILE) : undefined),
       world_cache: inspectFileInfo(worldDir ? worldCachePath(worldDir) : undefined)
     },
+    vault_isolation: detectVaultIsolation(),
     binding_debt: bindingDebt
   }, null, 2) + "\n");
 }
