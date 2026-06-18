@@ -1,14 +1,14 @@
 /**
  * Headline verb dispatch.
- * cli.ts から `dispatchHeadline(verb, argv)` で呼ばれる。
+ * Called from cli.ts as `dispatchHeadline(verb, argv)`.
  *
- * 実装範囲:
- * - parseFlagsArgv: 軽量 arg parser
+ * Implementation scope:
+ * - parseFlagsArgv: lightweight arg parser
  * - typed-add 5: add-decision / add-ok / add-risk / add-investigation / add-rejected-option
- * - ask: 自動段上げ (Task 8)
- * - carve: index→suggest→check 連鎖 (Task 9)
- * - commit-mutation: vault writer 経由で plan を適用 (OCC/commit/索引)
- * - inspect: env / artifacts 状態確認
+ * - ask: automatic escalation (Task 8)
+ * - carve: index→suggest→check chain (Task 9)
+ * - commit-mutation: apply plan via vault writer (OCC/commit/index)
+ * - inspect: env / artifacts status check
  */
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -52,9 +52,9 @@ import { main as runCarvingCheck } from "./check-carving.ts";
 import { existsSync, mkdirSync, writeFileSync, statSync } from "node:fs";
 
 /**
- * 軽量 arg parser。
- * --flag value | --flag=value | --flag (= true) | positional (= _positional に蓄積)
- * 同じ --flag が複数回 → 配列化
+ * Lightweight arg parser.
+ * --flag value | --flag=value | --flag (= true) | positional (= accumulated in _positional)
+ * Repeated --flag → converted to array
  */
 export function parseFlagsArgv(argv: string[]): Record<string, any> {
   const out: Record<string, any> = { _positional: [] };
@@ -91,8 +91,8 @@ export function parseFlagsArgv(argv: string[]): Record<string, any> {
 }
 
 /**
- * --flag on|off を boolean に変換。未指定 (undefined) はそのまま undefined を返し
- * (= 既定挙動に任せる)、"off" のみ false、"on"/その他は true。
+ * Converts --flag on|off to boolean. Unspecified (undefined) returns undefined as-is
+ * (= defers to default behavior); only "off" returns false; "on" or other values return true.
  */
 export function parseOnOff(value: any): boolean | undefined {
   if (value === undefined) return undefined;
@@ -116,7 +116,7 @@ function asEvidenceArray(flags: Record<string, any>): string[] | undefined {
 }
 
 async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<void> {
-  // v3: typed-add は vault writer 経由 (FalkorDB 非経由)。vault が単一正本。
+  // v3: typed-add goes through vault writer (not FalkorDB). Vault is the single source of truth.
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) {
     throw new Error("typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
@@ -161,8 +161,8 @@ function baseShaFlag(f: Record<string, any>): string | undefined {
 }
 
 /**
- * --dup-ack <id[,id...]> (反復可) → 重複ゲートの承認 (plan の duplicate_ack に注入)。
- * カンマ区切りと反復指定の両方を許す。
+ * --dup-ack <id[,id...]> (repeatable) → approves duplicate gate (injected into plan's duplicate_ack).
+ * Accepts both comma-separated and repeated flag syntax.
  */
 export function dupAckFlag(f: Record<string, any>): string[] | undefined {
   const v = f["dup-ack"];
@@ -176,9 +176,9 @@ export function dupAckFlag(f: Record<string, any>): string[] | undefined {
 }
 
 /**
- * カンマ区切り + 反復指定の両方を許して id 列を取り出す共通パーサ。
- * --aliases "a,b" や --constrains <id> --constrains <id> の両形を吸収する。
- * 未指定なら undefined (空配列ではなく) を返す (plan builder の「未指定なら載せない」と整合)。
+ * Common parser accepting both comma-separated and repeated flag forms for id lists.
+ * Absorbs both --aliases "a,b" and --constrains <id> --constrains <id> forms.
+ * Returns undefined (not empty array) when unspecified (consistent with plan builder "omit if unspecified").
  */
 function csvFlag(f: Record<string, any>, name: string): string[] | undefined {
   const v = f[name];
@@ -311,9 +311,9 @@ async function runAddInvestigation(argv: string[]) {
 }
 
 /**
- * brief stage の結果から「次の段に上げるべきか」を判定する pure 関数。
- * - high confidence + 結果あり → 段上げ不要
- * - low / none / 結果ゼロ → 段上げ
+ * Pure function to determine whether to escalate to the next stage from brief results.
+ * - high confidence + results found → no escalation needed
+ * - low / none / zero results → escalate
  */
 export function shouldEscalate(stageOutcome: { match_confidence?: string; result_count?: number }): boolean {
   const conf = stageOutcome.match_confidence ?? "none";
@@ -330,24 +330,24 @@ export async function runAsk(argv: string[]) {
   const limit = typeof f.limit === "string" ? Number(f.limit) : 3;
   const neighbors = typeof f.neighbors === "string" ? Number(f.neighbors) : 1;
 
-  // R6 --gist "<想定答えの一行>" (任意): 質問と gist を別々に埋め込み両方を queryVectors で渡す
-  // (semantic = 各 vector との cosine の max)。query 接頭辞は両方に付く (embedForIndex)。
+  // R6 --gist "<one-line expected answer>" (optional): embed question and gist separately, pass both as queryVectors
+  // (semantic = max cosine with each vector). Query prefix is applied to both (embedForIndex).
   const gist = typeof f.gist === "string" && f.gist.trim() !== "" ? f.gist : undefined;
-  // R5 --graph-rerank on|off (既定 off — 実 vault 実測で hub 偏重 net-negative。retrieval.ts の R5 コメント参照)。
+  // R5 --graph-rerank on|off (default off — hub-heavy net-negative observed in real vault. See R5 comment in retrieval.ts).
   const graphRerank = parseOnOff(f["graph-rerank"]);
 
-  // --call-number 自動加算 (LLM 手動付与廃止 → excessive 検出が構造的に走る)
+  // --call-number auto-incremented (manual LLM assignment removed → excessive detection runs structurally)
   const stateDir = process.env.GRAPHRAG_STATE_DIR ?? path.join(process.cwd(), ".graphrag");
   const callNumber = bumpCallCount(question, stateDir);
 
-  // v3: vault が単一正本。--vault フラグ > GRAPHRAG_VAULT_DIR env で vault を解決し、
-  // 読み込み系 (brief/evidence) に明示的に渡す (env 任せにしない)。
+  // v3: vault is the single source of truth. Resolve vault via --vault flag > GRAPHRAG_VAULT_DIR env,
+  // and pass explicitly to read operations (brief/evidence) rather than relying on env.
   const vaultDir = (typeof f.vault === "string" ? f.vault : undefined) ?? process.env.GRAPHRAG_VAULT_DIR;
 
-  // world (住所録) が構成されている時、または --gist 指定時はクエリ embedding を
-  // brief と共用するため、ここで索引読み込み+embed を先に行う
-  // (失敗時は従来経路に任せる: brief 側が同じ理由で大声で落ちる)。
-  // --gist 指定時は質問と gist の 2 ベクトルを R6 queryVectors として brief へ渡す。
+  // When world (directory) is configured or --gist is specified, load and embed query
+  // ahead of time to share with brief
+  // (on failure, fall back to the normal path: brief will fail loudly for the same reason).
+  // When --gist is specified, pass both question and gist as 2 R6 queryVectors to brief.
   const worldDir = resolveWorldDir(typeof f.world === "string" ? f.world : undefined);
   let sharedVectorIndex: any = null;
   let sharedQueryVector: number[] | null = null;
@@ -486,9 +486,9 @@ async function runCommitMutation(argv: string[]) {
   const planPath = (f._positional as string[])[0];
   if (!planPath) throw new Error("commit-mutation <plan.json> requires plan path");
 
-  // v3: vault writer 経由で適用 (FalkorDB-export / vault-build / carving-check は撤廃)。
-  // lock → OCC → import → normalize/validate → writeVaultDelta → 索引(非致命) → git commit
-  // を applyMutationToVault がまとめて行う。
+  // v3: applied via vault writer (FalkorDB-export / vault-build / carving-check are retired).
+  // lock → OCC → import → normalize/validate → writeVaultDelta → index(non-fatal) → git commit
+  // are all handled by applyMutationToVault.
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) throw new Error("commit-mutation: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
 
@@ -520,9 +520,9 @@ async function runCarve(argv: string[]) {
   const stateDir = process.env.GRAPHRAG_STATE_DIR ?? path.join(process.cwd(), ".graphrag");
 
   process.stderr.write(`[carve] stage 1/3: index (root=${root}, system=${system})\n`);
-  // index 単独 verb と同じ vault-trust 経路を通す。前回の本物 File summary は正本 vault
-  // からのみ継ぎ、scaffold(--previous)は change_status 専用にする。これを通さないと
-  // carve のたびに全 File summary が provisional に戻り、再 author 済み要約を握り潰す。
+  // Use the same vault-trust path as the standalone index verb. Previous genuine File summaries come from the canonical vault
+  // only; scaffold (--previous) is for change_status only. Without this,
+  // every carve would reset all File summaries to provisional, overwriting re-authored summaries.
   const { previous: previousGraph, trustSummaries } = resolvePreviousGraph({ root, previous, vault, systemName: system });
   const indexed: any = indexCodebase({ root, systemName: system, previous: previousGraph, trustPreviousSummaries: trustSummaries });
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
@@ -532,9 +532,9 @@ async function runCarve(argv: string[]) {
 
   const vectorIndexPath = process.env.GRAPHRAG_VECTOR_INDEX_PATH ?? path.join(stateDir, "vector-index.json");
 
-  // vector index 不在なら index 段の成果から自動構築して suggest 系へ進む
-  // (初回でも「carve → vector-index → もう一度 carve」の手動往復を不要にする)。
-  // embedding endpoint 不達は従来どおり非致命: suggest 系を skip し注記を出す。
+  // If no vector index, auto-build from index output and proceed to suggest steps
+  // (avoids the manual round-trip of "carve → vector-index → carve again" even on first run).
+  // Unreachable embedding endpoint remains non-fatal: skip suggest steps and note it.
   let vectorIndexReady = existsSync(vectorIndexPath);
   let vectorIndexSkipNote: string | null = null;
   if (!vectorIndexReady) {
@@ -588,10 +588,10 @@ async function runAddRejectedOption(argv: string[]) {
   await applyPlanAndReport(plan, f);
 }
 
-// binding_debt: bind 無し knowledge ノード総数。定義は mutate-vault.ts の countBindingDebt
-// および check-carving gate #9 (knowledge-impl-binding-missing) + 拡張
-// (constraint-binding-missing) と一致させる。Decision/OK/Risk は実装ファイルへの
-// sets_policy_for / documented_by が無ければ debt、Constraint は constrains が 0 本なら debt。
+// binding_debt: total count of knowledge nodes without bindings. Definition matches countBindingDebt in mutate-vault.ts
+// and check-carving gate #9 (knowledge-impl-binding-missing) + extension
+// (constraint-binding-missing). Decision/OK/Risk must have
+// sets_policy_for / documented_by to impl files, or it's debt. Constraint is debt if 0 constrains edges.
 function isImplFileBinding(toId: string): boolean {
   return toId.startsWith("file:") && !/docs\/knowhow\/|plans\/|docs\/design-decisions\//.test(toId);
 }
@@ -637,8 +637,8 @@ async function runInspect(_argv: string[]) {
     ?? (graphJsonPath ? path.join(path.dirname(graphJsonPath), "vector-index.json") : undefined);
   const worldDir = resolveWorldDir();
 
-  // binding_debt: vault が読めれば bind 無し knowledge ノード数を 1 整数で出す。
-  // vault 不在 / 読み込み失敗は非致命: null + reason で正直に出す (inspect を落とさない)。
+  // binding_debt: if vault is readable, output the count of knowledge nodes without bindings as a single integer.
+  // Absent vault / read failure is non-fatal: output null + reason honestly (never drop inspect).
   let bindingDebt: { count: number | null; reason?: string };
   if (!vaultDir) {
     bindingDebt = { count: null, reason: "GRAPHRAG_VAULT_DIR 未設定" };
@@ -673,18 +673,18 @@ async function runInspect(_argv: string[]) {
   }, null, 2) + "\n");
 }
 
-// project vault 専用コマンド向けスキーマガード。
-// vault が project preset でない場合は明確にエラーを出す。
+// Schema guard for project vault-only commands.
+// Emits a clear error if the vault is not the project preset.
 function requireProjectSchema(): void {
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) {
-    throw new Error("project typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
+    throw new Error("project typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (required in .env)");
   }
   const schema = resolveSchema(vaultDir);
   if (schema.id !== "project") {
     throw new Error(
-      `このコマンドは project vault 専用です (schema: ${schema.id})。` +
-      `VAULT.md に schema: project を設定してください。`
+      `This command is only for project vaults (schema: ${schema.id}). ` +
+      `Set schema: project in VAULT.md.`
     );
   }
 }

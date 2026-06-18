@@ -162,7 +162,7 @@ describe("project schema preset", () => {
       nodes: [
         { id: "task:p:a", type: "Task" },
       ],
-      edges: [{ id: "e1", type: "requires", from: "task:p:a", to: "vault:pilot-auto/deliverable:pilot-auto:v5.0.0" }],
+      edges: [{ id: "e1", type: "requires", from: "task:p:a", to: "vault:platform-x/deliverable:platform-x:product-v2.0" }],
     };
     const failures = validateGraph(g, S);
     assert.ok(!failures.some(f => f.includes("missing")));

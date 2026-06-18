@@ -24,14 +24,14 @@ import { importVault } from "./import-vault.ts";
 // ---------------------------------------------------------------------------
 
 export interface CrossVaultRefParts {
-  /** vault_slug of the target vault (e.g. "fms") */
+  /** vault_slug of the target vault (e.g. "billing") */
   vaultSlug: string;
-  /** local node id within the target vault (e.g. "deliverable:fms:v2-release") */
+  /** local node id within the target vault (e.g. "deliverable:billing:v2-release") */
   nodeId: string;
 }
 
 export interface ResolvedNode {
-  /** The cross-vault ref string that was resolved (e.g. "vault:fms/deliverable:fms:v2-release") */
+  /** The cross-vault ref string that was resolved (e.g. "vault:billing/deliverable:billing:v2-release") */
   ref: string;
   /** vault_path: absolute path to the vault directory where this node was found */
   vault_path: string;
@@ -67,8 +67,8 @@ export interface XRefCheckResult {
  * Returns null if the string is not a cross-vault ref.
  *
  * Examples:
- *   "vault:fms/deliverable:fms:v2-release"
- *     → { vaultSlug: "fms", nodeId: "deliverable:fms:v2-release" }
+ *   "vault:billing/deliverable:billing:v2-release"
+ *     → { vaultSlug: "billing", nodeId: "deliverable:billing:v2-release" }
  *   "decision:some:local-node"
  *     → null
  */
@@ -270,7 +270,7 @@ export function findVaultBySlug(slug: string, worldDir: string): string | null {
 /**
  * Resolve a cross-vault ref by reading the target node from the target vault.
  *
- * @param ref       Full cross-vault ref string, e.g. "vault:fms/deliverable:fms:v2"
+ * @param ref       Full cross-vault ref string, e.g. "vault:billing/deliverable:billing:v2"
  * @param worldDir  Directory to scan for sibling vaults. Falls back to
  *                  process.env.GRAPHRAG_WORLD_DIR when not provided.
  * @returns ResolvedNode when found, null otherwise.

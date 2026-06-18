@@ -48,7 +48,7 @@ A `Component` node can carry a `vault_ref` attribute that names the child system
 | absent / `null` | Details are described in this vault. |
 | `"<slug>"` | See vault `<slug>` for details. |
 
-Example: a component node `component:web-auto:fms` with `vault_ref: "fms"` means "the fms subsystem is described in the fms system vault". Cross-vault edges can then use the `vault:<slug>/...` ref syntax to link knowledge across vault boundaries.
+Example: a component node `component:cloud-svc:billing` with `vault_ref: "billing"` means "the billing subsystem is described in the billing system vault". Cross-vault edges can then use the `vault:<slug>/...` ref syntax to link knowledge across vault boundaries.
 
 `vault_ref` is a convention only — no schema validation is applied. The validator ignores unknown extra attributes on nodes.
 
@@ -58,11 +58,11 @@ If a system vault needs to be renamed, add the old slug(s) to `vault_slug_aliase
 
 ```yaml
 ---
-name: FMS
+name: Billing API
 kind: system
-vault_slug: fms
+vault_slug: billing
 vault_slug_aliases:
-  - fleet-management-system
+  - billing-service-legacy
 ---
 ```
 

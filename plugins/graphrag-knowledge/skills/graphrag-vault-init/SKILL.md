@@ -168,13 +168,13 @@ Mutation plan structure:
     { "op": "create", "id": "goal:<sys>:<slug>", "type": "Goal", "title": "...", "summary": "...", "state": "active" },
     { "op": "create", "id": "stakeholder:<sys>:<slug>", "type": "Stakeholder", "title": "...", "summary": "..." },
     { "op": "create", "id": "milestone:<sys>:<slug>", "type": "Milestone", "title": "...", "summary": "...", "state": "planned" },
-    { "op": "create", "id": "assumption:<sys>:<slug>", "type": "Assumption", "title": "...", "summary": "...", "description": "certainty: Expected" },
+    { "op": "create", "id": "assumption:<sys>:<slug>", "type": "Assumption", "title": "...", "summary": "...", "certainty": "Expected", "description": "Why this certainty level: ..." },
     { "op": "create", "id": "agreement:<sys>:<slug>", "type": "Agreement", "title": "...", "summary": "...", "state": "active" },
     { "op": "create", "id": "source:<sys>:<slug>", "type": "Source", "title": "...", "summary": "...", "description": "url: https://...\nfetched_at: 2026-06-18\nsource_kind: document" }
   ],
   "edges": [
     { "op": "create", "id": "edge:...", "type": "achieves", "from": "task:<sys>:<slug>", "to": "goal:<sys>:<slug>" },
-    { "op": "create", "id": "edge:...", "type": "requires", "from": "task:<sys>:<slug>", "to": "vault:pilot-auto/deliverable:pilot-auto:x2-v5.0.0" }
+    { "op": "create", "id": "edge:...", "type": "requires", "from": "task:<sys>:<slug>", "to": "vault:platform-x/deliverable:platform-x:product-v2.0" }
   ]
 }
 ```

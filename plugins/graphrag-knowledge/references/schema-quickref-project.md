@@ -16,7 +16,7 @@ For time-bounded initiatives (business projects). Differences from system vault:
   - `ConversationChunk` = Raw dialogue record.
 - **Project-specific (8)**:
   - `Source` = External information source (URL + freshness). Attributes: `source_kind` (document/event/regulation/incident), `url`, `fetched_at`, `refresh_method`, `staleness_threshold`.
-  - `Theme` = Cross-project concern (cost reduction, Jazzy migration, etc.). Often unnecessary within a single project.
+  - `Theme` = Cross-project concern (cost reduction, cross-team infrastructure migration, etc.). Often unnecessary within a single project.
   - `Stakeholder` = Interested party. Person, team, or external org.
   - `Resource` = People, assets, money, time. Attribute: `category` (people/budget/asset/time).
   - `Milestone` = Time-axis checkpoint. Grounds Goal in time.
@@ -67,14 +67,14 @@ For time-bounded initiatives (business projects). Differences from system vault:
 Edge `to` field accepts `vault:<vault_slug>/deliverable:<system>:<slug>`:
 
 ```json
-{ "type": "requires", "from": "task:proj:dp-integration", "to": "vault:pilot-auto/deliverable:pilot-auto:x2-v5.0.0" }
+{ "type": "requires", "from": "task:proj:backend-integration", "to": "vault:platform-x/deliverable:platform-x:product-v2.0" }
 ```
 
 Local existence check and type-pair check are skipped for `vault:` prefixed targets.
 
 ## ID Convention
 
-`<typeSlug>:<system>:<slug>` (e.g. `goal:odaiba-l4:l4-approval`). Convention: `<system>` matches `vault_slug`.
+`<typeSlug>:<system>:<slug>` (e.g. `goal:my-project:main-goal`). Convention: `<system>` matches `vault_slug`.
 
 ## State Vocabulary
 

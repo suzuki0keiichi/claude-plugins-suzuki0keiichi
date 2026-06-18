@@ -1,29 +1,29 @@
 /**
- * typed-add 系 CLI の plan 組み立て pure 関数群 — project vault 専用。
- * cli-headlines.ts の runAdd* (project) 関数から呼ばれる。
+ * Pure functions for assembling CLI plans for typed-add commands — project vault only.
+ * Called from runAdd* (project) functions in cli-headlines.ts.
  *
- * 対象ノード型 (project vault にのみ存在するもの):
+ * Target node types (exist only in project vaults):
  *   Stakeholder / Resource / Milestone / Assumption / Agreement / Task / Source / Theme
  *
- * 使用するエッジ型は schema-project.ts の EDGE_TYPE_RULES に準拠する。
- * Assumption は certainty フィールドが必須 (schema requiredFields)。
- * Task は derived_from evidence が必要 (system vault の Decision 相当)。
- * Source / Agreement / Stakeholder / Resource / Milestone / Theme は evidence 不要。
+ * Edge types used follow EDGE_TYPE_RULES in schema-project.ts.
+ * Assumption requires the certainty field (schema requiredFields).
+ * Task requires derived_from evidence (equivalent to Decision in system vault).
+ * Source / Agreement / Stakeholder / Resource / Milestone / Theme do not require evidence.
  */
 
 import { PROJECT_SCHEMA } from "./schema-project.ts";
 
-// プロジェクトスキーマの edge type rules を直接使う
+// Use project schema edge type rules directly
 const PROJECT_EDGE_RULES = PROJECT_SCHEMA.edgeTypeRules;
 const PROJECT_STATE_VOCABULARY = PROJECT_SCHEMA.stateVocabulary;
 
-// id 接頭辞 → ProjectNodeType のルックアップ。
-// schama-project の全 nodeTypes から生成する。
+// Lookup table: id prefix → ProjectNodeType.
+// Generated from all nodeTypes in schema-project.
 const TYPE_SLUG_TO_PROJECT_NODE: Record<string, string> = {};
 for (const t of PROJECT_SCHEMA.nodeTypes) {
   TYPE_SLUG_TO_PROJECT_NODE[t.toLowerCase()] = t;
 }
-// 歴史的 id 接頭辞 (system vault との互換)
+// Historical id prefixes (backward compatibility with system vault)
 const HISTORICAL_ID_SLUGS: Record<string, string> = {
   "conversation": "ConversationChunk",
   "ok": "OperationalKnowledge",
@@ -57,8 +57,8 @@ function assertEdgeAllowed(edgeType: string, fromType: string, toId: string, fla
     }
     const allowedStr = [...allowedTos].join(", ") || "(none)";
     throw new Error(
-      `${flag}: "${toId}" は ${edgeType} (${fromType} -> ?) の宛先に不正です ` +
-        `(推定型: ${toType ?? "unknown"}、許容: ${allowedStr})`
+      `${flag}: "${toId}" is not a valid target for ${edgeType} (${fromType} -> ?) ` +
+        `(inferred type: ${toType ?? "unknown"}, allowed: ${allowedStr})`
     );
   }
 }
@@ -129,7 +129,7 @@ export function buildAddStakeholderPlan(args: AddStakeholderArgs) {
     ...fanOutEdges("concerned_with", id, "Stakeholder", args.concernedWith, "--concerned-with"),
   ];
   return {
-    reason: args.reason ?? `新規 Stakeholder ${args.slug}`,
+    reason: args.reason ?? `New Stakeholder ${args.slug}`,
     nodes: [withAliases(withDescription({ op: "create", id, type: "Stakeholder", title: args.title, summary: args.summary }, args.description), args.aliases)],
     edges
   };
@@ -163,7 +163,7 @@ export function buildAddResourcePlan(args: AddResourceArgs) {
     node.category = args.category;
   }
   return {
-    reason: args.reason ?? `新規 Resource ${args.slug}`,
+    reason: args.reason ?? `New Resource ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges: []
   };
@@ -197,7 +197,7 @@ export function buildAddMilestonePlan(args: AddMilestoneArgs) {
   }
   const edges = fanOutEdges("depends_on", id, "Milestone", args.dependsOn, "--depends-on");
   return {
-    reason: args.reason ?? `新規 Milestone ${args.slug}`,
+    reason: args.reason ?? `New Milestone ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges
   };
@@ -240,7 +240,7 @@ export function buildAddAssumptionPlan(args: AddAssumptionArgs) {
   };
   const edges = fanOutEdges("has_premise", id, "Assumption", args.premise, "--premise");
   return {
-    reason: args.reason ?? `新規 Assumption ${args.slug}`,
+    reason: args.reason ?? `New Assumption ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges
   };
@@ -285,7 +285,7 @@ export function buildAddAgreementPlan(args: AddAgreementArgs) {
     edges.push(makeEdge("documented_by", id, args.documentedBy));
   }
   return {
-    reason: args.reason ?? `新規 Agreement ${args.slug}`,
+    reason: args.reason ?? `New Agreement ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges
   };
@@ -327,7 +327,7 @@ export function buildAddTaskPlan(args: AddTaskArgs) {
     ...fanOutEdges("depends_on", id, "Task", args.dependsOn, "--depends-on"),
   ];
   return {
-    reason: args.reason ?? `新規 Task ${args.slug}`,
+    reason: args.reason ?? `New Task ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges
   };
@@ -361,7 +361,7 @@ export function buildAddSourcePlan(args: AddSourceArgs) {
     node.source_kind = args.sourceKind;
   }
   return {
-    reason: args.reason ?? `新規 Source ${args.slug}`,
+    reason: args.reason ?? `New Source ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges: []
   };
@@ -384,7 +384,7 @@ export function buildAddThemePlan(args: AddThemeArgs) {
   const id = nodeId("theme", args.system, args.slug);
   const edges = fanOutEdges("encompasses", id, "Theme", args.encompasses, "--encompasses");
   return {
-    reason: args.reason ?? `新規 Theme ${args.slug}`,
+    reason: args.reason ?? `New Theme ${args.slug}`,
     nodes: [withAliases(withDescription({ op: "create", id, type: "Theme", title: args.title, summary: args.summary }, args.description), args.aliases)],
     edges
   };

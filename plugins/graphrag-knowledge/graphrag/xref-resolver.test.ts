@@ -15,7 +15,6 @@ import {
   type XRefCheckResult
 } from "./xref-resolver.ts";
 import { buildVaultFiles } from "./build-vault.ts";
-import { writeFileSync as wfs } from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,10 +70,10 @@ function makeWorldDir(root: string): string {
 // ---------------------------------------------------------------------------
 
 test("parseCrossVaultRef: parses standard vault ref", () => {
-  const parts = parseCrossVaultRef("vault:fms/deliverable:fms:v2-release");
+  const parts = parseCrossVaultRef("vault:billing/deliverable:billing:v2-release");
   assert.ok(parts !== null);
-  assert.equal(parts!.vaultSlug, "fms");
-  assert.equal(parts!.nodeId, "deliverable:fms:v2-release");
+  assert.equal(parts!.vaultSlug, "billing");
+  assert.equal(parts!.nodeId, "deliverable:billing:v2-release");
 });
 
 test("parseCrossVaultRef: parses ref with colons in nodeId", () => {
@@ -104,12 +103,12 @@ test("parseCrossVaultRef: returns null for empty slug or empty nodeId", () => {
 // ---------------------------------------------------------------------------
 
 test("parseVaultSlug: reads vault_slug from frontmatter", () => {
-  const content = `---\nname: fms\nkind: system\nschema: system\nvault_slug: fms\n---\nA system vault.\n`;
-  assert.equal(parseVaultSlug(content), "fms");
+  const content = `---\nname: billing\nkind: system\nschema: system\nvault_slug: billing\n---\nA system vault.\n`;
+  assert.equal(parseVaultSlug(content), "billing");
 });
 
 test("parseVaultSlug: returns null when vault_slug is absent", () => {
-  const content = `---\nname: fms\nkind: system\n---\nA system vault.\n`;
+  const content = `---\nname: billing\nkind: system\n---\nA system vault.\n`;
   assert.equal(parseVaultSlug(content), null);
 });
 
@@ -132,23 +131,23 @@ test("parseVaultSlug: handles single-quoted vault_slug values", () => {
 // ---------------------------------------------------------------------------
 
 test("parseVaultSlugAliases: returns empty array when field is absent", () => {
-  const content = `---\nname: fms\nvault_slug: fms\n---\nDescription.\n`;
+  const content = `---\nname: billing\nvault_slug: billing\n---\nDescription.\n`;
   assert.deepEqual(parseVaultSlugAliases(content), []);
 });
 
 test("parseVaultSlugAliases: parses a single alias", () => {
-  const content = `---\nvault_slug: fms\nvault_slug_aliases:\n  - fleet-hub\n---\n`;
-  assert.deepEqual(parseVaultSlugAliases(content), ["fleet-hub"]);
+  const content = `---\nvault_slug: billing\nvault_slug_aliases:\n  - billing-old\n---\n`;
+  assert.deepEqual(parseVaultSlugAliases(content), ["billing-old"]);
 });
 
 test("parseVaultSlugAliases: parses multiple aliases", () => {
-  const content = `---\nvault_slug: fms\nvault_slug_aliases:\n  - fleet-hub\n  - fms-old\n---\n`;
-  assert.deepEqual(parseVaultSlugAliases(content), ["fleet-hub", "fms-old"]);
+  const content = `---\nvault_slug: billing\nvault_slug_aliases:\n  - billing-old\n  - billing-service-legacy\n---\n`;
+  assert.deepEqual(parseVaultSlugAliases(content), ["billing-old", "billing-service-legacy"]);
 });
 
 test("parseVaultSlugAliases: strips quotes from alias values", () => {
-  const content = `---\nvault_slug: fms\nvault_slug_aliases:\n  - "fleet-hub"\n  - 'old-name'\n---\n`;
-  assert.deepEqual(parseVaultSlugAliases(content), ["fleet-hub", "old-name"]);
+  const content = `---\nvault_slug: billing\nvault_slug_aliases:\n  - "billing-old"\n  - 'old-name'\n---\n`;
+  assert.deepEqual(parseVaultSlugAliases(content), ["billing-old", "old-name"]);
 });
 
 test("parseVaultSlugAliases: returns empty array when there is no frontmatter", () => {
@@ -165,14 +164,14 @@ test("findVaultBySlug: finds vault in canonical layout (worldDir/repoName/vault/
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "Release" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "Release" }
     });
 
-    const found = findVaultBySlug("fms", worldDir);
+    const found = findVaultBySlug("billing", worldDir);
     assert.ok(found !== null, "should find the vault");
-    assert.ok(found!.endsWith(path.join("fms-repo", "vault")), `expected path ending in fms-repo/vault, got ${found}`);
+    assert.ok(found!.endsWith(path.join("billing-repo", "vault")), `expected path ending in billing-repo/vault, got ${found}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -184,9 +183,9 @@ test("findVaultBySlug: returns null when no vault has matching slug", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "Release" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "Release" }
     });
 
     const found = findVaultBySlug("nonexistent-slug", worldDir);
@@ -197,7 +196,7 @@ test("findVaultBySlug: returns null when no vault has matching slug", () => {
 });
 
 test("findVaultBySlug: returns null when worldDir does not exist", () => {
-  const found = findVaultBySlug("fms", "/no/such/dir");
+  const found = findVaultBySlug("billing", "/no/such/dir");
   assert.equal(found, null);
 });
 
@@ -207,23 +206,23 @@ test("findVaultBySlug: finds correct vault among multiple", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "FMS release" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "Billing API release" }
     });
     makeVault({
       root: worldDir,
-      repoName: "sensing-repo",
-      slug: "sensing",
-      node: { id: "deliverable:sensing:v1", type: "Deliverable", title: "Sensing v1", summary: "Sensing release" }
+      repoName: "analytics-repo",
+      slug: "analytics",
+      node: { id: "deliverable:analytics:v1", type: "Deliverable", title: "Analytics v1", summary: "Analytics release" }
     });
 
-    const fms = findVaultBySlug("fms", worldDir);
-    const sensing = findVaultBySlug("sensing", worldDir);
-    assert.ok(fms !== null);
-    assert.ok(sensing !== null);
-    assert.ok(fms!.includes("fms-repo"));
-    assert.ok(sensing!.includes("sensing-repo"));
+    const billing = findVaultBySlug("billing", worldDir);
+    const analytics = findVaultBySlug("analytics", worldDir);
+    assert.ok(billing !== null);
+    assert.ok(analytics !== null);
+    assert.ok(billing!.includes("billing-repo"));
+    assert.ok(analytics!.includes("analytics-repo"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -239,20 +238,20 @@ test("resolveCrossVaultRef: resolves an existing cross-vault node", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2-release", type: "Deliverable", title: "FMS v2 Release", summary: "The v2 milestone." }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2-release", type: "Deliverable", title: "Billing API v2 Release", summary: "The v2 milestone." }
     });
 
-    const ref = "vault:fms/deliverable:fms:v2-release";
+    const ref = "vault:billing/deliverable:billing:v2-release";
     const resolved = resolveCrossVaultRef(ref, worldDir);
     assert.ok(resolved !== null, "should resolve");
     assert.equal(resolved!.ref, ref);
-    assert.equal(resolved!.node_id, "deliverable:fms:v2-release");
+    assert.equal(resolved!.node_id, "deliverable:billing:v2-release");
     assert.equal(resolved!.type, "Deliverable");
-    assert.equal(resolved!.title, "FMS v2 Release");
+    assert.equal(resolved!.title, "Billing API v2 Release");
     assert.equal(resolved!.summary, "The v2 milestone.");
-    assert.ok(resolved!.vault_path.includes("fms-repo"));
+    assert.ok(resolved!.vault_path.includes("billing-repo"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -264,7 +263,7 @@ test("resolveCrossVaultRef: returns null when vault not found (orphan)", () => {
     const worldDir = makeWorldDir(root);
     // no vaults created
 
-    const resolved = resolveCrossVaultRef("vault:fms/deliverable:fms:v2", worldDir);
+    const resolved = resolveCrossVaultRef("vault:billing/deliverable:billing:v2", worldDir);
     assert.equal(resolved, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -277,13 +276,13 @@ test("resolveCrossVaultRef: returns null when node not in vault (broken ref)", (
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2-release", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2-release", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
     // correct slug, wrong nodeId
-    const resolved = resolveCrossVaultRef("vault:fms/deliverable:fms:nonexistent", worldDir);
+    const resolved = resolveCrossVaultRef("vault:billing/deliverable:billing:nonexistent", worldDir);
     assert.equal(resolved, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -294,7 +293,7 @@ test("resolveCrossVaultRef: returns null when GRAPHRAG_WORLD_DIR not set and no 
   const prev = process.env.GRAPHRAG_WORLD_DIR;
   delete process.env.GRAPHRAG_WORLD_DIR;
   try {
-    const resolved = resolveCrossVaultRef("vault:fms/deliverable:fms:v2");
+    const resolved = resolveCrossVaultRef("vault:billing/deliverable:billing:v2");
     assert.equal(resolved, null);
   } finally {
     if (prev !== undefined) process.env.GRAPHRAG_WORLD_DIR = prev;
@@ -313,15 +312,15 @@ test("resolveCrossVaultRef: uses GRAPHRAG_WORLD_DIR env when worldDir arg not pr
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "Release" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "Release" }
     });
 
     process.env.GRAPHRAG_WORLD_DIR = worldDir;
-    const resolved = resolveCrossVaultRef("vault:fms/deliverable:fms:v2");
+    const resolved = resolveCrossVaultRef("vault:billing/deliverable:billing:v2");
     assert.ok(resolved !== null);
-    assert.equal(resolved!.title, "FMS v2");
+    assert.equal(resolved!.title, "Billing API v2");
   } finally {
     if (prev !== undefined) process.env.GRAPHRAG_WORLD_DIR = prev;
     else delete process.env.GRAPHRAG_WORLD_DIR;
@@ -339,9 +338,9 @@ test("checkCrossVaultRefs: resolved status for found node", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "The release." }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
     });
 
     const graph = {
@@ -349,7 +348,7 @@ test("checkCrossVaultRefs: resolved status for found node", () => {
         { id: "goal:proj:milestone-a", type: "Goal", title: "Milestone A", summary: "x" }
       ],
       edges: [
-        { id: "e:1", type: "has_premise", from: "goal:proj:milestone-a", to: "vault:fms/deliverable:fms:v2" }
+        { id: "e:1", type: "has_premise", from: "goal:proj:milestone-a", to: "vault:billing/deliverable:billing:v2" }
       ]
     };
 
@@ -357,9 +356,9 @@ test("checkCrossVaultRefs: resolved status for found node", () => {
     assert.equal(results.length, 1);
     assert.equal(results[0].status, "resolved");
     assert.equal(results[0].edge_id, "e:1");
-    assert.equal(results[0].ref, "vault:fms/deliverable:fms:v2");
+    assert.equal(results[0].ref, "vault:billing/deliverable:billing:v2");
     assert.ok(results[0].resolved !== undefined);
-    assert.equal(results[0].resolved!.title, "FMS v2");
+    assert.equal(results[0].resolved!.title, "Billing API v2");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -393,15 +392,15 @@ test("checkCrossVaultRefs: broken status when vault found but node missing", () 
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
     const graph = {
       nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
       edges: [
-        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:fms/deliverable:fms:nonexistent" }
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:nonexistent" }
       ]
     };
 
@@ -418,7 +417,7 @@ test("checkCrossVaultRefs: unresolvable when worldDir not set", () => {
   const graph = {
     nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
     edges: [
-      { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:fms/deliverable:fms:v2" }
+      { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" }
     ]
   };
 
@@ -455,16 +454,16 @@ test("checkCrossVaultRefs: multiple cross-vault edges in one graph", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
     const graph = {
       nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
       edges: [
-        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:fms/deliverable:fms:v2" },
-        { id: "e:2", type: "has_premise", from: "goal:proj:a", to: "vault:sensing/deliverable:sensing:v1" }
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" },
+        { id: "e:2", type: "has_premise", from: "goal:proj:a", to: "vault:analytics/deliverable:analytics:v1" }
       ]
     };
 
@@ -474,8 +473,8 @@ test("checkCrossVaultRefs: multiple cross-vault edges in one graph", () => {
     const orphan = results.filter((r) => r.status === "orphan");
     assert.equal(resolved.length, 1);
     assert.equal(orphan.length, 1);
-    assert.equal(resolved[0].ref, "vault:fms/deliverable:fms:v2");
-    assert.equal(orphan[0].ref, "vault:sensing/deliverable:sensing:v1");
+    assert.equal(resolved[0].ref, "vault:billing/deliverable:billing:v2");
+    assert.equal(orphan[0].ref, "vault:analytics/deliverable:analytics:v1");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -491,16 +490,16 @@ test("augmentMatchesWithXRefResolutions: adds cross_vault_resolved to matches wi
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "The release." }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
     });
 
     const matches = [
       {
         node: { id: "goal:proj:a", type: "Goal" },
         relations: [
-          { type: "has_premise", to: "vault:fms/deliverable:fms:v2" },
+          { type: "has_premise", to: "vault:billing/deliverable:billing:v2" },
           { type: "reduces_risk", to: "risk:proj:r1" }  // local ref, should be ignored
         ]
       },
@@ -517,9 +516,9 @@ test("augmentMatchesWithXRefResolutions: adds cross_vault_resolved to matches wi
     assert.ok("cross_vault_resolved" in augmented[0], "first match should have cross_vault_resolved");
     const xrefs = augmented[0].cross_vault_resolved as any[];
     assert.equal(xrefs.length, 1);
-    assert.equal(xrefs[0].ref, "vault:fms/deliverable:fms:v2");
+    assert.equal(xrefs[0].ref, "vault:billing/deliverable:billing:v2");
     assert.ok(xrefs[0].resolved !== null);
-    assert.equal(xrefs[0].resolved.title, "FMS v2");
+    assert.equal(xrefs[0].resolved.title, "Billing API v2");
     assert.equal(xrefs[0].edge_type, "has_premise");
 
     // Second match has no cross-vault refs, should remain unchanged
@@ -536,7 +535,7 @@ test("augmentMatchesWithXRefResolutions: returns matches unchanged when worldDir
     const matches = [
       {
         node: { id: "goal:proj:a", type: "Goal" },
-        relations: [{ type: "has_premise", to: "vault:fms/deliverable:fms:v2" }]
+        relations: [{ type: "has_premise", to: "vault:billing/deliverable:billing:v2" }]
       }
     ];
     const augmented = augmentMatchesWithXRefResolutions(matches, undefined);
@@ -584,15 +583,15 @@ test("findVaultBySlugWithInfo: primary slug match returns matchedViaAlias=false"
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      aliases: ["fleet-hub"],
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
-    const result = findVaultBySlugWithInfo("fms", worldDir);
+    const result = findVaultBySlugWithInfo("billing", worldDir);
     assert.ok(result !== null);
-    assert.equal(result!.currentSlug, "fms");
+    assert.equal(result!.currentSlug, "billing");
     assert.equal(result!.matchedViaAlias, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -605,17 +604,17 @@ test("findVaultBySlugWithInfo: alias match returns matchedViaAlias=true and curr
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      aliases: ["fleet-hub"],
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
-    const result = findVaultBySlugWithInfo("fleet-hub", worldDir);
+    const result = findVaultBySlugWithInfo("billing-old", worldDir);
     assert.ok(result !== null, "should find vault via alias");
-    assert.equal(result!.currentSlug, "fms");
+    assert.equal(result!.currentSlug, "billing");
     assert.equal(result!.matchedViaAlias, true);
-    assert.ok(result!.vaultDir.includes("fms-repo"));
+    assert.ok(result!.vaultDir.includes("billing-repo"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -625,15 +624,15 @@ test("findVaultBySlugWithInfo: prefers primary slug over alias when both match (
   const root = mkdtempSync(path.join(tmpdir(), "xref-alias-"));
   try {
     const worldDir = makeWorldDir(root);
-    // vault whose primary slug is "fms"
+    // vault whose primary slug is "billing"
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
-    const result = findVaultBySlugWithInfo("fms", worldDir);
+    const result = findVaultBySlugWithInfo("billing", worldDir);
     assert.ok(result !== null);
     assert.equal(result!.matchedViaAlias, false);
   } finally {
@@ -647,15 +646,15 @@ test("findVaultBySlug: still works via alias (backwards-compatible wrapper)", ()
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      aliases: ["fleet-hub"],
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
-    const vaultDir = findVaultBySlug("fleet-hub", worldDir);
+    const vaultDir = findVaultBySlug("billing-old", worldDir);
     assert.ok(vaultDir !== null, "should find vault via alias");
-    assert.ok(vaultDir!.includes("fms-repo"));
+    assert.ok(vaultDir!.includes("billing-repo"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -671,17 +670,17 @@ test("checkCrossVaultRefs: resolved with alias_warning when ref uses an alias sl
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      aliases: ["fleet-hub"],
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
     const graph = {
       nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
       edges: [
-        // ref uses the old alias "fleet-hub" instead of current slug "fms"
-        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:fleet-hub/deliverable:fms:v2" }
+        // ref uses the old alias "billing-old" instead of current slug "billing"
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing-old/deliverable:billing:v2" }
       ]
     };
 
@@ -689,8 +688,8 @@ test("checkCrossVaultRefs: resolved with alias_warning when ref uses an alias sl
     assert.equal(results.length, 1);
     assert.equal(results[0].status, "resolved");
     assert.ok(results[0].alias_warning !== undefined, "should have alias_warning");
-    assert.match(results[0].alias_warning ?? "", /fleet-hub/);
-    assert.match(results[0].alias_warning ?? "", /fms/);
+    assert.match(results[0].alias_warning ?? "", /billing-old/);
+    assert.match(results[0].alias_warning ?? "", /billing/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -702,16 +701,16 @@ test("checkCrossVaultRefs: no alias_warning when ref uses primary slug", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      aliases: ["fleet-hub"],
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "x" }
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
     });
 
     const graph = {
       nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
       edges: [
-        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:fms/deliverable:fms:v2" }
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" }
       ]
     };
 
@@ -730,19 +729,19 @@ test("resolveCrossVaultRef: resolves cross-vault node via alias", () => {
     const worldDir = makeWorldDir(root);
     makeVault({
       root: worldDir,
-      repoName: "fms-repo",
-      slug: "fms",
-      aliases: ["fleet-hub"],
-      node: { id: "deliverable:fms:v2", type: "Deliverable", title: "FMS v2", summary: "The release." }
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
     });
 
-    // ref uses old alias "fleet-hub"
-    const ref = "vault:fleet-hub/deliverable:fms:v2";
+    // ref uses old alias "billing-old"
+    const ref = "vault:billing-old/deliverable:billing:v2";
     const resolved = resolveCrossVaultRef(ref, worldDir);
     assert.ok(resolved !== null, "should resolve via alias");
-    assert.equal(resolved!.node_id, "deliverable:fms:v2");
-    assert.equal(resolved!.title, "FMS v2");
-    assert.ok(resolved!.vault_path.includes("fms-repo"));
+    assert.equal(resolved!.node_id, "deliverable:billing:v2");
+    assert.equal(resolved!.title, "Billing API v2");
+    assert.ok(resolved!.vault_path.includes("billing-repo"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -20,14 +20,14 @@
 //   C1. knowledge-floor: Goal 0 件 / Constraint 0 件は WARN (知識軸が未シーディング)。
 //   B2'. superseded-premise: 現役ノードが終端 state のノードへ has_premise している組は WARN。
 //
-// 検査項目 (project vault, --schema project 指定時に追加実行):
-//   P1. Agreement exploring 集中: state=exploring かつ responsible_for 無し ≧2 件は WARN。
-//   P2. Agreement negotiating 滞留: state=negotiating の Agreement は「まだ活きているか」WARN。
-//   P3. Stakeholder 過負荷: active Agreement ≧3 件の Stakeholder は WARN。
-//   P4. Resource gap: 未完了 Task で requires エッジが 0 本のものは WARN。
-//   P5. Assumption orphan: has_premise の対象になっていない Assumption は WARN。
-//   P6. Goal 未着手: achieves エッジが届いていない active Goal は WARN。
-//   P7. Theme 空: encompasses エッジが 0 本の Theme は WARN。
+// Check items (project vault, run additionally when --schema project is specified):
+//   P1. Agreement exploring concentration: state=exploring with no responsible_for, ≥2 items → WARN.
+//   P2. Agreement negotiating stagnation: Agreement with state=negotiating — "is it still active?" → WARN.
+//   P3. Stakeholder overload: Stakeholder with ≥3 active Agreements → WARN.
+//   P4. Resource gap: incomplete Task with 0 requires edges → WARN.
+//   P5. Assumption orphan: Assumption not referenced by has_premise → WARN.
+//   P6. Goal no-task: active Goal with no incoming achieves edge → WARN.
+//   P7. Theme empty: Theme with 0 encompasses edges → WARN.
 import fs from "node:fs";
 import { canonicalType } from "./schema.ts";
 import {
@@ -170,8 +170,8 @@ const ROLE_ALONE_EXEMPT = new Set(["documentation", "generated"]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Project vault checks (P1–P7)
-// graph と outEdges/inEdges を受け取り Finding[] を返す。
-// check-carving.ts の main() から schema === "project" の場合にのみ呼ばれる。
+// Receives graph and outEdges/inEdges, returns Finding[].
+// Called from check-carving.ts main() only when schema === "project".
 // ─────────────────────────────────────────────────────────────────────────────
 export function runProjectChecks(
   graph: { nodes: any[]; edges: any[] },
@@ -181,9 +181,9 @@ export function runProjectChecks(
   const findings: Finding[] = [];
   const nodeById = new Map<string, any>(graph.nodes.map((n: any) => [n.id, n]));
 
-  // ─── P1: Agreement exploring 集中 ─────────────────────────────────────────
-  // state=exploring の Agreement のうち、いずれの Stakeholder からも responsible_for
-  // エッジを受けていないものを「担当者未定」とみなす。その数 ≥ 2 なら WARN。
+  // ─── P1: Agreement exploring concentration ─────────────────────────────────────────
+  // Among state=exploring Agreements, those with no responsible_for edge from any Stakeholder
+  // are considered "unassigned". If count ≥ 2, emit WARN.
   const exploringAgreements = graph.nodes.filter(
     (n: any) => n.type === "Agreement" && n.state === "exploring"
   );
@@ -196,14 +196,14 @@ export function runProjectChecks(
     findings.push({
       severity: "WARN",
       rule: "agreement-exploring-concentration",
-      message: `state=exploring の Agreement が ${exploringNoOwner.length} 件、いずれも Stakeholder の responsible_for 無し。探索段階が担当者不在のまま滞留している疑い。各 Agreement に responsible_for エッジを張るか、探索を閉じることを検討。`,
+      message: `${exploringNoOwner.length} Agreement(s) in state=exploring with no Stakeholder responsible_for. Exploration may be stalling without an owner. Add responsible_for edges or close the exploration.`,
       details: exploringNoOwner.slice(0, 20),
     });
   }
 
-  // ─── P2: Agreement negotiating 滞留 ──────────────────────────────────────
-  // state=negotiating の Agreement は「まだ活きているか」を確認すべき。タイムスタンプ
-  // 追跡は未実装なので、件数にかかわらず全件を WARN で見せる。
+  // ─── P2: Agreement negotiating stagnation ──────────────────────────────────────
+  // Agreements with state=negotiating should be checked: "is this still active?"
+  // Timestamp tracking is not implemented, so all items are shown as WARN regardless of count.
   const negotiatingAgreements = graph.nodes.filter(
     (n: any) => n.type === "Agreement" && n.state === "negotiating"
   );
@@ -211,14 +211,14 @@ export function runProjectChecks(
     findings.push({
       severity: "WARN",
       rule: "agreement-negotiating-stagnation",
-      message: `state=negotiating の Agreement が ${negotiatingAgreements.length} 件。交渉中のまま放置されていないか確認する (まだ活きているか / signed に進んだか / 失効したか)。タイムスタンプ追跡が無いため全件を列挙。`,
+      message: `${negotiatingAgreements.length} Agreement(s) with state=negotiating. Check if they are still active (still negotiating / moved to signed / expired). All items listed because timestamp tracking is unavailable.`,
       details: negotiatingAgreements.slice(0, 20).map((n: any) => `[Agreement] ${String(n.id).split(":").pop()} — ${(n.title ?? "").slice(0, 60)}`),
     });
   }
 
-  // ─── P3: Stakeholder 過負荷 ───────────────────────────────────────────────
-  // Stakeholder が party_to している Agreement のうち state=active のものを数える。
-  // ≥ 3 件の Stakeholder は WARN。
+  // ─── P3: Stakeholder overload ───────────────────────────────────────────────
+  // Count Agreements with state=active that the Stakeholder is party_to.
+  // Stakeholders with ≥ 3 such Agreements emit WARN.
   const stakeholders = graph.nodes.filter((n: any) => n.type === "Stakeholder");
   for (const sh of stakeholders) {
     const activeCount = (outEdges[sh.id] ?? []).filter((e: any) => {
@@ -230,15 +230,15 @@ export function runProjectChecks(
       findings.push({
         severity: "WARN",
         rule: "stakeholder-overload",
-        message: `Stakeholder '${String(sh.id).split(":").pop()}' が state=active の Agreement に ${activeCount} 件関与 (≥3)。過負荷の疑い。一部の Agreement の担当者を見直すか、Agreement を分割する。`,
+        message: `Stakeholder '${String(sh.id).split(":").pop()}' is party_to ${activeCount} active Agreement(s) (≥3). Possible overload. Review ownership or split Agreements.`,
         details: [`[Stakeholder] ${String(sh.id).split(":").pop()} — active agreements: ${activeCount}`],
       });
     }
   }
 
   // ─── P4: Resource gap ────────────────────────────────────────────────────
-  // completed/cancelled 以外の Task で requires エッジが 0 本のもの。
-  // 「このタスクは何のリソースを消費するか?」が未定義の疑い。
+  // Tasks not in completed/cancelled state with 0 requires edges.
+  // Indicates "what resources does this task consume?" is undefined.
   const incompleteTasks = graph.nodes.filter(
     (n: any) => n.type === "Task" && n.state !== "completed" && n.state !== "cancelled"
   );
@@ -253,14 +253,14 @@ export function runProjectChecks(
     findings.push({
       severity: "WARN",
       rule: "task-resource-gap",
-      message: `未完了 Task ${tasksNoResource.length} 件に requires エッジが無い。このタスクがどのリソース (人・時間・予算 等) を消費するか未定義の疑い。Resource ノードを作成して requires で繋ぐか、消費リソースが無い場合は Task の必要性を再確認。`,
+      message: `${tasksNoResource.length} incomplete Task(s) have no requires edge. Unclear what resources (people, time, budget, etc.) this task consumes. Create Resource nodes and connect via requires, or reconsider the Task if it consumes nothing.`,
       details: tasksNoResource.slice(0, 20),
     });
   }
 
   // ─── P5: Assumption orphan ───────────────────────────────────────────────
-  // has_premise の to 側に来ていない Assumption は、何も依存していない「孤立前提」。
-  // 誰も利用していないなら削除候補か、依存ノードへの has_premise 追加が必要。
+  // Assumptions not appearing on the to side of has_premise are "isolated premises".
+  // If no one depends on them, they are deletion candidates or need has_premise edges added.
   const assumptions = graph.nodes.filter((n: any) => n.type === "Assumption");
   const orphanAssumptions: string[] = [];
   for (const as of assumptions) {
@@ -273,14 +273,14 @@ export function runProjectChecks(
     findings.push({
       severity: "WARN",
       rule: "assumption-orphan",
-      message: `孤立した Assumption が ${orphanAssumptions.length} 件 (has_premise で参照されていない)。この前提に依存しているはずの Goal / Decision / Task から has_premise エッジを張るか、前提自体が不要なら削除を検討。`,
+      message: `${orphanAssumptions.length} isolated Assumption(s) (not referenced by has_premise). Add has_premise edges from Goals / Decisions / Tasks that depend on them, or delete if the premise is unnecessary.`,
       details: orphanAssumptions.slice(0, 20),
     });
   }
 
-  // ─── P6: Goal 未着手 ─────────────────────────────────────────────────────
-  // state=active の Goal で、achieves エッジが届いていないもの (Task が無い)。
-  // 「このゴールに向けて誰も動いていない」疑い。
+  // ─── P6: Goal no-task ─────────────────────────────────────────────────────
+  // Active Goals with no incoming achieves edge (no Task assigned).
+  // Indicates "no one is working toward this goal".
   const activeGoals = graph.nodes.filter(
     (n: any) => n.type === "Goal" && n.state === "active"
   );
@@ -295,14 +295,14 @@ export function runProjectChecks(
     findings.push({
       severity: "WARN",
       rule: "goal-no-task",
-      message: `state=active の Goal ${goalsNoTask.length} 件に achieves エッジが届いていない (取り組み中の Task が無い)。Goal が宙に浮いている疑い。対応する Task を作成して achieves で繋ぐか、Goal の state を planned/abandoned に変更する。`,
+      message: `${goalsNoTask.length} active Goal(s) have no incoming achieves edge (no Task in progress). The Goal may be floating. Create a Task and connect via achieves, or change the Goal state to planned/abandoned.`,
       details: goalsNoTask.slice(0, 20),
     });
   }
 
-  // ─── P7: Theme 空 ────────────────────────────────────────────────────────
-  // encompasses エッジが 0 本の Theme は「空の横断テーマ」。
-  // 内容が無いなら削除候補か、encompasses で要素を繋ぐ必要がある。
+  // ─── P7: Theme empty ────────────────────────────────────────────────────────
+  // Themes with 0 encompasses edges are "empty cross-cutting themes".
+  // If empty, they are deletion candidates or need encompasses edges added.
   const themes = graph.nodes.filter((n: any) => n.type === "Theme");
   const emptyThemes: string[] = [];
   for (const th of themes) {
@@ -315,7 +315,7 @@ export function runProjectChecks(
     findings.push({
       severity: "WARN",
       rule: "theme-empty",
-      message: `encompasses エッジが 0 本の Theme が ${emptyThemes.length} 件。空テーマは横断観点として機能しない。Goal / Decision / Risk / Task / Resource / Assumption を encompasses で繋ぐか、テーマ自体を削除する。`,
+      message: `${emptyThemes.length} Theme(s) have 0 encompasses edges. Empty themes do not function as cross-cutting views. Connect Goal / Decision / Risk / Task / Resource / Assumption via encompasses, or delete the theme.`,
       details: emptyThemes.slice(0, 20),
     });
   }

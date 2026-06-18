@@ -1,10 +1,10 @@
 // --- Project vault schema preset -------------------------------------------
-// 時限付きイニシアチブ (事業プロジェクト) 向けスキーマ。
-// system vault (コード/プロダクト知識, 受動的) に対し、
-// project vault は能動的にプロジェクト健全性を監視する。
+// Schema for time-bounded initiatives (business projects).
+// Unlike system vaults (code/product knowledge, passive),
+// project vaults actively monitor project health.
 //
-// Deliverable は system vault の住人。project vault は cross-vault ref で参照。
-// vault:<slug>/deliverable:<system>:<slug> 形式の qualified ID を edge の to に許容。
+// Deliverable lives in the system vault. Project vaults reference it via cross-vault ref.
+// Qualified IDs of the form vault:<slug>/deliverable:<system>:<slug> are allowed in edge `to`.
 
 import type { SchemaDefinition, RequiredField } from "./schema.ts";
 
@@ -17,14 +17,14 @@ const PROJECT_NODE_TYPES = [
   "OperationalKnowledge",
   "Investigation",
   "ConversationChunk",
-  "Source",          // File の差替。外部情報源 (URL + 鮮度管理)
-  "Theme",           // Layer/Concern/Component の差替。cross-project 横断関心
-  "Stakeholder",     // 利害関係者
-  "Resource",        // ヒト・モノ・カネ・時間
-  "Milestone",       // 時間軸の到達点
-  "Assumption",      // 前提・仮定。certainty level 付き
-  "Agreement",       // 外部との約束事・境界条件
-  "Task",            // 判断に関わる粒度の作業
+  "Source",          // Replaces File. External information sources (URL + freshness management).
+  "Theme",           // Replaces Layer/Concern/Component. Cross-project cross-cutting concern.
+  "Stakeholder",     // Stakeholder / interested party.
+  "Resource",        // People, assets, budget, time.
+  "Milestone",       // Time-axis milestone.
+  "Assumption",      // Premise / assumption. With certainty level.
+  "Agreement",       // External commitment / boundary condition.
+  "Task",            // Task at the granularity relevant to decisions.
 ] as const;
 
 type ProjectNodeType = typeof PROJECT_NODE_TYPES[number];

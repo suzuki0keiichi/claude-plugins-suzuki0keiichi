@@ -241,8 +241,8 @@ test("validateGraph rejects closed on Decision (vocabularies are per-type)", () 
 test("Component node with vault_ref attribute passes validation (extra attributes are ignored)", () => {
   const failures = validateGraph({
     nodes: [
-      { id: "component:web-auto:fms", type: "Component", vault_ref: "fms" },
-      { id: "component:web-auto:local", type: "Component", vault_ref: null }
+      { id: "component:cloud-svc:billing", type: "Component", vault_ref: "billing" },
+      { id: "component:cloud-svc:local", type: "Component", vault_ref: null }
     ],
     edges: []
   });
