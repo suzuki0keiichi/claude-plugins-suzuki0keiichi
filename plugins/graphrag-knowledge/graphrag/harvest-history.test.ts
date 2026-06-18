@@ -120,7 +120,7 @@ test("extractMarkerCandidates finds HACK/FIXME/WORKAROUND/XXX with 1-based lines
 
 // --- 本体 / CLI -------------------------------------------------------------------
 
-test("harvestHistory returns candidate JSON in the vein-hint style", () => {
+test("harvestHistory returns candidate JSON in the concern-hint style", () => {
   const result = harvestHistory({ root: "/repo", system: "payments" }, fakeDeps());
   assert.equal(result.generated_by, "graphrag/harvest-history.ts");
   assert.equal(result.root, "/repo");

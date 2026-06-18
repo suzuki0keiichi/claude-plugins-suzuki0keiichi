@@ -59,7 +59,7 @@ export async function buildVectorIndex(args, deps: any = {}) {
   if (provisionalCount > 0) {
     console.error(
       `[warn] 要約がテンプレのまま (summary_provisional): ${provisionalCount}件 (File / Component / Layer 等)。` +
-      `embedding からは除外したが、意味の要約に書き換えないと検索・vein-hint の品質が落ちる。`
+      `embedding からは除外したが、意味の要約に書き換えないと検索・concern-hint の品質が落ちる。`
     );
   }
   const rows = await embedNodesIncremental(nodes, provider, previousRows, documentPrefix);

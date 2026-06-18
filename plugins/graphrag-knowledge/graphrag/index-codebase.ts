@@ -249,7 +249,7 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
     // index-codebase は path/role/language/symbols/imports からの機械テンプレ要約しか
     // 作れない。LLM がファイルを実際に読んで「何をする/何のためのコードか」を要約に
     // 書き換えるまで、summary_provisional=true で「未完」を自己申告する。これを消費側が
-    // 見る: vein-hint は拒否 (テンプレ要約だと typescript/components 等の言語語で
+    // 見る: concern-hint は拒否 (テンプレ要約だと typescript/components 等の言語語で
     // クラスタリングして縦串が無意味化する)、vector は embedding から除外 (検索汚染防止)、
     // build-vault は警告。フラグが無いと「空でない=完了」に見えて作り直しでもサボりが残る。
     // content 不変かつ前回が本物要約 (provisional でない) なら、再索引でそれを壊さず継ぐ。

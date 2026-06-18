@@ -124,7 +124,7 @@ All typed-add verbs can attach edges via flags. Key ones:
 ## Headline verbs (chained, multi-stage in one command)
 
 - `ask "<q>"` — auto-escalation brief→search→evidence + auto-incrementing `--call-number` (reads vault)
-- `carve --root <repo> --system <name>` — index → vein-hint → policy-suggest → carving-check chain. **Post-index, File and Component/Layer candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes vein-hint rejection / carving-check ERROR). **Concern (crosscut) discovery is driven by LLM conceptual modeling** — vein-hint machine candidates (for Concern discovery) are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
+- `carve --root <repo> --system <name>` — index → concern-hint → policy-suggest → carving-check chain. **Post-index, File and Component/Layer candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes concern-hint rejection / carving-check ERROR). **Concern (crosscut) discovery is driven by LLM conceptual modeling** — concern-hint machine candidates (for Concern discovery) are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
 - `inspect` — status of env + artifacts (vault / graph.json / vector-index / world) as single JSON
@@ -142,7 +142,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `vector-index` | build vector index (from vault) |
 | `vault-build` | graph.json → vault (only for converting indexer output to vault) |
 | `vault-import` | vault → graph.json (for round-trip verification) |
-| `vein-hint` | machine hints for Concerns (embedding proximity clustering). For blind-spot checking after LLM modeling |
+| `concern-hint` | machine hints for Concerns (embedding proximity clustering). For blind-spot checking after LLM modeling |
 | `edge-suggest-policy` | sets_policy_for candidate extraction |
 | `carving-check` | carving quality gate |
 | `branch-merge` | semantic merge analysis of vault git branches (read-only). Procedure: `$REF/branch-merge.md` |
