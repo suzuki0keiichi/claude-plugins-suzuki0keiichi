@@ -27,7 +27,7 @@ diff 時のレビュー。**目的は QA でなくコントローラビリティ
    git diff --name-only <base>...<head>      # 範囲指定が無ければ git diff --name-only
    ```
 2. **逆引きで枠を組む**（method §2）: 各変更 File について `ask` / `evidence` で
-   - 所属 **Stratum / Pocket / Vein**（着地点・ルーティング信号。例: UI Layer に変更が入った）
+   - 所属 **Layer / Component / Concern**（着地点・ルーティング信号。例: UI Layer に変更が入った）
    - 統べる **Decision / Constraint / Risk / OperationalKnowledge**（governance 逆引き）
    - 関連 **RejectedOption / supersedes 連鎖**（過去経緯）
    を引く。`ask` は領域ごとに1発、連打しない。`supersedes` / `refines` 連鎖と state を確認して**現役末端で枠を組む**
@@ -43,7 +43,7 @@ diff 時のレビュー。**目的は QA でなくコントローラビリティ
    候補が多い時は裏取りの読みを **subagent に並列委譲**してよい（method §2.5 委譲項。ペイロード規定・判定非委譲・
    書き込み禁止・会計不変をそのまま守る — 委譲は実行手段の追加であって義務の縮小ではない）。
 4. **概念デルタを判定**（method §3）: 枠に対し変更が超えていないか。
-   - 却下案再導入 / 層破り（import 縦走）/ Decision 暗黙の反故 / Vein 規範 vs 実体（例: エラー処理の log だけ追加）/
+   - 却下案再導入 / 層破り（import 縦走）/ Decision 暗黙の反故 / Concern 規範 vs 実体（例: エラー処理の log だけ追加）/
      governance 違反（確立済み方針の退行）/ scope creep。
    - **has_premise 逆引き**（反故にする Decision を前提にしている現役ノードの列挙 = 前提崩れの波及）/
      **reduces_risk の解除**（弱めた Decision が抑えていた Risk の再開）/ **OperationalKnowledge の再踏み**
