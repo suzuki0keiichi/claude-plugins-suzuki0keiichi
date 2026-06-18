@@ -19,6 +19,9 @@ export function listPresets(): string[] {
 
 registerPreset(DEFAULT_SCHEMA);
 
+import { PROJECT_SCHEMA } from "./schema-project.ts";
+registerPreset(PROJECT_SCHEMA);
+
 /**
  * vault の VAULT.md から schema プリセットを解決する。
  * 優先順位:
