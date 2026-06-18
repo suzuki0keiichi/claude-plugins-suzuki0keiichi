@@ -3,7 +3,7 @@
 // 機械的に判定できる歪みを警告/エラーとして出力する。
 // LLM レビューの前段。mutation apply 後に走らせて、警告ゼロを確認してから完了とする。
 //
-// 検査項目:
+// 検査項目 (system vault):
 //   0.  要約が機械テンプレ (summary_provisional) のまま残っていないか (ERROR)
 //   0b. carve 未完 (candidate:true 残存 / "band N/M"・"(N files)"・"candidate cN" の
 //       プレースホルダ title) が残っていないか (ERROR)。カスみたいな命名の確定を防ぐ。
@@ -19,6 +19,15 @@
 //       config 不正/stale を ERROR、builtin 重複と免除比率 >15% を WARN。免除会計を常時印字。
 //   C1. knowledge-floor: Goal 0 件 / Constraint 0 件は WARN (知識軸が未シーディング)。
 //   B2'. superseded-premise: 現役ノードが終端 state のノードへ has_premise している組は WARN。
+//
+// 検査項目 (project vault, --schema project 指定時に追加実行):
+//   P1. Agreement exploring 集中: state=exploring かつ responsible_for 無し ≧2 件は WARN。
+//   P2. Agreement negotiating 滞留: state=negotiating の Agreement は「まだ活きているか」WARN。
+//   P3. Stakeholder 過負荷: active Agreement ≧3 件の Stakeholder は WARN。
+//   P4. Resource gap: 未完了 Task で requires エッジが 0 本のものは WARN。
+//   P5. Assumption orphan: has_premise の対象になっていない Assumption は WARN。
+//   P6. Goal 未着手: achieves エッジが届いていない active Goal は WARN。
+//   P7. Theme 空: encompasses エッジが 0 本の Theme は WARN。
 import fs from "node:fs";
 import { canonicalType } from "./schema.ts";
 import {
@@ -45,6 +54,7 @@ function parseArgs(argv: string[]) {
     dominanceThreshold: Number.isFinite(Number(p["dominance-threshold"])) ? Number(p["dominance-threshold"]) : 0.7,
     duplicateThreshold: Number.isFinite(Number(p["duplicate-threshold"])) ? Number(p["duplicate-threshold"]) : 0.92,
     configPath: typeof p.config === "string" ? p.config : undefined,
+    schema: typeof p.schema === "string" ? p.schema : process.env.GRAPHRAG_SCHEMA,
     json: Boolean(p.json),
   };
 }
@@ -157,6 +167,161 @@ export function isAllowedOrphan(filePath: string): boolean {
 // orphan 検出が黙って空になる (silent pass)。ui_component / api_route / entrypoint / config 等は
 // 実装なので、builtin パターンか config の literal path に該当しない限り Component 所属を要求する。
 const ROLE_ALONE_EXEMPT = new Set(["documentation", "generated"]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project vault checks (P1–P7)
+// graph と outEdges/inEdges を受け取り Finding[] を返す。
+// check-carving.ts の main() から schema === "project" の場合にのみ呼ばれる。
+// ─────────────────────────────────────────────────────────────────────────────
+export function runProjectChecks(
+  graph: { nodes: any[]; edges: any[] },
+  outEdges: Record<string, any[]>,
+  inEdges: Record<string, any[]>,
+): Finding[] {
+  const findings: Finding[] = [];
+  const nodeById = new Map<string, any>(graph.nodes.map((n: any) => [n.id, n]));
+
+  // ─── P1: Agreement exploring 集中 ─────────────────────────────────────────
+  // state=exploring の Agreement のうち、いずれの Stakeholder からも responsible_for
+  // エッジを受けていないものを「担当者未定」とみなす。その数 ≥ 2 なら WARN。
+  const exploringAgreements = graph.nodes.filter(
+    (n: any) => n.type === "Agreement" && n.state === "exploring"
+  );
+  const exploringNoOwner: string[] = [];
+  for (const ag of exploringAgreements) {
+    const hasOwner = (inEdges[ag.id] ?? []).some((e: any) => e.type === "responsible_for");
+    if (!hasOwner) exploringNoOwner.push(`[Agreement] ${String(ag.id).split(":").pop()} — ${(ag.title ?? "").slice(0, 60)}`);
+  }
+  if (exploringNoOwner.length >= 2) {
+    findings.push({
+      severity: "WARN",
+      rule: "agreement-exploring-concentration",
+      message: `state=exploring の Agreement が ${exploringNoOwner.length} 件、いずれも Stakeholder の responsible_for 無し。探索段階が担当者不在のまま滞留している疑い。各 Agreement に responsible_for エッジを張るか、探索を閉じることを検討。`,
+      details: exploringNoOwner.slice(0, 20),
+    });
+  }
+
+  // ─── P2: Agreement negotiating 滞留 ──────────────────────────────────────
+  // state=negotiating の Agreement は「まだ活きているか」を確認すべき。タイムスタンプ
+  // 追跡は未実装なので、件数にかかわらず全件を WARN で見せる。
+  const negotiatingAgreements = graph.nodes.filter(
+    (n: any) => n.type === "Agreement" && n.state === "negotiating"
+  );
+  if (negotiatingAgreements.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "agreement-negotiating-stagnation",
+      message: `state=negotiating の Agreement が ${negotiatingAgreements.length} 件。交渉中のまま放置されていないか確認する (まだ活きているか / signed に進んだか / 失効したか)。タイムスタンプ追跡が無いため全件を列挙。`,
+      details: negotiatingAgreements.slice(0, 20).map((n: any) => `[Agreement] ${String(n.id).split(":").pop()} — ${(n.title ?? "").slice(0, 60)}`),
+    });
+  }
+
+  // ─── P3: Stakeholder 過負荷 ───────────────────────────────────────────────
+  // Stakeholder が party_to している Agreement のうち state=active のものを数える。
+  // ≥ 3 件の Stakeholder は WARN。
+  const stakeholders = graph.nodes.filter((n: any) => n.type === "Stakeholder");
+  for (const sh of stakeholders) {
+    const activeCount = (outEdges[sh.id] ?? []).filter((e: any) => {
+      if (e.type !== "party_to") return false;
+      const ag = nodeById.get(e.to);
+      return ag && ag.state === "active";
+    }).length;
+    if (activeCount >= 3) {
+      findings.push({
+        severity: "WARN",
+        rule: "stakeholder-overload",
+        message: `Stakeholder '${String(sh.id).split(":").pop()}' が state=active の Agreement に ${activeCount} 件関与 (≥3)。過負荷の疑い。一部の Agreement の担当者を見直すか、Agreement を分割する。`,
+        details: [`[Stakeholder] ${String(sh.id).split(":").pop()} — active agreements: ${activeCount}`],
+      });
+    }
+  }
+
+  // ─── P4: Resource gap ────────────────────────────────────────────────────
+  // completed/cancelled 以外の Task で requires エッジが 0 本のもの。
+  // 「このタスクは何のリソースを消費するか?」が未定義の疑い。
+  const incompleteTasks = graph.nodes.filter(
+    (n: any) => n.type === "Task" && n.state !== "completed" && n.state !== "cancelled"
+  );
+  const tasksNoResource: string[] = [];
+  for (const t of incompleteTasks) {
+    const hasRequires = (outEdges[t.id] ?? []).some((e: any) => e.type === "requires");
+    if (!hasRequires) {
+      tasksNoResource.push(`[Task] ${String(t.id).split(":").pop()} — ${(t.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (tasksNoResource.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "task-resource-gap",
+      message: `未完了 Task ${tasksNoResource.length} 件に requires エッジが無い。このタスクがどのリソース (人・時間・予算 等) を消費するか未定義の疑い。Resource ノードを作成して requires で繋ぐか、消費リソースが無い場合は Task の必要性を再確認。`,
+      details: tasksNoResource.slice(0, 20),
+    });
+  }
+
+  // ─── P5: Assumption orphan ───────────────────────────────────────────────
+  // has_premise の to 側に来ていない Assumption は、何も依存していない「孤立前提」。
+  // 誰も利用していないなら削除候補か、依存ノードへの has_premise 追加が必要。
+  const assumptions = graph.nodes.filter((n: any) => n.type === "Assumption");
+  const orphanAssumptions: string[] = [];
+  for (const as of assumptions) {
+    const hasDependents = (inEdges[as.id] ?? []).some((e: any) => e.type === "has_premise");
+    if (!hasDependents) {
+      orphanAssumptions.push(`[Assumption] ${String(as.id).split(":").pop()} — ${(as.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (orphanAssumptions.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "assumption-orphan",
+      message: `孤立した Assumption が ${orphanAssumptions.length} 件 (has_premise で参照されていない)。この前提に依存しているはずの Goal / Decision / Task から has_premise エッジを張るか、前提自体が不要なら削除を検討。`,
+      details: orphanAssumptions.slice(0, 20),
+    });
+  }
+
+  // ─── P6: Goal 未着手 ─────────────────────────────────────────────────────
+  // state=active の Goal で、achieves エッジが届いていないもの (Task が無い)。
+  // 「このゴールに向けて誰も動いていない」疑い。
+  const activeGoals = graph.nodes.filter(
+    (n: any) => n.type === "Goal" && n.state === "active"
+  );
+  const goalsNoTask: string[] = [];
+  for (const g of activeGoals) {
+    const hasAchieves = (inEdges[g.id] ?? []).some((e: any) => e.type === "achieves");
+    if (!hasAchieves) {
+      goalsNoTask.push(`[Goal] ${String(g.id).split(":").pop()} — ${(g.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (goalsNoTask.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "goal-no-task",
+      message: `state=active の Goal ${goalsNoTask.length} 件に achieves エッジが届いていない (取り組み中の Task が無い)。Goal が宙に浮いている疑い。対応する Task を作成して achieves で繋ぐか、Goal の state を planned/abandoned に変更する。`,
+      details: goalsNoTask.slice(0, 20),
+    });
+  }
+
+  // ─── P7: Theme 空 ────────────────────────────────────────────────────────
+  // encompasses エッジが 0 本の Theme は「空の横断テーマ」。
+  // 内容が無いなら削除候補か、encompasses で要素を繋ぐ必要がある。
+  const themes = graph.nodes.filter((n: any) => n.type === "Theme");
+  const emptyThemes: string[] = [];
+  for (const th of themes) {
+    const hasEncompasses = (outEdges[th.id] ?? []).some((e: any) => e.type === "encompasses");
+    if (!hasEncompasses) {
+      emptyThemes.push(`[Theme] ${String(th.id).split(":").pop()} — ${(th.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (emptyThemes.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "theme-empty",
+      message: `encompasses エッジが 0 本の Theme が ${emptyThemes.length} 件。空テーマは横断観点として機能しない。Goal / Decision / Risk / Task / Resource / Assumption を encompasses で繋ぐか、テーマ自体を削除する。`,
+      details: emptyThemes.slice(0, 20),
+    });
+  }
+
+  return findings;
+}
 
 export function main(argv: string[] = process.argv.slice(2)): void {
   const args = parseArgs(argv);
@@ -765,6 +930,14 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // Project vault 専用チェック (--schema project の場合のみ実行)
+  // ─────────────────────────────────────────────────────────────
+  if (args.schema === "project") {
+    const projectFindings = runProjectChecks(graph, outEdges, inEdges);
+    findings.push(...projectFindings);
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // 出力
   // ─────────────────────────────────────────────────────────────
   const summary = {
@@ -777,7 +950,8 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   if (args.json) {
     console.log(JSON.stringify({ summary, accounting, findings }, null, 2));
   } else {
-    console.log(`=== Carving check on ${args.graphPath} ===`);
+    const schemaLabel = args.schema ? ` [schema: ${args.schema}]` : "";
+    console.log(`=== Carving check on ${args.graphPath}${schemaLabel} ===`);
     console.log(`nodes: ${graph.nodes.length} | files: ${files.length} | components: ${components.length} | concerns: ${concerns.length} | layers: ${layers.length}`);
     console.log();
     // 免除会計 (常時印字): 免除がゼロでも「ゼロである」ことを見せる

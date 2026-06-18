@@ -24,10 +24,21 @@ import {
   buildAddInvestigationPlan,
   buildAddRejectedOptionPlan
 } from "./cli-typed-add.ts";
+import {
+  buildAddStakeholderPlan,
+  buildAddResourcePlan,
+  buildAddMilestonePlan,
+  buildAddAssumptionPlan,
+  buildAddAgreementPlan,
+  buildAddTaskPlan,
+  buildAddSourcePlan,
+  buildAddThemePlan
+} from "./cli-typed-add-project.ts";
 import { buildGraphBrief } from "./brief.ts";
 import { buildEvidencePacket } from "./evidence-packet.ts";
 import { bumpCallCount } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
+import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph } from "./retrieval.ts";
 import { embedForIndex } from "./vector.ts";
 import { recordAskHits } from "./cli-ask-state.ts";
@@ -439,6 +450,24 @@ export async function runAsk(argv: string[]) {
 
   const askSchema = vaultDir ? resolveSchema(vaultDir) : undefined;
 
+  // Stage 3 cross-vault ref resolution: when worldDir is configured, attempt to
+  // resolve any vault: prefixed `to` fields found in the brief matches' relations.
+  // Non-throwing: failures are noted inline, ask output is never dropped.
+  if (worldDir) {
+    try {
+      if (briefOut?.query?.matches) {
+        briefOut.query.matches = augmentMatchesWithXRefResolutions(briefOut.query.matches, worldDir);
+      }
+      for (const stage of stages) {
+        if (stage?.output?.direct_evidence) {
+          stage.output.direct_evidence = augmentMatchesWithXRefResolutions(stage.output.direct_evidence, worldDir);
+        }
+      }
+    } catch {
+      // xref resolution is non-fatal — never surface as an error in ask output
+    }
+  }
+
   process.stdout.write(JSON.stringify({
     question,
     call_number: callNumber,
@@ -644,6 +673,160 @@ async function runInspect(_argv: string[]) {
   }, null, 2) + "\n");
 }
 
+// project vault 専用コマンド向けスキーマガード。
+// vault が project preset でない場合は明確にエラーを出す。
+function requireProjectSchema(): void {
+  const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
+  if (!vaultDir) {
+    throw new Error("project typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
+  }
+  const schema = resolveSchema(vaultDir);
+  if (schema.id !== "project") {
+    throw new Error(
+      `このコマンドは project vault 専用です (schema: ${schema.id})。` +
+      `VAULT.md に schema: project を設定してください。`
+    );
+  }
+}
+
+async function runAddStakeholder(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddStakeholderPlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    responsibleFor: csvFlag(f, "responsible-for"),
+    concernedWith: csvFlag(f, "concerned-with")
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddResource(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddResourcePlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    category: strFlag(f, "category") as any
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddMilestone(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddMilestonePlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    state: strFlag(f, "state"),
+    dependsOn: csvFlag(f, "depends-on")
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddAssumption(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const certainty = requireFlag(f, "certainty");
+  const plan = buildAddAssumptionPlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    certainty: certainty as any,
+    premise: csvFlag(f, "premise")
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddAgreement(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddAgreementPlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    state: strFlag(f, "state"),
+    partyTo: csvFlag(f, "party-to"),
+    documentedBy: strFlag(f, "documented-by")
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddTask(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddTaskPlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    evidence: asEvidenceArray(f),
+    state: strFlag(f, "state"),
+    achieves: csvFlag(f, "achieves"),
+    requires: csvFlag(f, "requires"),
+    dependsOn: csvFlag(f, "depends-on")
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddSource(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddSourcePlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    sourceKind: strFlag(f, "source-kind") as any
+  });
+  await applyPlanAndReport(plan, f);
+}
+
+async function runAddTheme(argv: string[]) {
+  requireProjectSchema();
+  const f = parseFlagsArgv(argv);
+  const plan = buildAddThemePlan({
+    system: requireFlag(f, "system"),
+    slug: requireFlag(f, "slug"),
+    title: requireFlag(f, "title"),
+    summary: requireFlag(f, "summary"),
+    description: strFlag(f, "description"),
+    reason: strFlag(f, "reason"),
+    aliases: csvFlag(f, "aliases"),
+    encompasses: csvFlag(f, "encompasses")
+  });
+  await applyPlanAndReport(plan, f);
+}
+
 export async function dispatchHeadline(verb: string, argv: string[]): Promise<void> {
   switch (verb) {
     case "add-decision": return runAddDecision(argv);
@@ -653,6 +836,14 @@ export async function dispatchHeadline(verb: string, argv: string[]): Promise<vo
     case "add-goal": return runAddGoal(argv);
     case "add-investigation": return runAddInvestigation(argv);
     case "add-rejected-option": return runAddRejectedOption(argv);
+    case "add-stakeholder": return runAddStakeholder(argv);
+    case "add-resource": return runAddResource(argv);
+    case "add-milestone": return runAddMilestone(argv);
+    case "add-assumption": return runAddAssumption(argv);
+    case "add-agreement": return runAddAgreement(argv);
+    case "add-task": return runAddTask(argv);
+    case "add-source": return runAddSource(argv);
+    case "add-theme": return runAddTheme(argv);
     case "ask": return runAsk(argv);
     case "carve": return runCarve(argv);
     case "commit-mutation": return runCommitMutation(argv);

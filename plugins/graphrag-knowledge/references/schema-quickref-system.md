@@ -39,6 +39,35 @@ Canonical source: `graphrag/schema.ts`. This file covers the **system** preset (
 - `risks_in`: Risk → Decision|File|OK|Investigation|Deliverable|Layer|Concern|Component
 - `temporary_relation_candidate`: any knowledge node → any knowledge node
 
+## vault_ref — Component pointing to a child system vault
+
+A `Component` node can carry a `vault_ref` attribute that names the child system vault slug where the component's internals live.
+
+| Value | Meaning |
+|---|---|
+| absent / `null` | Details are described in this vault. |
+| `"<slug>"` | See vault `<slug>` for details. |
+
+Example: a component node `component:web-auto:fms` with `vault_ref: "fms"` means "the fms subsystem is described in the fms system vault". Cross-vault edges can then use the `vault:<slug>/...` ref syntax to link knowledge across vault boundaries.
+
+`vault_ref` is a convention only — no schema validation is applied. The validator ignores unknown extra attributes on nodes.
+
+## vault_slug_aliases — renaming a vault slug without breaking refs
+
+If a system vault needs to be renamed, add the old slug(s) to `vault_slug_aliases` in its VAULT.md:
+
+```yaml
+---
+name: FMS
+kind: system
+vault_slug: fms
+vault_slug_aliases:
+  - fleet-management-system
+---
+```
+
+The cross-vault resolver accepts both the current `vault_slug` and any alias. New refs **must** use the current slug; `xref-check` warns when a ref uses an alias instead of the current slug.
+
 ## ID Convention
 
 `<typeSlug>:<system>:<slug>` (e.g. `decision:graphrag:vault-single-source`).

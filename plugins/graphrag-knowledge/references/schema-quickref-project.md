@@ -114,7 +114,11 @@ name: <project name>
 kind: project
 schema: project
 vault_slug: <slug>
+vault_slug_aliases:       # optional — list old slugs that still appear in existing refs
+  - old-slug
 ---
 ```
 
-`schema: project` is required. `vault_slug` is the cross-vault ref namespace, immutable once set.
+`schema: project` is required. `vault_slug` is the cross-vault ref namespace.
+
+`vault_slug_aliases` lets you rename a vault slug without breaking existing cross-vault refs. The resolver accepts both the current slug and any alias. New refs **must** use the current `vault_slug`; `xref-check` warns when a ref uses an alias (`"ref uses alias '…', current slug is '…' — update ref to use current slug"`).
