@@ -100,20 +100,20 @@ test("同型のみ比較: 別型の既存ノードがいくら近くても suspe
   assert.equal(res.status, "ok");
 });
 
-test("alias 型 (Concern=Vein) は canonical で同型として照合される", async () => {
-  const vein = { id: "vein:s:auth", type: "Vein", title: "auth", summary: "authentication" };
+test("alias 型 (Vein=Concern) は canonical で同型として照合される", async () => {
+  const concern = { id: "concern:s:auth", type: "Concern", title: "auth", summary: "authentication" };
   const res = await runDuplicateCheck({
     plan: {
       nodes: [
-        { op: "create", id: "concern:s:auth2", type: "Concern", title: "auth", summary: "authentication" },
+        { op: "create", id: "vein:s:auth2", type: "Vein", title: "auth", summary: "authentication" },
       ],
     },
-    currentGraph: graphWith(vein),
-    vectorIndex: indexWith({ node_id: "vein:s:auth", vector: [1, 0, 0] }),
+    currentGraph: graphWith(concern),
+    vectorIndex: indexWith({ node_id: "concern:s:auth", vector: [1, 0, 0] }),
     embed: embedConst([1, 0, 0]),
   });
   assert.equal(res.status, "rejected");
-  assert.equal(res.suspects[0].existing_id, "vein:s:auth");
+  assert.equal(res.suspects[0].existing_id, "concern:s:auth");
 });
 
 test("対象外型 (File/ConversationChunk) の create はゲートを素通り (embed も呼ばない)", async () => {
@@ -275,16 +275,16 @@ test("対象型は契約の知識/横断ノード閉集合", () => {
   assert.deepEqual(
     [...DUPLICATE_CHECK_NODE_TYPES].sort(),
     [
+      "Component",
+      "Concern",
       "Constraint",
       "Decision",
       "Goal",
       "Investigation",
+      "Layer",
       "OperationalKnowledge",
-      "Pocket",
       "RejectedOption",
       "Risk",
-      "Stratum",
-      "Vein",
     ]
   );
 });

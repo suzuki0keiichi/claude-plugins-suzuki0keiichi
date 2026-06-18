@@ -365,7 +365,7 @@ export function nodeVectorText(node) {
   // (concern:→vein: 等) で埋め込みが動き検索が移行に反応するため、除外する。
   // provisional 要約 (index-codebase の機械テンプレ。実際にファイルを読んだ要約では
   // ない) は embedding に含めない。含めると "typescript" / "ソース" / import 名のような
-  // 言語・構造語が埋め込みを支配し、File 同士が言語/階層で固まって縦串 (Vein) 検出が
+  // 言語・構造語が埋め込みを支配し、File 同士が言語/階層で固まって縦串 (Concern) 検出が
   // 無意味化する。LLM が本物の要約に書き換え provisional を外せば自然に embedding 入りする。
   return [
     node.type,

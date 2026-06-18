@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 3.11.1
+version: 3.12.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④⑤ 実装一段落・結論確定・却下・記録指示で書き戻す (詳細は §Proactive Persistence)。【初回】⑥ 未知のリポジトリを初回索引したい時。
 ---
 
@@ -124,7 +124,7 @@ All typed-add verbs can attach edges via flags. Key ones:
 ## Headline verbs (chained, multi-stage in one command)
 
 - `ask "<q>"` — auto-escalation brief→search→evidence + auto-incrementing `--call-number` (reads vault)
-- `carve --root <repo> --system <name>` — index → vein-hint → policy-suggest → carving-check chain. **Post-index, File and Pocket/Stratum candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes vein-hint rejection / carving-check ERROR). **Vein (crosscut concern) discovery is driven by LLM conceptual modeling** — vein-hint machine candidates are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
+- `carve --root <repo> --system <name>` — index → concern-hint → policy-suggest → carving-check chain. **Post-index, File and Component/Layer candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes concern-hint rejection / carving-check ERROR). **Concern (crosscut) discovery is driven by LLM conceptual modeling** — concern-hint machine candidates (for Concern discovery) are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
 - `inspect` — status of env + artifacts (vault / graph.json / vector-index / world) as single JSON
@@ -142,7 +142,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `vector-index` | build vector index (from vault) |
 | `vault-build` | graph.json → vault (only for converting indexer output to vault) |
 | `vault-import` | vault → graph.json (for round-trip verification) |
-| `vein-hint` | machine hints for Veins (embedding proximity clustering). For blind-spot checking after LLM modeling |
+| `concern-hint` | machine hints for Concerns (embedding proximity clustering). For blind-spot checking after LLM modeling |
 | `edge-suggest-policy` | sets_policy_for candidate extraction |
 | `carving-check` | carving quality gate |
 | `branch-merge` | semantic merge analysis of vault git branches (read-only). Procedure: `$REF/branch-merge.md` |
@@ -173,7 +173,7 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
 - Passing `null` as an `updates` value **deletes that field** (e.g. `{ "state": null }` to withdraw state).
 - `summary` = one-line headline (stays in frontmatter, primary search carrier).
 - `description` = distilled prose about the node (appears in vault body `## 説明` with round-trip marker, also enters embedding). **Write for every node in principle.** Guidelines:
-  - **Aggregate types (especially Vein)**: not a list of constituents, but **what the collection means as a whole** — the meaning that emerges only at the aggregate level.
+  - **Aggregate types (especially Concern)**: not a list of constituents, but **what the collection means as a whole** — the meaning that emerges only at the aggregate level.
   - **Judgment types (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge)**: **why it was decided that way**.
 - `raw_content` = raw primary information (conversation logs, how it was decided, Slack URLs, etc.). **Do not discard even for judgment types**: low volume, becomes the primary source for tracing "why" later.
 
@@ -182,7 +182,7 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
 | Goal | Recommended method |
 |---|---|
 | Single new Decision/OK/Risk/Investigation/RejectedOption/Goal/Constraint | typed-add (`add-*`) — no JSON needed |
-| New Vein/Stratum/Pocket, Update, Delete, policy reversal | `commit-mutation <plan.json>` — templates: `$REF/mutation-templates.md` |
+| New Concern/Layer/Component, Update, Delete, policy reversal | `commit-mutation <plan.json>` — templates: `$REF/mutation-templates.md` |
 
 ### Write-time duplicate gate (duplicate_check)
 
@@ -223,7 +223,7 @@ Post-write `suggestions` (binding/relations/led_to/premise_candidates/binding_de
 
 ## Topology Gap Review
 
-When a bug or oversight is found, ask: "could this have been prevented if the graph had the right structure?" If yes, add the missing Vein/Pocket + edges via `commit-mutation` (topology cultivation). Details: `$REF/topology-gap-review.md`.
+When a bug or oversight is found, ask: "could this have been prevented if the graph had the right structure?" If yes, add the missing Concern/Component + edges via `commit-mutation` (topology cultivation). Details: `$REF/topology-gap-review.md`.
 
 ## Drift Reconciliation (incidentally noticed divergence)
 
@@ -236,7 +236,7 @@ Report graph changes in natural language (what knowledge changed / what relation
 ## Reference links
 
 - `$REF/cli-primitives.md`: full flag reference for all primitives
-- `$REF/mutation-templates.md`: plan templates for Vein / Stratum / Pocket / Update / Delete / policy reversal + suggestions details
+- `$REF/mutation-templates.md`: plan templates for Concern / Layer / Component / Update / Delete / policy reversal + suggestions details
 - `$REF/schema-quickref.md`: node types (12) / edge types (14) / allowed pairs / ID convention / state vocabulary / policy-reversal recipe
 - `$REF/ask-output-guide.md`: detailed ask output field guide (match_confidence / repeat_state / world_hints / standout)
 - `$REF/topology-gap-review.md`: graph structure self-reflection protocol on bug discovery
@@ -244,7 +244,7 @@ Report graph changes in natural language (what knowledge changed / what relation
 - `$REF/drift-reconciliation.md`: drift presentation format and post-ruling application
 - `$REF/port-site.md`: porting reference only (env / escalation / graphName / output paths)
 - `$REF/indexing-and-carving.md`: **must read for initial indexing and conceptual pass**
-- `$REF/carving-rationale.md`: core value of 12 node types + edge grammar, RejectedOption as first-class, Stratum≠Vein≠Pocket (geological metaphor)
+- `$REF/carving-rationale.md`: core value of 12 node types + edge grammar, RejectedOption as first-class, Layer≠Concern≠Component
 - `$REF/interpretation-guidance.md`: universal guidance for File interpretation summaries (primary lever for retrieval quality)
 - `$REF/conceptual-pass.md`: conceptual interpretation pass procedure
 - `$REF/carving-rules.md`: carving quality guards (no sequential slugs / completeness / duplicate detection / automated verification commands)

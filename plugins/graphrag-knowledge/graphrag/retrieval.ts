@@ -384,7 +384,7 @@ export function nodeForOutput(node) {
 
 function buildSearchFields(node) {
   // node.id (識別子) と node.type (分類) は意味ではない。文字一致の対象に含めると
-  // canonical 化 / 中立化改名 (concern:→vein:, Concern→Vein) で検索が移行に反応する
+  // canonical 化 / 改名 (vein:→concern:, Vein→Concern) で検索が移行に反応する
   // ため、除外する。type での絞り込みは searchGraph の types フィルタで行う。
   return [
     node.title,

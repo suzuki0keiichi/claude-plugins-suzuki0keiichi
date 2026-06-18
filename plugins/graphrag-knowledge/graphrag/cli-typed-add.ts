@@ -30,7 +30,7 @@ const TYPE_SLUG_TO_NODE: Record<string, NodeType> = {};
 for (const t of NODE_TYPES) {
   TYPE_SLUG_TO_NODE[t.toLowerCase()] = t;
 }
-// canonical 化前の engineering alias (Layer/Concern/Component) の id 接頭辞も拾う。
+// canonical 化前の地質メタファー alias (Stratum/Vein/Pocket) の id 接頭辞も拾う。
 for (const [alias, canonical] of Object.entries(NODE_TYPE_ALIASES)) {
   TYPE_SLUG_TO_NODE[alias.toLowerCase()] = canonical;
 }
@@ -89,7 +89,7 @@ export type AddDecisionArgs = {
   evidence?: Evidence[];
   reason?: string;
   // E1 add-decision 追加フラグ (全て任意・複数可)
-  setsPolicyFor?: string[]; // sets_policy_for: Decision → File|Investigation|OperationalKnowledge|Stratum|Vein|Pocket
+  setsPolicyFor?: string[]; // sets_policy_for: Decision → File|Investigation|OperationalKnowledge|Layer|Concern|Component
   premise?: string[]; // has_premise: Decision → Decision|OperationalKnowledge|Constraint|Risk|Goal
   fromInvestigation?: string; // led_to: Investigation → この Decision (向きは inv→decision)
   refines?: string; // refines: Decision → Decision
@@ -138,7 +138,7 @@ export type AddRiskArgs = {
   evidence?: Evidence[];
   reason?: string;
   // E1 add-risk 追加フラグ
-  risksIn?: string[]; // risks_in: Risk → Decision|File|OperationalKnowledge|Investigation|Stratum|Vein|Pocket
+  risksIn?: string[]; // risks_in: Risk → Decision|File|OperationalKnowledge|Investigation|Layer|Concern|Component
 };
 
 export type AddConstraintArgs = {

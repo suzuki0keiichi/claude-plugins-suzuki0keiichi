@@ -62,8 +62,8 @@ function listMdFiles(dir: string): string[] {
   return out;
 }
 
-// 孤児 .md 削除で空になった型フォルダを掃除する。例: 全 Component ノードが Pocket へ
-// 改名されると Component/*.md は消えるが、空の Component/ ディレクトリだけが残骸として
+// 孤児 .md 削除で空になった型フォルダを掃除する。例: 全 Pocket ノードが Component へ
+// 改名されると Pocket/*.md は消えるが、空の Pocket/ ディレクトリだけが残骸として
 // 残る (旧型のフォルダが空のまま居座る)。dot ディレクトリ (.git/.obsidian/.graphrag 等)
 // と vault ルート自体は対象外。rmdirSync は空でないと失敗するので非空フォルダは安全に残る。
 function pruneEmptyDirs(root: string): string[] {

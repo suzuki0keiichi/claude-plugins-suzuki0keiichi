@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 test("canonicalType maps axis-2 aliases to canonical and passes others through", () => {
-  assert.equal(canonicalType("Layer"), "Stratum");
-  assert.equal(canonicalType("Concern"), "Vein");
-  assert.equal(canonicalType("Component"), "Pocket");
+  assert.equal(canonicalType("Stratum"), "Layer");
+  assert.equal(canonicalType("Vein"), "Concern");
+  assert.equal(canonicalType("Pocket"), "Component");
   // 既に canonical / 非軸2型はそのまま
-  assert.equal(canonicalType("Stratum"), "Stratum");
+  assert.equal(canonicalType("Layer"), "Layer");
   assert.equal(canonicalType("Decision"), "Decision");
   assert.equal(canonicalType("Goal"), "Goal");
   // undefined は undefined
@@ -35,14 +35,14 @@ test("migrateV2Graph canonicalizes axis-2 type+id, leaves non-axis-2 verbatim", 
     ]
   };
   const out = migrateV2Graph(v2);
-  // 軸2 type が canonical 化される (System が落ちて index が 1 つ前へ)
-  assert.equal(out.nodes[0].type, "Vein");
-  assert.equal(out.nodes[1].type, "Pocket");
-  assert.equal(out.nodes[2].type, "Stratum");
-  // 軸2 id の先頭 slug も canonical 化される
-  assert.equal(out.nodes[0].id, "vein:acme:auth");
-  assert.equal(out.nodes[1].id, "pocket:acme:api");
-  assert.equal(out.nodes[2].id, "stratum:acme:domain");
+  // 軸2 type は既に canonical (System が落ちて index が 1 つ前へ)
+  assert.equal(out.nodes[0].type, "Concern");
+  assert.equal(out.nodes[1].type, "Component");
+  assert.equal(out.nodes[2].type, "Layer");
+  // 軸2 id も既に canonical — 変換不要
+  assert.equal(out.nodes[0].id, "concern:acme:auth");
+  assert.equal(out.nodes[1].id, "component:acme:api");
+  assert.equal(out.nodes[2].id, "layer:acme:domain");
   // v3.3: System root は migrate が落とす (vault=scope)
   assert.ok(!out.nodes.some((n) => n.type === "System"), "System root is dropped");
   // 非軸2型・他フィールド・top-level メタは不変
@@ -52,11 +52,11 @@ test("migrateV2Graph canonicalizes axis-2 type+id, leaves non-axis-2 verbatim", 
   assert.equal(out.nodes[0].summary, "横断");
   assert.equal(out.version, 1);
   assert.equal(out.generated_at, "2026-05-29T00:00:00.000Z");
-  // edge の from/to は新 id に連動更新される (edge id・type は不変)
+  // edge の from/to は変換不要 (既に canonical)
   assert.equal(out.edges[0].id, "e:1");
   assert.equal(out.edges[0].type, "evidenced_by");
-  assert.equal(out.edges[0].from, "vein:acme:auth");
-  assert.equal(out.edges[0].to, "pocket:acme:api");
+  assert.equal(out.edges[0].from, "concern:acme:auth");
+  assert.equal(out.edges[0].to, "component:acme:api");
   // 入力を破壊しない
   assert.equal(v2.nodes[1].type, "Concern");
   assert.equal(v2.nodes[1].id, "concern:acme:auth");
@@ -65,7 +65,7 @@ test("migrateV2Graph canonicalizes axis-2 type+id, leaves non-axis-2 verbatim", 
 
 test("compareGraphs returns [] when graphs match, reports losses otherwise", () => {
   const a = {
-    nodes: [{ id: "n1", type: "Vein", title: "T" }, { id: "n2", type: "File" }],
+    nodes: [{ id: "n1", type: "Concern", title: "T" }, { id: "n2", type: "File" }],
     edges: [{ id: "e1", type: "contains", from: "n1", to: "n2" }]
   };
   // 完全一致 → 欠損ゼロ
@@ -79,7 +79,7 @@ test("compareGraphs returns [] when graphs match, reports losses otherwise", () 
 
   // フィールド相違
   const changed = {
-    nodes: [{ id: "n1", type: "Vein", title: "違う" }, a.nodes[1]],
+    nodes: [{ id: "n1", type: "Concern", title: "違う" }, a.nodes[1]],
     edges: [...a.edges]
   };
   const diffs = compareGraphs(a, changed);
@@ -90,11 +90,11 @@ test("reimportVaultFiles reconstructs graph from in-memory files (no disk)", () 
   const graph = {
     nodes: [
       { id: "system:acme", type: "System", title: "Acme" },
-      { id: "vein:acme:auth", type: "Vein", title: "認証", summary: "横断" },
+      { id: "concern:acme:auth", type: "Concern", title: "認証", summary: "横断" },
       { id: "file:acme:a.ts", type: "File", title: "a.ts" }
     ],
     edges: [
-      { id: "e:1", type: "evidenced_by", from: "vein:acme:auth", to: "file:acme:a.ts" }
+      { id: "e:1", type: "evidenced_by", from: "concern:acme:auth", to: "file:acme:a.ts" }
     ]
   };
   const files = buildVaultFiles(graph);
@@ -102,7 +102,7 @@ test("reimportVaultFiles reconstructs graph from in-memory files (no disk)", () 
   assert.equal(out.nodes.length, 3);
   assert.equal(out.edges.length, 1);
   const byId = new Map(out.nodes.map((n) => [n.id, n]));
-  assert.equal(byId.get("vein:acme:auth").type, "Vein");
+  assert.equal(byId.get("concern:acme:auth").type, "Concern");
   assert.equal(out.edges[0].id, "e:1");
 });
 
@@ -131,20 +131,20 @@ test("runMigration: v2 (Layer/Concern/Component + System root) migrates and roun
   assert.deepEqual(r.validationFailures, [], r.validationFailures.join("; "));
   // 往復欠損ゼロ (= 移行完了ゲート)
   assert.deepEqual(r.lossReport, [], r.lossReport.join("; "));
-  // 軸2 が type も id も canonical 化されている
+  // 軸2 は既に canonical — type も id もそのまま
   const byId = new Map(r.migrated.nodes.map((n) => [n.id, n]));
-  assert.equal(byId.get("vein:acme:auth").type, "Vein");
-  assert.equal(byId.get("pocket:acme:api").type, "Pocket");
-  assert.equal(byId.get("stratum:acme:domain").type, "Stratum");
+  assert.equal(byId.get("concern:acme:auth").type, "Concern");
+  assert.equal(byId.get("component:acme:api").type, "Component");
+  assert.equal(byId.get("layer:acme:domain").type, "Layer");
   // v3.3: System root と contains は migrate が落とす (vault=scope)
   assert.ok(!byId.has("system:acme"), "System root dropped");
   assert.ok(!r.migrated.edges.some((e) => e.type === "contains"), "contains dropped");
-  // 軸2ノードを指す edge は新 id に連動
+  // 軸2ノードを指す edge は既に canonical id
   const e3 = r.migrated.edges.find((e) => e.id === "e:3");
-  assert.equal(e3.from, "vein:acme:auth");
+  assert.equal(e3.from, "concern:acme:auth");
   // vault ファイルが canonical フォルダに配置される
-  assert.ok(r.files.some((f) => f.relPath.startsWith("Vein/")));
-  assert.ok(r.files.some((f) => f.relPath.startsWith("Pocket/")));
+  assert.ok(r.files.some((f) => f.relPath.startsWith("Concern/")));
+  assert.ok(r.files.some((f) => f.relPath.startsWith("Component/")));
 });
 
 test("main reads graph.json, writes v3 vault, does not reject on zero-loss", () => {
@@ -176,7 +176,7 @@ test("main reads graph.json, writes v3 vault, does not reject on zero-loss", () 
   }
   assert.notEqual(code, 1, "should not reject a clean migration");
   // canonical フォルダに書かれている
-  assert.ok(existsSync(path.join(vaultDir, "Vein")), "Vein/ folder written");
+  assert.ok(existsSync(path.join(vaultDir, "Concern")), "Concern/ folder written");
   rmSync(work, { recursive: true, force: true });
 });
 
@@ -279,7 +279,7 @@ test("migrateV2Graph handles edge cases: empty graph, unknown/undefined type, ed
   assert.deepEqual(dropped.edges, []);
 });
 
-test("migrateV2Graph canonicalizes axis-2 ids and rewires edge from/to", () => {
+test("migrateV2Graph keeps already-canonical axis-2 ids and rewires edge from/to", () => {
   const v2 = {
     nodes: [
       { id: "system:acme", type: "System", title: "Acme" },
@@ -296,23 +296,23 @@ test("migrateV2Graph canonicalizes axis-2 ids and rewires edge from/to", () => {
   };
   const out = migrateV2Graph(v2);
   const byId = new Map(out.nodes.map((n) => [n.id, n]));
-  // 軸2 id の先頭 slug が新名に揃う
-  assert.ok(byId.has("vein:acme:auth"));
-  assert.ok(byId.has("pocket:acme:api"));
-  assert.ok(byId.has("stratum:acme:domain"));
-  assert.equal(byId.get("vein:acme:auth").type, "Vein");
+  // 軸2 id は既に canonical — 変換不要
+  assert.ok(byId.has("concern:acme:auth"));
+  assert.ok(byId.has("component:acme:api"));
+  assert.ok(byId.has("layer:acme:domain"));
+  assert.equal(byId.get("concern:acme:auth").type, "Concern");
   // 軸2以外の id は不変、System root は落ちる
   assert.ok(!byId.has("system:acme"));
   assert.ok(byId.has("decision:acme:x"));
-  // edge の from/to が新 id に連動更新される (edge id 自体は不変)
+  // edge の from/to は既に canonical (edge id 自体は不変)
   const e1 = out.edges.find((e) => e.id === "e:1");
-  assert.equal(e1.from, "vein:acme:auth");
-  assert.equal(e1.to, "pocket:acme:api");
+  assert.equal(e1.from, "concern:acme:auth");
+  assert.equal(e1.to, "component:acme:api");
   // contains (e:2) は落ちる
   assert.ok(!out.edges.some((e) => e.id === "e:2"), "contains dropped");
   const e3 = out.edges.find((e) => e.id === "e:3");
   assert.equal(e3.from, "decision:acme:x");
-  assert.equal(e3.to, "vein:acme:auth");
+  assert.equal(e3.to, "concern:acme:auth");
   // 入力非破壊
   assert.equal(v2.nodes[1].id, "concern:acme:auth");
   assert.equal(v2.edges[0].from, "concern:acme:auth");
@@ -336,9 +336,9 @@ test("migrateV2Graph applies caller-supplied semantic overrides (no blind rules)
   const n = out.nodes.find((x) => x.id === "goal:s:x");
   assert.equal(n.type, "Goal");
   assert.equal(n.title, "T", "他フィールドは保持");
-  // override 無しのノードは従来の機械変換 (Concern→Vein, concern:→vein:)
-  const c = out.nodes.find((x) => x.id === "vein:s:c");
-  assert.equal(c.type, "Vein");
+  // override 無しのノードは既に canonical (Concern/concern: は変換不要)
+  const c = out.nodes.find((x) => x.id === "concern:s:c");
+  assert.equal(c.type, "Concern");
   // edge は override どおり (向き反転 + 型変更)
   const e = out.edges[0];
   assert.equal(e.type, "has_premise");

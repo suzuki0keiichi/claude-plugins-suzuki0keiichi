@@ -221,12 +221,12 @@ test("v3 graph (Goal/crosscut/new edges) round-trips losslessly", () => {
       { id: "goal:acme:p99", type: "Goal", title: "p99 < 200ms", summary: "性能ゴール",
         category: "performance-efficiency" },
       { id: "decision:acme:shard", type: "Decision", title: "shard 採用", summary: "s" },
-      { id: "vein:acme:auth", type: "Vein", title: "認証", summary: "横断" },
+      { id: "concern:acme:auth", type: "Concern", title: "認証", summary: "横断" },
       { id: "file:acme:a.ts", type: "File", title: "a.ts" }
     ],
     edges: [
       { id: "e:1", type: "has_premise", from: "decision:acme:shard", to: "goal:acme:p99" },
-      { id: "e:3", type: "evidenced_by", from: "vein:acme:auth", to: "file:acme:a.ts" }
+      { id: "e:3", type: "evidenced_by", from: "concern:acme:auth", to: "file:acme:a.ts" }
     ]
   };
   const files = buildVaultFiles(graph);

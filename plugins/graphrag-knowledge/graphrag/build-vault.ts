@@ -272,8 +272,8 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   ).length;
   if (provisionalCount > 0) {
     console.error(
-      `[warn] 要約がテンプレのまま (summary_provisional): ${provisionalCount}件 (File / Pocket / Stratum 等) を vault に書き出す。` +
-      `意味の要約に書き換えて summary_provisional を外すまで、検索・vein-hint の品質は落ちたまま。`
+      `[warn] 要約がテンプレのまま (summary_provisional): ${provisionalCount}件 (File / Component / Layer 等) を vault に書き出す。` +
+      `意味の要約に書き換えて summary_provisional を外すまで、検索・concern-hint の品質は落ちたまま。`
     );
   }
   const files = buildVaultFiles(graph);

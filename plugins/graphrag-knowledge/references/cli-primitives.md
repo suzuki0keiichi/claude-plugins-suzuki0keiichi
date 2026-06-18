@@ -46,7 +46,7 @@ node graphrag/cli.ts evidence --request "<text>" [--limit N] [--neighbors N] [--
 
 direct_evidence (ranked) + graph_context (neighbors) + retrieval_policy + answer_instructions。`ask` の段上げ最終段で内部呼び出しされている。
 
-Goal / Constraint / Vein / Stratum / Pocket / Update / Delete の plan 雛形は `references/mutation-templates.md` (適用は `commit-mutation`)。
+Goal / Constraint / Concern / Layer / Component / Update / Delete の plan 雛形は `references/mutation-templates.md` (適用は `commit-mutation`)。
 
 ## index — 決定論索引 (git ls-files + role 分類 + 依存)
 
@@ -91,13 +91,13 @@ node graphrag/cli.ts vault-import <vault-dir> [<out.json>]
 
 vault から graph.json を再構築。**round-trip 等価性検証用** (vault 編集 → import → 元 graph と diff)。日常運用では使わない。
 
-## vein-hint — Vein の機械ヒント (embedding 近接クラスタリング)
+## concern-hint — Concern の機械ヒント (embedding 近接クラスタリング)
 
 ```sh
-node graphrag/cli.ts vein-hint --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
+node graphrag/cli.ts concern-hint --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
 ```
 
-embedding 距離で異なる Pocket をまたぐ File 群を Union-Find クラスタ化、candidate JSON を出力。**Vein 発見の主役は LLM の概念的モデリング** (`conceptual-pass.md` §2) であり、本コマンドはそのモデリング後の盲点チェック用。`carve` 内部で呼ぶ。閾値調整したい時のみ直叩き。
+embedding 距離で異なる Component をまたぐ File 群を Union-Find クラスタ化、candidate JSON を出力。**Concern 発見の主役は LLM の概念的モデリング** (`conceptual-pass.md` §2) であり、本コマンドはそのモデリング後の盲点チェック用。`carve` 内部で呼ぶ。閾値調整したい時のみ直叩き。
 
 ## edge-suggest-policy — binding / relations 候補の一括抽出
 
@@ -118,7 +118,7 @@ binding モード (既定): 各 Decision/OK/Risk/Constraint について embeddi
 node graphrag/cli.ts carving-check --graph <path> [--vector-index <path>] [--config <path>] [--json]
 ```
 
-連番 slug / Stratum 混入 / Pocket 網羅性 / 重複検出 / 紐付け不在 / embedding 距離による表記揺れ重複 / knowledge-floor (Goal・Constraint 0 件) / superseded-premise (現役ノードが終端 state ノードへ `has_premise`) を機械判定。ERROR があれば exit 1。`carve` の最終段で自動。`commit-mutation` (vault writer) は carving-check を内蔵しないので、carving を伴う mutation 後は必要に応じ手で叩く。
+連番 slug / Layer 混入 / Component 網羅性 / 重複検出 / 紐付け不在 / embedding 距離による表記揺れ重複 / knowledge-floor (Goal・Constraint 0 件) / superseded-premise (現役ノードが終端 state ノードへ `has_premise`) を機械判定。ERROR があれば exit 1。`carve` の最終段で自動。`commit-mutation` (vault writer) は carving-check を内蔵しないので、carving を伴う mutation 後は必要に応じ手で叩く。
 
 `--config <path>` でプロジェクト固有の allowed-orphan 免除設定 (`.graphrag/carving.json`) を指定する (省略時は graph パスからの規約解決)。免除会計 (各免除の根拠種別 `builtin:<name>` / `role:<role>` / `config:<path>`、config 由来件数、実装 File に占める免除比率) を text / JSON 出力に常時印字し、比率 > 15% で WARN。config の不正 (glob 文字 / reason・added 欠落) と stale-exemption (graph に無い path) は ERROR。閾値調整: `--jaccard-threshold` (0.4) / `--dominance-threshold` (0.7) / `--duplicate-threshold` (0.92)。
 
@@ -131,7 +131,7 @@ node graphrag/cli.ts carving-allow list [--config <path>]
 node graphrag/cli.ts carving-allow migrate --graph <path>   # 旧 builtin 該当 File を config エントリ案として出力 (書き込みなし)
 ```
 
-literal path のみ (glob/regex 文字はエラー)。`add` / `remove` は vault-lock を共用した原子書き (tmp+rename)。git repo 内なら git add+commit を試み、失敗は非致命で出力に注記。carving.json は Stratum/Vein/Pocket と同格の人間所有の概念層 — LLM は提案のみ可、追記は user 承認後。
+literal path のみ (glob/regex 文字はエラー)。`add` / `remove` は vault-lock を共用した原子書き (tmp+rename)。git repo 内なら git add+commit を試み、失敗は非致命で出力に注記。carving.json は Layer/Concern/Component と同格の人間所有の概念層 — LLM は提案のみ可、追記は user 承認後。
 
 ## harvest-history — git 履歴からの知識 candidate 決定論抽出
 
@@ -139,7 +139,7 @@ literal path のみ (glob/regex 文字はエラー)。`add` / `remove` は vault
 node graphrag/cli.ts harvest-history --root <repo> [--system <name>] [--out <path>]
 ```
 
-書き込みなし・決定論抽出のみ: (1) revert コミット → `RejectedOption` candidate (`suggested_slug` / `title` / `commits: [hash, subject, date]` / `note`)、(2) コメントマーカー HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk` candidate (`path` / `line` / `marker` / `text`)。vein-hint と同じ思想の candidate JSON — 採否は LLM が個別判断して typed-add する。手順は `references/conceptual-pass.md` の「知識軸シーディング」。
+書き込みなし・決定論抽出のみ: (1) revert コミット → `RejectedOption` candidate (`suggested_slug` / `title` / `commits: [hash, subject, date]` / `note`)、(2) コメントマーカー HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk` candidate (`path` / `line` / `marker` / `text`)。concern-hint と同じ思想の candidate JSON — 採否は LLM が個別判断して typed-add する。手順は `references/conceptual-pass.md` の「知識軸シーディング」。
 
 ## staleness-check — 知識ノードの陳腐化候補の機械抽出
 

@@ -842,7 +842,7 @@
         color: var(--ink);
       }
 
-      /* 地質断面図 */
+      /* 横断構造図 */
       .geo-wrap {
         margin: 40px 0 14px;
         border: 1px solid var(--line);
@@ -1807,7 +1807,7 @@
           がエンティティと関係を抽出してグラフ化し、グラフ上の距離が近い塊を「コミュニティ」として
           検出して要約を付ける、という<b>自動構築</b>のパイプラインです。このスキルは名前を借りつつ、コミュニティを事後的に
           発見する代わりに、型付きスキーマで<b>最初から構造を彫っておく</b>我流の亜種です。コミュニティ要約が担う「塊の意味」は
-          Stratum / Vein / Pocket とその description
+          Layer / Concern / Component とその description
           が担っているので、看板に偽りあり、とまでは言わないでいただけると幸いです。
           なお、コミュニティ方式をあえて採らなかった積極的な理由（構造ドリフトの検知）は
           §04 で述べます。
@@ -2096,7 +2096,7 @@
                 fill="#E3E8DB"
               />
               <text x="435" y="201" text-anchor="middle">
-                File/ Stratum/ Vein/ Pocket
+                File/ Layer/ Concern/ Component
               </text>
             </g>
             <text
@@ -2300,7 +2300,7 @@
         </div>
         <p class="sec-sub">
           3
-          つの系（構造・知識・横断）に分かれる。横断系は地質メタファーで命名されている。
+          つの系（構造・知識・横断）に分かれる。横断系は Layer / Concern / Component の 3 軸。
         </p>
 
         <div class="legend rv">
@@ -2426,43 +2426,41 @@
           </div>
           <div class="cards">
             <div class="ncard c-cross">
-              <span class="ty">Stratum</span><span class="ja">地層</span
-              ><span class="alias">旧 Layer</span>
+              <span class="ty">Layer</span><span class="ja">層</span>
               <p>
                 水平に積もる層＝アーキテクチャ層。「<b>どの層か</b>」（縦の位置）を持つ。
               </p>
             </div>
             <div class="ncard c-cross">
-              <span class="ty">Pocket</span><span class="ja">鉱塊</span
-              ><span class="alias">旧 Component</span>
+              <span class="ty">Component</span><span class="ja">部品</span>
               <p>
                 局所に凝集した塊＝パッケージ／モジュールのまとまり。「<b>どこにあるか</b>」（構造）を持つ。
               </p>
             </div>
             <div class="ncard c-cross">
-              <span class="ty">Vein</span><span class="ja">鉱脈</span
-              ><span class="alias">旧 Concern</span>
+              <span class="ty">Concern</span><span class="ja">横断関心</span>
               <p>
-                層も塊も貫いて走る筋＝横断的関心事。「<b>何を横断的に気にしているか</b>」を持ち、構造にも層にも縛られない。
+                層も部品も貫いて走る筋＝横断的関心事。「<b>何を横断的に気にしているか</b>」を持ち、構造にも層にも縛られない。
               </p>
             </div>
           </div>
         </div>
 
-        <h3 class="rv">なぜ地質メタファーか — Stratum ≠ Vein ≠ Pocket</h3>
+        <h3 class="rv">なぜ 3 軸か — Layer ≠ Concern ≠ Component</h3>
         <p class="body rv">
-          3 種を 1
+          3 軸を 1
           つの型に潰すと、ファイル移動やリファクタのたびに<b>アーキテクチャの意図が構造と心中します</b>。
-          地質の比喩はそのまま切り分けの軸になっています。3 種はいずれも
+          Layer（どの層か）・Component（どこにあるか）・Concern（何を横断的に気にしているか）は
+          互いに独立した切り分け軸です。3 種はいずれも
           <code>evidenced_by</code> で File を指し、
-          意図を必ず実体に接地させます。ファイルが動いても、層・塊・関心は生き残ります。
+          意図を必ず実体に接地させます。ファイルが動いても、層・部品・関心は生き残ります。
         </p>
 
         <div class="geo-wrap rv">
           <svg
             viewBox="0 0 820 400"
             font-family="Zen Kaku Gothic New, sans-serif"
-            aria-label="地質断面図: Stratum, Vein, Pocket の関係"
+            aria-label="横断構造図: Layer, Concern, Component の関係"
           >
             <defs>
               <marker
@@ -2492,7 +2490,7 @@
               stroke="#C7BCA3"
             />
             <g clip-path="url(#ground)">
-              <!-- 地層 (Stratum) -->
+              <!-- 層 (Layer) -->
               <path
                 d="M60 60 L620 60 L620 124 C 480 136, 340 116, 200 128 C 140 132, 90 128, 60 130 Z"
                 fill="#EAE0C8"
@@ -2509,7 +2507,7 @@
                 d="M60 274 C 92 272, 138 276, 195 272 C 335 260, 475 280, 620 268 L620 330 L60 330 Z"
                 fill="#C2B086"
               />
-              <!-- 鉱脈 (Vein): 層を貫く斜めの筋 -->
+              <!-- 横断関心 (Concern): 層を貫く斜めの筋 -->
               <path
                 d="M120 330 C 200 270, 260 230, 330 180 C 400 130, 450 95, 505 60 L545 60 C 490 100, 438 140, 368 190 C 298 240, 240 280, 158 330 Z"
                 fill="#A9BD92"
@@ -2531,7 +2529,7 @@
                 stroke-dasharray="6 4"
                 opacity=".7"
               />
-              <!-- 鉱塊 (Pocket) -->
+              <!-- 部品 (Component) -->
               <ellipse
                 cx="475"
                 cy="230"
@@ -2552,7 +2550,7 @@
               />
             </g>
 
-            <!-- 地表線 -->
+            <!-- 上端線 -->
             <line
               x1="48"
               y1="60"
@@ -2577,7 +2575,7 @@
               <line x1="600" y1="60" x2="594" y2="52" />
             </g>
 
-            <!-- ラベル: Stratum -->
+            <!-- ラベル: Layer -->
             <g>
               <line
                 x1="620"
@@ -2595,16 +2593,16 @@
                 fill="#33302A"
                 font-family="IBM Plex Mono, monospace"
               >
-                Stratum
+                Layer
               </text>
               <text x="676" y="170" font-size="11" fill="#5F594D">
-                地層 — 水平に積もる層
+                層 — 水平に積もるアーキテクチャ層
               </text>
               <text x="676" y="186" font-size="10.5" fill="#8B8374">
                 「どの層か」(縦の位置)
               </text>
             </g>
-            <!-- ラベル: Vein -->
+            <!-- ラベル: Concern -->
             <g>
               <line
                 x1="402"
@@ -2623,10 +2621,10 @@
                 fill="#33302A"
                 font-family="IBM Plex Mono, monospace"
               >
-                Vein
+                Concern
               </text>
               <text x="676" y="240" font-size="11" fill="#5F594D">
-                鉱脈 — 層を貫いて走る筋
+                横断関心 — 層を貫いて走る筋
               </text>
               <text x="676" y="256" font-size="10.5" fill="#8B8374">
                 横断的関心事。構造にも
@@ -2635,7 +2633,7 @@
                 層にも縛られない意図
               </text>
             </g>
-            <!-- ラベル: Pocket -->
+            <!-- ラベル: Component -->
             <g>
               <line
                 x1="510"
@@ -2654,10 +2652,10 @@
                 fill="#33302A"
                 font-family="IBM Plex Mono, monospace"
               >
-                Pocket
+                Component
               </text>
               <text x="676" y="314" font-size="11" fill="#5F594D">
-                鉱塊 — 局所に凝集した塊
+                部品 — 局所に凝集した塊
               </text>
               <text x="676" y="330" font-size="10.5" fill="#8B8374">
                 「どこにあるか」(構造)
@@ -2754,7 +2752,7 @@
         </div>
         <p class="flow-cap rv">
           横断 3 種はどれも <code>evidenced_by</code> で File
-          に接地する。ファイルが移動しても層・塊・鉱脈のノードは残り、<br />「この関心はどこに効いているか」を
+          に接地する。ファイルが移動しても層・部品・関心のノードは残り、<br />「この関心はどこに効いているか」を
           File 側を張り替えるだけで追従できる。
         </p>
 
@@ -2918,7 +2916,7 @@
               <li>
                 <span class="en">evidenced_by</span
                 ><span class="pair"
-                  ><span class="chip x">Stratum | Vein | Pocket</span
+                  ><span class="chip x">Layer | Concern | Component</span
                   ><span class="arrow">→</span
                   ><span class="chip f">File</span></span
                 >
@@ -3021,12 +3019,12 @@
                   ><span class="chip k">Decision</span
                   ><span class="arrow">→</span><span class="chip f">File</span
                   ><span class="chip k">Investigation | OK</span
-                  ><span class="chip x">Stratum | Vein | Pocket</span></span
+                  ><span class="chip x">Layer | Concern | Component</span></span
                 >
                 <span class="note"
                   >横断構造宛は「この部品／層／関心の<b>全体</b>に効く方針」。File
                   集合に張ると後から増えたファイルに方針が黙って効かなくなるため、正直でいられる一番低い高度（File
-                  → Pocket → Stratum / Vein）を選ぶ。</span
+                  → Component → Layer / Concern）を選ぶ。</span
                 >
               </li>
               <li>
@@ -3701,14 +3699,14 @@
         </p>
         <p class="body rv">
           実際のフィードバックは、不具合や考慮漏れが見つかった時に判明します。
-          「本来 Vein/Pocket があって、そこから Constraint がエッジで繋がっていれば、
+          「本来 Concern/Component があって、そこから Constraint がエッジで繋がっていれば、
           <code>ask</code> で引っ張れて防げた不具合だった」——
           この<b>「あるべきグラフ構造の不在」の検出</b>がフィードバックの本質です。
         </p>
         <p class="body rv">
           このスキルは、不具合や見落とし発見時に
           「グラフに適切な構造があれば回避できたか？ あるべきノードが存在しない状態か？」
-          を自問し、不足する Vein/Pocket とエッジを補う<b>Topology Gap Review</b> を備えています。
+          を自問し、不足する Concern/Component とエッジを補う<b>Topology Gap Review</b> を備えています。
           検索精度の改善ではなく、グラフのトポロジー自体を育てる行為が学習ループを閉じます。
         </p>
       </section>

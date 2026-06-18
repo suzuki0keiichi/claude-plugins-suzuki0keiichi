@@ -59,27 +59,26 @@ test("indexCodebase produces a schema-valid graph with rich File summaries", () 
 
     assert.ok(!graph.edges.some((e: any) => e.type === "contains"), "no contains edges");
 
-    // Pocket (旧 Component) = dependency community (graph distance), candidate for LLM naming.
-    // indexer は canonical 地質名を吐く (SKILL「新規は地質名で書く」)。
-    const component = graph.nodes.find((n: any) => n.type === "Pocket" && n.candidate === true);
-    assert.ok(component, "dependency-community Pocket candidate present");
+    // Component (旧 Pocket) = dependency community (graph distance), candidate for LLM naming.
+    const component = graph.nodes.find((n: any) => n.type === "Component" && n.candidate === true);
+    assert.ok(component, "dependency-community Component candidate present");
     assert.equal(component.signals?.kind, "dependency-community");
-    assert.ok(component.judgment_input?.member_files?.length >= 3, "Pocket carries >=3 member files for LLM judgment");
-    assert.equal(component.summary_provisional, true, "Pocket candidate summary (構成要素サマリ) is flagged provisional");
-    assert.ok(graph.edges.some((e: any) => e.type === "evidenced_by" && e.from === component.id), "Pocket evidenced_by File edges");
-    assert.ok(component.id.startsWith("pocket:"), "Pocket id uses canonical pocket: prefix");
+    assert.ok(component.judgment_input?.member_files?.length >= 3, "Component carries >=3 member files for LLM judgment");
+    assert.equal(component.summary_provisional, true, "Component candidate summary (構成要素サマリ) is flagged provisional");
+    assert.ok(graph.edges.some((e: any) => e.type === "evidenced_by" && e.from === component.id), "Component evidenced_by File edges");
+    assert.ok(component.id.startsWith("component:"), "Component id uses canonical component: prefix");
     // The a->b->c->d chain should land in one community.
     const memberPaths = new Set(component.judgment_input.member_files);
     assert.ok(["src/mod/a.ts", "src/mod/b.ts", "src/mod/c.ts"].every((p) => memberPaths.has(p)),
       `import chain clustered together: ${[...memberPaths].join(",")}`);
 
-    // Stratum (旧 Layer) = dependency-topology band (graph topology), candidate for LLM naming.
-    const layer = graph.nodes.find((n: any) => n.type === "Stratum" && n.candidate === true);
-    assert.ok(layer, "dependency-topology Stratum candidate present");
+    // Layer (旧 Stratum) = dependency-topology band (graph topology), candidate for LLM naming.
+    const layer = graph.nodes.find((n: any) => n.type === "Layer" && n.candidate === true);
+    assert.ok(layer, "dependency-topology Layer candidate present");
     assert.equal(layer.signals?.kind, "dependency-topology-band");
-    assert.ok(typeof layer.signals?.depth_band === "number", "Stratum carries a depth band");
-    assert.ok(layer.id.startsWith("stratum:"), "Stratum id uses canonical stratum: prefix");
-    assert.equal(layer.summary_provisional, true, "Stratum candidate summary (構成要素サマリ) is flagged provisional");
+    assert.ok(typeof layer.signals?.depth_band === "number", "Layer carries a depth band");
+    assert.ok(layer.id.startsWith("layer:"), "Layer id uses canonical layer: prefix");
+    assert.equal(layer.summary_provisional, true, "Layer candidate summary (構成要素サマリ) is flagged provisional");
 
     assert.ok(graph.nodes.filter((n: any) => n.type === "File").every((n: any) => n.change_status === "new"), "all new on first index");
   } finally {

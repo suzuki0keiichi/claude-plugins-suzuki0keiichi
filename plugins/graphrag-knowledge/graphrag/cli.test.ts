@@ -6,7 +6,7 @@ test("cli has expected primitive verbs", () => {
   const expected = [
     "brief", "search", "evidence", "index", "vector-index",
     "vault-build", "vault-import",
-    "vein-hint", "edge-suggest-policy", "carving-check",
+    "concern-hint", "edge-suggest-policy", "carving-check",
     "branch-merge", "world-refresh",
     "carving-allow", "harvest-history", "staleness-check"
   ];

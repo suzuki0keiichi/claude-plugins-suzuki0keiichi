@@ -268,7 +268,7 @@ test("loadRequiredVectorIndex throws when the index file is absent (semantic req
 });
 
 test("searchGraph does not match on node id (identifier excluded from search)", () => {
-  const graph = { nodes: [{ id: "concern:acme:auth", type: "Vein", title: "認証基盤" }], edges: [] };
+  const graph = { nodes: [{ id: "concern:acme:auth", type: "Concern", title: "認証基盤" }], edges: [] };
   // "concern" は id にしか無い (title は認証基盤)。id 除外なら一致しない。
   const m = searchGraph(graph, "concern", { limit: 10 });
   assert.equal(m.length, 0, "id token should not produce a match");
@@ -327,12 +327,12 @@ test("searchGraph: active (non-terminal) state is not demoted", () => {
 });
 
 test("searchGraph does not match on node type name (type is a filter, not search text)", () => {
-  const graph = { nodes: [{ id: "n1", type: "Vein", title: "認証基盤" }], edges: [] };
-  // "Vein" は title に無く type のみ。文字一致の対象から type を外せば一致しない。
-  const m = searchGraph(graph, "Vein", { limit: 10 });
+  const graph = { nodes: [{ id: "n1", type: "Concern", title: "認証基盤" }], edges: [] };
+  // "Concern" は title に無く type のみ。文字一致の対象から type を外せば一致しない。
+  const m = searchGraph(graph, "Concern", { limit: 10 });
   assert.equal(m.length, 0, "type name should not be a lexical match target");
   // type での絞り込みは types フィルタで引き続き可能
-  const filtered = searchGraph(graph, "認証", { limit: 10, types: ["Vein"] });
+  const filtered = searchGraph(graph, "認証", { limit: 10, types: ["Concern"] });
   assert.equal(filtered.length, 1);
 });
 

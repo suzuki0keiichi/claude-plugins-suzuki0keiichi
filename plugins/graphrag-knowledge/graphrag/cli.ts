@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 const PRIMITIVE_VERBS = [
   "brief", "search", "evidence", "index", "vector-index",
   "vault-build", "vault-import",
-  "vein-hint", "edge-suggest-policy", "carving-check",
+  "concern-hint", "edge-suggest-policy", "carving-check",
   "branch-merge", "world-refresh",
   "carving-allow", "harvest-history", "staleness-check"
 ] as const;
@@ -45,7 +45,7 @@ const PRIMITIVE_FILE_MAP: Record<PrimitiveVerb, { file: string; exportName?: str
   "vector-index": { file: "./build-vector-index.ts" },
   "vault-build": { file: "./build-vault.ts" },
   "vault-import": { file: "./import-vault.ts" },
-  "vein-hint": { file: "./suggest-vein-hints.ts" },
+  "concern-hint": { file: "./suggest-concern-hints.ts" },
   "edge-suggest-policy": { file: "./suggest-policy-edges.ts" },
   "carving-check": { file: "./check-carving.ts" },
   "branch-merge": { file: "./branch-merge.ts" },
@@ -84,12 +84,14 @@ export async function runCli(argv: string[]) {
     printHelp();
     process.exit(verb ? 0 : 2);
   }
-  if (isPrimitiveVerb(verb)) {
-    await dispatchPrimitive(verb, rest);
+  const VERB_ALIASES: Record<string, string> = { "vein-hint": "concern-hint" };
+  const resolved = VERB_ALIASES[verb] ?? verb;
+  if (isPrimitiveVerb(resolved)) {
+    await dispatchPrimitive(resolved, rest);
     return;
   }
-  if (isHeadlineVerb(verb)) {
-    await dispatchHeadline(verb, rest);
+  if (isHeadlineVerb(resolved)) {
+    await dispatchHeadline(resolved, rest);
     return;
   }
   process.stderr.write(`unknown verb: ${verb}\n`);

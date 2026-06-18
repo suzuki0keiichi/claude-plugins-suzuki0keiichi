@@ -31,9 +31,9 @@ export const NODE_TYPES = [
   "OperationalKnowledge",
   "Investigation",
   "ConversationChunk",
-  "Stratum",
-  "Vein",
-  "Pocket"
+  "Layer",
+  "Concern",
+  "Component"
 ];
 
 // v3.3: contains (唯一の整理エッジ) は撤去。所属は vault の存在と id 規約が既に持つ。
@@ -91,16 +91,16 @@ const ANY_KNOWLEDGE_NODE: NodeType[] = [
 ];
 
 const ANY_CROSSCUT_NODE: NodeType[] = [
-  "Stratum",
-  "Vein",
-  "Pocket"
+  "Layer",
+  "Concern",
+  "Component"
 ];
 
-// engineering 互換 alias。canonical は Stratum/Vein/Pocket。
+// 地質メタファー互換 alias。canonical は Layer/Concern/Component。
 export const NODE_TYPE_ALIASES: Record<string, NodeType> = {
-  Layer: "Stratum",
-  Concern: "Vein",
-  Component: "Pocket"
+  Stratum: "Layer",
+  Vein: "Concern",
+  Pocket: "Component"
 };
 
 export function canonicalType(t: string | undefined, schema?: SchemaDefinition): NodeType | undefined {
@@ -147,7 +147,7 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
   constrains: [
     ["Constraint", ["Decision", "File", "OperationalKnowledge"]]
   ],
-  // 横断構造 (Stratum/Vein/Pocket) を宛先に許すのは「この部品/層/関心の全体に効く」
+  // 横断構造 (Layer/Concern/Component) を宛先に許すのは「この部品/層/関心の全体に効く」
   // という方針/リスクの正しい高度を schema に用意するため。File 集合に張ると後から
   // 増えたファイルに方針が黙って効かなくなる。乱用ガードは高度のはしご (正直で
   // いられる一番低い高度を選ぶ) + 自動付与しない + carving-check の次数 WARN。
@@ -246,7 +246,7 @@ export const DEFAULT_SCHEMA: SchemaDefinition = {
     distilled: ["Decision", "RejectedOption", "Risk", "OperationalKnowledge"],
     duplicateCheck: [
       "Decision", "RejectedOption", "Constraint", "Goal", "Risk",
-      "OperationalKnowledge", "Investigation", "Vein", "Pocket", "Stratum"
+      "OperationalKnowledge", "Investigation", "Concern", "Component", "Layer"
     ],
     staleness: ["Decision", "Constraint", "Risk", "OperationalKnowledge"],
     premiseCandidate: ["Decision", "Constraint", "Goal", "OperationalKnowledge"],

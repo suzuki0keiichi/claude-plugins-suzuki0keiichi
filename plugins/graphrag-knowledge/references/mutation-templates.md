@@ -9,34 +9,34 @@ typed-add (`add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-r
 `add-goal` / `add-constraint`) でカバーされる頻出ケースは CLI 引数だけで済むので本テンプレートは不要。
 **Goal / Constraint も `add-goal` / `add-constraint` で足りる**ようになった (エッジは `--refines` /
 `--constrains` 等のフラグで張る。SKILL.md §典型 Recipe)。以下の Goal / Constraint テンプレは
-複数ノード/エッジを一括で組む複雑ケース用に残置する。残る **Vein (横断関心)** と
+複数ノード/エッジを一括で組む複雑ケース用に残置する。残る **Concern (横断関心)** と
 **Update / Delete / 方針転換** 系は typed-add に無いので本テンプレートを使う。
 
 ---
 
-## Vein (横断関心、evidenced_by で複数 File を指す)
+## Concern (横断関心、evidenced_by で複数 File を指す)
 
-地質メタファーの「鉱脈」── 層 (Stratum) や塊 (Pocket) を貫いて走る横断的関心。エッジは evidenced_by のみ。
+層 (Layer) や塊 (Component) を貫いて走る横断的関心。エッジは evidenced_by のみ。
 
 ```json
 {
-  "reason": "新規 Vein <slug>",
+  "reason": "新規 Concern <slug>",
   "nodes": [
-    { "op": "create", "id": "vein:<system>:<slug>", "type": "Vein", "title": "...", "summary": "...",
+    { "op": "create", "id": "concern:<system>:<slug>", "type": "Concern", "title": "...", "summary": "...",
       "description": "(任意) 蒸留散文。この関心が何を/なぜ横断するか。vault body `## 説明` に出る" }
   ],
   "edges": [
-    { "op": "create", "id": "vein_<slug>__evidenced_by__file_<file_a_slug>",
-      "type": "evidenced_by", "from": "vein:<system>:<slug>", "to": "file:<system>:<pathA>" },
-    { "op": "create", "id": "vein_<slug>__evidenced_by__file_<file_b_slug>",
-      "type": "evidenced_by", "from": "vein:<system>:<slug>", "to": "file:<system>:<pathB>" }
+    { "op": "create", "id": "concern_<slug>__evidenced_by__file_<file_a_slug>",
+      "type": "evidenced_by", "from": "concern:<system>:<slug>", "to": "file:<system>:<pathA>" },
+    { "op": "create", "id": "concern_<slug>__evidenced_by__file_<file_b_slug>",
+      "type": "evidenced_by", "from": "concern:<system>:<slug>", "to": "file:<system>:<pathB>" }
   ]
 }
 ```
 
-- `evidenced_by` は Vein → File (schema 上 `[ANY_CROSSCUT_NODE, "File"]`、ANY_CROSSCUT = Stratum/Vein/Pocket)。`Stratum` / `Pocket` の手動作成も同形 (evidenced_by で File に接地)。
-- 2-5 個程度の File を束ねる典型。1 File しか繋がないなら Vein にせず File の summary に書き込むだけにする。
-- **`summary` vs `description`**: `summary` = 1 行見出し (frontmatter・検索主担体)。`description` = 蒸留散文で **原則どのノードにも書く** (vault body に `## 説明` が round-trip marker 付きで出る・embedding にも入る)。集合系 (Vein 等が特に重要) は構成要素の列挙でなく「まとまりとして結局何なのか= what の正体」を、判断系 (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge) は「なぜそう決めたか」を書く。判断系の生情報 (会話ログ・Slack URL 等) は捨てず `raw_content` か raw_content を持つ ConversationChunk/Investigation を source backing として残す。summary 丸写しにしかならない時だけ `description` を省く (空でも body に `## 説明` は出ない)。Goal / Constraint も同形。typed-add (`add-*`) でも `--description "..."` で指定できる。
+- `evidenced_by` は Concern → File (schema 上 `[ANY_CROSSCUT_NODE, "File"]`、ANY_CROSSCUT = Layer/Concern/Component)。`Layer` / `Component` の手動作成も同形 (evidenced_by で File に接地)。
+- 2-5 個程度の File を束ねる典型。1 File しか繋がないなら Concern にせず File の summary に書き込むだけにする。
+- **`summary` vs `description`**: `summary` = 1 行見出し (frontmatter・検索主担体)。`description` = 蒸留散文で **原則どのノードにも書く** (vault body に `## 説明` が round-trip marker 付きで出る・embedding にも入る)。集合系 (Concern 等が特に重要) は構成要素の列挙でなく「まとまりとして結局何なのか= what の正体」を、判断系 (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge) は「なぜそう決めたか」を書く。判断系の生情報 (会話ログ・Slack URL 等) は捨てず `raw_content` か raw_content を持つ ConversationChunk/Investigation を source backing として残す。summary 丸写しにしかならない時だけ `description` を省く (空でも body に `## 説明` は出ない)。Goal / Constraint も同形。typed-add (`add-*`) でも `--description "..."` で指定できる。
 
 ## Goal (システムの目的因・到達点。v2 の Requirement を吸収)
 
@@ -159,7 +159,7 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 ```
 
 `validateGraph` (schema.ts) が:
-- 未知の node type / edge type を拒否 (旧名 Layer/Concern/Component は `canonicalType` で Stratum/Vein/Pocket に正規化され通る)
+- 未知の node type / edge type を拒否 (旧名 Stratum/Vein/Pocket は `canonicalType` で Layer/Concern/Component に正規化され通る)
 - 未許可の (from-type, to-type) 組み合わせを拒否
 - evidence backing が無い Decision/RejectedOption/Risk/OperationalKnowledge を拒否 (enforceSourceBacking)
 - 同じ id の重複 create を拒否

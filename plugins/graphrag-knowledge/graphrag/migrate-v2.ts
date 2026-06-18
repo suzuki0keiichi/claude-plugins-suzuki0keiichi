@@ -12,12 +12,12 @@ export interface Graph {
   edges?: Rec[];
 }
 
-// id 規約 `<typeSlug>:<system>:<slug>` の先頭 typeSlug を軸2の旧名→新名へ。
-// NODE_TYPE_ALIASES (型名) に対応する小文字 slug。
+// id 規約 `<typeSlug>:<system>:<slug>` の先頭 typeSlug を canonical slug へ。
+// NODE_TYPE_ALIASES (型名) に対応する小文字 slug。canonical は layer/concern/component。
 const ID_SLUG_ALIASES: Record<string, string> = {
-  layer: "stratum",
-  concern: "vein",
-  component: "pocket"
+  stratum: "layer",
+  vein: "concern",
+  pocket: "component"
 };
 
 // id の先頭セグメント (最初の `:` まで) が軸2旧 slug なら新 slug に置換。
@@ -38,8 +38,8 @@ export interface MigrateOverrides {
 }
 
 // v2 graph → v3 graph。
-// (1) 機械変換: 軸2 の type/id を canonical 化 (Layer/Concern/Component →
-//     Stratum/Vein/Pocket、id 先頭 slug も)、edge の from/to を連動更新。
+// (1) 機械変換: 軸2 の type/id を canonical 化 (Stratum/Vein/Pocket →
+//     Layer/Concern/Component、id 先頭 slug も)、edge の from/to を連動更新。
 // (2) 意味変換: opts.nodeOverrides / edgeOverrides で呼び出し側が明示した変換を
 //     適用 (Requirement→Goal 等の意味判断は盲目ルールにせず override で渡す)。
 // 非軸2型・他フィールド・top-level メタ・edge id は verbatim。入力は破壊しない。

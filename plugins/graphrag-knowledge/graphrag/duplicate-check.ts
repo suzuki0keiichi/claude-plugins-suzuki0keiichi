@@ -22,9 +22,9 @@ export const DUPLICATE_CHECK_NODE_TYPES = [
   "Risk",
   "OperationalKnowledge",
   "Investigation",
-  "Vein",
-  "Pocket",
-  "Stratum"
+  "Concern",
+  "Component",
+  "Layer"
 ] as const;
 
 const DUPLICATE_CHECK_TYPE_SET = new Set<string>(DUPLICATE_CHECK_NODE_TYPES);
