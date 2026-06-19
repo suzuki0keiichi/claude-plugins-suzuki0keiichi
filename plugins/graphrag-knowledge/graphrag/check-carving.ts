@@ -18,6 +18,7 @@
 //   C3. allowed-orphan の設定化: .graphrag/carving.json (literal path 免除) を統合し、
 //       config 不正/stale を ERROR、builtin 重複と免除比率 >15% を WARN。免除会計を常時印字。
 //   C1. knowledge-floor: Goal 0 件 / Constraint 0 件は WARN (知識軸が未シーディング)。
+//   C1b. goal-island: Goal with 0 incoming has_premise edges → WARN (Goal disconnected from Decisions → code).
 //   B2'. superseded-premise: 現役ノードが終端 state のノードへ has_premise している組は WARN。
 //
 // Check items (project vault, run additionally when --schema project is specified):
@@ -840,6 +841,27 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       rule: "knowledge-floor-constraint-missing",
       message: `Constraint が 0 件。design-review の scope-creep / roadmap 観点が無効な状態。conceptual-pass の知識軸シーディングを実施せよ。`,
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // (C1b) Goal island: Goal with no incoming has_premise from Decision/OK.
+  // Without this bridge, Goal is disconnected from the code (Decision →sets_policy_for→ File).
+  // Common in newly carved vaults where Decisions haven't been extracted yet.
+  // ─────────────────────────────────────────────────────────────
+  const goals = graph.nodes.filter((n: any) => canonicalType(n.type) === "Goal");
+  const premiseEdgesToGoal = new Set(
+    graph.edges
+      .filter((e: any) => e.type === "has_premise")
+      .map((e: any) => e.to)
+  );
+  for (const g of goals) {
+    if (!premiseEdgesToGoal.has(g.id)) {
+      findings.push({
+        severity: "WARN",
+        rule: "goal-island",
+        message: `Goal "${g.title ?? g.id}" has no incoming has_premise edge — no Decision references this Goal. Bridge it to Decisions to connect Goal→code.`,
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
