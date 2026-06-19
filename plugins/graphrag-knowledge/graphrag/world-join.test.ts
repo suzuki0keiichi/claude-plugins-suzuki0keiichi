@@ -14,6 +14,10 @@ function makeVault(root: string, name: string, profile?: string): string {
   return vaultDir;
 }
 
+function graphragDirOf(vaultDir: string): string {
+  return path.dirname(vaultDir);
+}
+
 function makeWorldDir(root: string): string {
   const worldDir = path.join(root, "world");
   mkdirSync(worldDir, { recursive: true });
@@ -85,7 +89,7 @@ test("worldJoin creates world.json with slug when VAULT.md has vault_slug", asyn
     const vaultDir = makeVault(root, "repo-a", profile);
     const worldDir = makeWorldDir(root);
 
-    const result = await worldJoin({ vaultDir, worldDir });
+    const result = await worldJoin({ vaultDir, worldDir, graphragDir: graphragDirOf(vaultDir) });
 
     assert.equal(result.world_json_updated, true);
     assert.equal(result.vault_slug, "repo-a");
@@ -106,7 +110,7 @@ test("worldJoin creates world.json without slug when VAULT.md has no vault_slug"
     const vaultDir = makeVault(root, "repo-a", profile);
     const worldDir = makeWorldDir(root);
 
-    const result = await worldJoin({ vaultDir, worldDir });
+    const result = await worldJoin({ vaultDir, worldDir, graphragDir: graphragDirOf(vaultDir) });
 
     assert.equal(result.vault_slug, null);
     assert.match(result.message, /no vault_slug/);
@@ -119,18 +123,30 @@ test("worldJoin creates world.json without slug when VAULT.md has no vault_slug"
   }
 });
 
-test("worldJoin writes .env with GRAPHRAG_WORLD_DIR", async () => {
+test("worldJoin writes .env to the graphragDir, not the vault parent", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "grag-join-"));
   try {
-    const vaultDir = makeVault(root, "repo-a");
+    // Simulate external vault: vault is in a different tree than the local .graphrag
+    const localGraphrag = path.join(root, "local-project", ".graphrag");
+    mkdirSync(localGraphrag, { recursive: true });
+
+    const externalRoot = mkdtempSync(path.join(tmpdir(), "grag-ext-"));
+    const vaultDir = path.join(externalRoot, "vault");
+    mkdirSync(vaultDir, { recursive: true });
+
     const worldDir = makeWorldDir(root);
 
-    const result = await worldJoin({ vaultDir, worldDir });
+    const result = await worldJoin({ vaultDir, worldDir, graphragDir: localGraphrag });
     assert.equal(result.env_updated, true);
+    assert.equal(result.env_path, path.join(localGraphrag, ".env"));
 
-    const graphragDir = path.dirname(vaultDir);
-    const envContent = readFileSync(path.join(graphragDir, ".env"), "utf8");
-    assert.match(envContent, new RegExp(`GRAPHRAG_WORLD_DIR=${path.resolve(worldDir).replace(/[/\\]/g, "\\$&")}`));
+    const envContent = readFileSync(path.join(localGraphrag, ".env"), "utf8");
+    assert.match(envContent, /GRAPHRAG_WORLD_DIR/);
+
+    // Ensure it did NOT write to the external vault's parent
+    assert.equal(existsSync(path.join(externalRoot, ".env")), false);
+
+    rmSync(externalRoot, { recursive: true, force: true });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -149,7 +165,7 @@ test("worldJoin appends vault to existing world.json without duplicating", async
       JSON.stringify({ vaults: [path.resolve(vaultA)] }, null, 2)
     );
 
-    const result = await worldJoin({ vaultDir: vaultB, worldDir });
+    const result = await worldJoin({ vaultDir: vaultB, worldDir, graphragDir: graphragDirOf(vaultB) });
     assert.equal(result.world_json_updated, true);
 
     const worldJson = JSON.parse(readFileSync(path.join(worldDir, "world.json"), "utf8"));
@@ -168,9 +184,10 @@ test("worldJoin is idempotent (no-op when already joined)", async () => {
     const profile = `---\nname: repo-a\nvault_slug: repo-a\n---\nA.\n`;
     const vaultDir = makeVault(root, "repo-a", profile);
     const worldDir = makeWorldDir(root);
+    const graphragDir = graphragDirOf(vaultDir);
 
-    await worldJoin({ vaultDir, worldDir });
-    const result = await worldJoin({ vaultDir, worldDir });
+    await worldJoin({ vaultDir, worldDir, graphragDir });
+    const result = await worldJoin({ vaultDir, worldDir, graphragDir });
 
     assert.equal(result.world_json_updated, false);
     assert.equal(result.env_updated, false);
@@ -188,7 +205,7 @@ test("worldJoin warns when VAULT.md is missing", async () => {
     const vaultDir = makeVault(root, "repo-a"); // no profile
     const worldDir = makeWorldDir(root);
 
-    const result = await worldJoin({ vaultDir, worldDir });
+    const result = await worldJoin({ vaultDir, worldDir, graphragDir: graphragDirOf(vaultDir) });
     assert.match(result.message, /VAULT\.md not found/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -201,7 +218,7 @@ test("worldJoin creates world directory if it does not exist", async () => {
     const vaultDir = makeVault(root, "repo-a");
     const worldDir = path.join(root, "nonexistent", "world");
 
-    const result = await worldJoin({ vaultDir, worldDir });
+    const result = await worldJoin({ vaultDir, worldDir, graphragDir: graphragDirOf(vaultDir) });
     assert.equal(result.world_json_updated, true);
     assert.ok(existsSync(path.join(worldDir, "world.json")));
   } finally {

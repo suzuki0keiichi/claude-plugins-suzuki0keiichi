@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadWorldConfig, resolveWorldDir, WORLD_FILE, vaultProfilePath } from "./world.ts";
@@ -24,6 +24,25 @@ function resolveVaultDir(flagValue?: string): string | undefined {
 
 function normalizeVaultPaths(config: { vaults: { path: string }[] }): string[] {
   return config.vaults.map((v) => path.resolve(v.path));
+}
+
+/**
+ * cwd から上方向に `.graphrag` ディレクトリを探す。
+ * discoverAndLoadGraphragEnv と同じ探索方式。
+ * 見つからなければ cwd 直下に `.graphrag` を返す（新規作成用）。
+ */
+function discoverGraphragDir(cwd: string = process.cwd()): string {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const candidate = path.join(dir, ".graphrag");
+    if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.join(path.resolve(cwd), ".graphrag");
 }
 
 /**
@@ -118,7 +137,8 @@ export async function worldJoin(options: {
   }
 
   // .graphrag/.env に GRAPHRAG_WORLD_DIR を書く
-  const graphragDir = options.graphragDir ?? path.dirname(resolvedVault);
+  // cwd から上方向に .graphrag/ を探す（vault が外部リポジトリにあっても LOCAL の .env に書く）
+  const graphragDir = options.graphragDir ?? discoverGraphragDir();
   const envPath = path.join(graphragDir, ".env");
   let envUpdated = false;
 
