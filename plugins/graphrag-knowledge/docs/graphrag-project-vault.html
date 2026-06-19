@@ -647,6 +647,49 @@
       .foot code {
         background: var(--paper-3);
       }
+
+      /* 知的伝統 → design constraint */
+      .trad {
+        list-style: none;
+        margin: 24px 0 28px;
+        border-top: 1px solid var(--line);
+        max-width: 56em;
+      }
+      .trad li {
+        display: grid;
+        grid-template-columns: 230px 1fr;
+        gap: 18px;
+        padding: 13px 4px;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+        align-items: baseline;
+      }
+      .trad .src {
+        font-weight: 700;
+        color: var(--ink);
+        font-size: 13px;
+        font-family: var(--serif);
+      }
+      .trad .src small {
+        display: block;
+        font-weight: 400;
+        color: var(--ink-faint);
+        font-size: 11px;
+        font-family: var(--sans);
+      }
+      .trad .to {
+        color: var(--ink-soft);
+        line-height: 1.8;
+      }
+      .trad .to b {
+        color: var(--ink);
+      }
+      @media (max-width: 700px) {
+        .trad li {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -671,6 +714,9 @@
           </li>
           <li>
             <a href="#xref"><span class="no">04</span>cross-vault ref</a>
+          </li>
+          <li>
+            <a href="#traditions"><span class="no">05</span>知的背景</a>
           </li>
         </ul>
       </nav>
@@ -1105,7 +1151,7 @@
               <li>
                 <span class="en">has_premise</span
                 ><span class="pair"
-                  ><span class="chip k">Decision | OK | Risk</span
+                  ><span class="chip k">Decision | OK | Risk | Goal</span
                   ><span class="chip p">Task | Assumption</span
                   ><span class="arrow">→</span
                   ><span class="chip k">Decision | Constraint | Goal | OK</span
@@ -1442,6 +1488,95 @@
         <p class="fineprint rv">
           <b>VAULT.md の設定。</b>project vault の VAULT.md には <code>schema: project</code> と <code>vault_slug</code> が必要。
           <code>vault_slug_aliases</code> でリネーム時の後方互換を確保できる。
+        </p>
+      </section>
+
+      <!-- ═══════════ §05 知的背景 ═══════════ -->
+      <section id="traditions">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 05</span>
+          <h2>知的背景 — なぜこの構造か</h2>
+        </div>
+        <p class="sec-sub">
+          既存の知的伝統から design constraint を抽出した。1:1 の対応表ではなく、設計判断の発想源として。
+        </p>
+
+        <ul class="trad rv">
+          <li>
+            <span class="src"
+              >PMI / PMBOK<small
+                >プロジェクトの定義</small
+              ></span
+            ><span class="to"
+              >「独自の成果を生む一時的な取り組み」→
+              <b>vault = 時限イニシアチブ</b>。Goal が achieved / abandoned で vault が閉じる</span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >OKR<small
+                >Objectives and Key Results</small
+              ></span
+            ><span class="to"
+              >Objective は方向、Key Result は判定基準 →
+              <b>Goal の二層パターン</b>: vision Goal（active のまま）+ gate Goal（achieved / abandoned）を refines で接続</span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >PMBOK リスクマネジメント<small
+                >確率 × 影響度 / エビデンス階層</small
+              ></span
+            ><span class="to"
+              >前提の確信度を段階で管理する →
+              <b>Assumption の certainty 4 段階</b>（Established / Expected / Assumed / Speculative）</span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >Norman<small
+                >アフォーダンス理論</small
+              ></span
+            ><span class="to"
+              >存在するアフォーダンスは使われる（誤用含む）→
+              <b>状態語彙の意図的削減</b>。「あるからいけない」— 不要な状態を置かないことで誤用を防ぐ</span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >Dijkstra<small
+                >関心の分離 (1974)</small
+              ></span
+            ><span class="to"
+              >モジュールを横断する関心事は独立して扱う →
+              <b>Theme</b> をプロジェクト横断の aspect として切り出す</span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >状態機械理論<small
+                >不可逆遷移とイベントソーシング</small
+              ></span
+            ><span class="to"
+              >遷移を不可逆にすれば履歴が自然に残る →
+              <b>Agreement の前進のみ状態</b>。撤回は expire → 新規 exploring で履歴を保全</span
+            >
+          </li>
+          <li>
+            <span class="src"
+              >ソフトウェアプロダクトライン<small
+                >Clements &amp; Northrop (2001)</small
+              ></span
+            ><span class="to"
+              >バリアントは線形に置き換わるのではなく共存する →
+              <b>Deliverable は「版」ではなく「製品モデル」</b>。用途別に並立する</span
+            >
+          </li>
+        </ul>
+
+        <p class="body rv">
+          overview の §04 と同様、これらは対応表による正当化ではない。
+          「なぜこの型にこの制約を課したか」を辿れるようにする発想源の記録である。
         </p>
       </section>
     </main>
