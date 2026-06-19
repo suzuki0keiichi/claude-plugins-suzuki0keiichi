@@ -58,7 +58,8 @@ export const EDGE_TYPES = [
   "supersedes",
   "reduces_risk",
   "risks_in",
-  "evidenced_by"
+  "evidenced_by",
+  "targets"
 ];
 
 export type NodeType = typeof NODE_TYPES[number];
@@ -173,6 +174,9 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
   ],
   risks_in: [
     ["Risk", ["Decision", "File", "OperationalKnowledge", "Investigation", "Deliverable", ...ANY_CROSSCUT_NODE]]
+  ],
+  targets: [
+    ["Goal", "Deliverable"]
   ]
 };
 
