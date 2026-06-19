@@ -182,3 +182,116 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 - `suggestions.binding_debt`: bind 無し knowledge ノード総数 (carving-check #9 と同定義、Constraint 拡張込み) を整数 1 つで。増えていたら未紐付けの知識が溜まっている合図。
 
 いずれも「判断して確定 or 理由を持って見送る」。提案をそのまま無言で放置しない (見送るなら見送る理由が言える状態にする)。
+
+---
+
+## Project Vault Templates (`schema: project`)
+
+Project vaults use a different node/edge set from system vaults. The following templates show common patterns. For the full schema, see `$REF/schema-quickref-project.md`.
+
+### Initial population (batch creation)
+
+Typical initial setup for a project vault. Note: `Assumption` requires `certainty` field.
+
+```json
+{
+  "reason": "Initial setup for <project name>",
+  "nodes": [
+    { "op": "create", "id": "goal:<sys>:main-objective", "type": "Goal",
+      "title": "...", "summary": "...", "state": "active" },
+    { "op": "create", "id": "milestone:<sys>:target-date", "type": "Milestone",
+      "title": "...", "summary": "...", "state": "planned" },
+    { "op": "create", "id": "assumption:<sys>:key-premise", "type": "Assumption",
+      "title": "...", "summary": "...", "certainty": "Expected",
+      "description": "Why this certainty level: ..." },
+    { "op": "create", "id": "stakeholder:<sys>:lead", "type": "Stakeholder",
+      "title": "...", "summary": "..." },
+    { "op": "create", "id": "agreement:<sys>:partner-contract", "type": "Agreement",
+      "title": "...", "summary": "...", "state": "active",
+      "raw_content": "Contract details from source doc...",
+      "raw_content_status": "copied_from_summary" },
+    { "op": "create", "id": "task:<sys>:key-work", "type": "Task",
+      "title": "...", "summary": "...", "state": "planned" },
+    { "op": "create", "id": "resource:<sys>:shared-infra", "type": "Resource",
+      "title": "...", "summary": "...",
+      "description": "category: asset" },
+    { "op": "create", "id": "source:<sys>:meeting-notes", "type": "Source",
+      "title": "...", "summary": "...",
+      "description": "url: https://...\nfetched_at: 2026-06-18\nsource_kind: document" }
+  ],
+  "edges": [
+    { "op": "create", "id": "edge:goal-targets-milestone",
+      "type": "targets", "from": "goal:<sys>:main-objective", "to": "milestone:<sys>:target-date" },
+    { "op": "create", "id": "edge:goal-premise-assumption",
+      "type": "has_premise", "from": "goal:<sys>:main-objective", "to": "assumption:<sys>:key-premise" },
+    { "op": "create", "id": "edge:task-achieves-goal",
+      "type": "achieves", "from": "task:<sys>:key-work", "to": "goal:<sys>:main-objective" },
+    { "op": "create", "id": "edge:task-requires-resource",
+      "type": "requires", "from": "task:<sys>:key-work", "to": "resource:<sys>:shared-infra" },
+    { "op": "create", "id": "edge:stakeholder-responsible",
+      "type": "responsible_for", "from": "stakeholder:<sys>:lead", "to": "task:<sys>:key-work" },
+    { "op": "create", "id": "edge:stakeholder-party",
+      "type": "party_to", "from": "stakeholder:<sys>:lead", "to": "agreement:<sys>:partner-contract" },
+    { "op": "create", "id": "edge:agreement-derived",
+      "type": "derived_from", "from": "agreement:<sys>:partner-contract", "to": "source:<sys>:meeting-notes" }
+  ]
+}
+```
+
+**Source backing for Agreement**: `Agreement` → `derived_from` → `Source` is the standard pattern. When `derived_from` type pairs don't allow direct linking, use `raw_content` + `raw_content_status: copied_from_summary` on the Agreement node itself as a workaround.
+
+### Cross-vault ref (referencing system vault Deliverables)
+
+```json
+{
+  "reason": "Wire cross-vault dependency to system vault Deliverable",
+  "nodes": [],
+  "edges": [
+    { "op": "create", "id": "edge:task-requires-deliverable",
+      "type": "requires",
+      "from": "task:<sys>:integration-work",
+      "to": "vault:<system-vault-slug>/deliverable:<system>:<slug>" }
+  ]
+}
+```
+
+The `vault:` prefix in `to` skips local existence and type-pair checks. The target Deliverable must exist in the referenced system vault (create thin stubs in Step 0 if needed).
+
+### Theme (cross-project concern)
+
+```json
+{
+  "reason": "Add cross-project theme",
+  "nodes": [
+    { "op": "create", "id": "theme:<sys>:shared-concern", "type": "Theme",
+      "title": "...", "summary": "...",
+      "description": "Why this is a cross-project concern, not just a local edge" }
+  ],
+  "edges": [
+    { "op": "create", "id": "edge:theme-encompasses-goal",
+      "type": "encompasses", "from": "theme:<sys>:shared-concern", "to": "goal:<sys>:affected-goal" },
+    { "op": "create", "id": "edge:theme-encompasses-risk",
+      "type": "encompasses", "from": "theme:<sys>:shared-concern", "to": "risk:<sys>:related-risk" },
+    { "op": "create", "id": "edge:theme-encompasses-assumption",
+      "type": "encompasses", "from": "theme:<sys>:shared-concern", "to": "assumption:<sys>:shared-premise" }
+  ]
+}
+```
+
+### Agreement state transition (no backward transitions)
+
+```json
+{
+  "reason": "Negotiation failed, restart with new terms",
+  "nodes": [
+    { "op": "update", "id": "agreement:<sys>:old-deal",
+      "updates": { "state": "expired" } },
+    { "op": "create", "id": "agreement:<sys>:new-deal", "type": "Agreement",
+      "title": "...", "summary": "Renegotiated terms after ...", "state": "exploring",
+      "raw_content": "...", "raw_content_status": "copied_from_summary" }
+  ],
+  "edges": []
+}
+```
+
+Do NOT reverse state (e.g. `negotiating` → `exploring`). Expire the old, create a new one.

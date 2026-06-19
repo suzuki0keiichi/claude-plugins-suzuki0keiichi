@@ -7,13 +7,16 @@ const PRIMITIVE_VERBS = [
   "vault-build", "vault-import",
   "concern-hint", "edge-suggest-policy", "carving-check",
   "branch-merge", "world-refresh",
-  "carving-allow", "harvest-history", "staleness-check"
+  "carving-allow", "harvest-history", "staleness-check",
+  "xref-check"
 ] as const;
 
 const HEADLINE_VERBS = [
   "ask", "carve", "commit-mutation",
   "add-decision", "add-ok", "add-risk", "add-constraint", "add-goal",
   "add-investigation", "add-rejected-option",
+  "add-stakeholder", "add-resource", "add-milestone", "add-assumption",
+  "add-agreement", "add-task", "add-source", "add-theme",
   "inspect"
 ] as const;
 
@@ -52,7 +55,8 @@ const PRIMITIVE_FILE_MAP: Record<PrimitiveVerb, { file: string; exportName?: str
   "world-refresh": { file: "./world.ts" },
   "carving-allow": { file: "./cli-carving-allow.ts", exportName: "runCarvingAllow" },
   "harvest-history": { file: "./harvest-history.ts", exportName: "runHarvestHistory" },
-  "staleness-check": { file: "./staleness-check.ts", exportName: "runStalenessCheck" }
+  "staleness-check": { file: "./staleness-check.ts", exportName: "runStalenessCheck" },
+  "xref-check": { file: "./xref-check.ts", exportName: "runXRefCheck" }
 };
 
 async function dispatchPrimitive(verb: PrimitiveVerb, argv: string[]) {

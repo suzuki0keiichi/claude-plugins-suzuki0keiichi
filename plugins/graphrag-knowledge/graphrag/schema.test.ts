@@ -238,6 +238,17 @@ test("validateGraph rejects closed on Decision (vocabularies are per-type)", () 
   assert.match(failures[0], /invalid state for Decision: closed/);
 });
 
+test("Component node with vault_ref attribute passes validation (extra attributes are ignored)", () => {
+  const failures = validateGraph({
+    nodes: [
+      { id: "component:cloud-svc:billing", type: "Component", vault_ref: "billing" },
+      { id: "component:cloud-svc:local", type: "Component", vault_ref: null }
+    ],
+    edges: []
+  });
+  assert.deepEqual(failures, []);
+});
+
 test("Goal/Investigation can be derived_from ConversationChunk (Requirement migration)", () => {
   const failures = validateGraph({
     nodes: [

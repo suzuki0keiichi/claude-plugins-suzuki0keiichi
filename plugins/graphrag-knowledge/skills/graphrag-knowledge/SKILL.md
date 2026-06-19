@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 3.12.0
+version: 4.0.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④⑤ 実装一段落・結論確定・却下・記録指示で書き戻す (詳細は §Proactive Persistence)。【初回】⑥ 未知のリポジトリを初回索引したい時。
 ---
 
@@ -157,7 +157,7 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
 
 ## Schema quick-reference
 
-`graphrag/schema.ts` `NODE_TYPES` (12) / `EDGE_TYPES` (14) are canonical. Full node-type descriptions, edge allowed-pairs, ID convention (`<typeSlug>:<system>:<slug>`), state vocabulary, and policy-reversal recipe: `$REF/schema-quickref.md`. **Judgment criterion: chose from alternatives → Decision; learned from operation → OperationalKnowledge. When unsure, use Decision.**
+`graphrag/schema.ts` が正本。2つのプリセット: **system** (13ノード型/14エッジ型, 既定) と **project** (16ノード型/22エッジ型, `schema: project` で選択)。vault の VAULT.md frontmatter `schema` フィールドでプリセットが決まる。**`inspect` で vault type を確認し、type に応じた quickref を読むこと**: system → `$REF/schema-quickref-system.md`、project → `$REF/schema-quickref-project.md`。両方を同時に読まない。project vault の初期構築: `graphrag-project-init` スキル参照。**Judgment criterion: chose from alternatives → Decision; learned from operation → OperationalKnowledge. When unsure, use Decision.**
 
 ## Mutation Plan
 
@@ -237,7 +237,9 @@ Report graph changes in natural language (what knowledge changed / what relation
 
 - `$REF/cli-primitives.md`: full flag reference for all primitives
 - `$REF/mutation-templates.md`: plan templates for Concern / Layer / Component / Update / Delete / policy reversal + suggestions details
-- `$REF/schema-quickref.md`: node types (12) / edge types (14) / allowed pairs / ID convention / state vocabulary / policy-reversal recipe
+- `$REF/schema-quickref.md`: **ルーター** — vault type を見て system/project の適切な quickref に誘導
+- `$REF/schema-quickref-system.md`: system preset (13+14) / allowed pairs / state vocabulary / policy-reversal recipe
+- `$REF/schema-quickref-project.md`: project preset (16+22) / allowed pairs / state vocabulary / cross-vault ref / 判断基準
 - `$REF/ask-output-guide.md`: detailed ask output field guide (match_confidence / repeat_state / world_hints / standout)
 - `$REF/topology-gap-review.md`: graph structure self-reflection protocol on bug discovery
 - `$REF/branch-merge.md`: semantic merge procedure for vault branches

@@ -3,7 +3,7 @@
 // 機械的に判定できる歪みを警告/エラーとして出力する。
 // LLM レビューの前段。mutation apply 後に走らせて、警告ゼロを確認してから完了とする。
 //
-// 検査項目:
+// 検査項目 (system vault):
 //   0.  要約が機械テンプレ (summary_provisional) のまま残っていないか (ERROR)
 //   0b. carve 未完 (candidate:true 残存 / "band N/M"・"(N files)"・"candidate cN" の
 //       プレースホルダ title) が残っていないか (ERROR)。カスみたいな命名の確定を防ぐ。
@@ -19,6 +19,15 @@
 //       config 不正/stale を ERROR、builtin 重複と免除比率 >15% を WARN。免除会計を常時印字。
 //   C1. knowledge-floor: Goal 0 件 / Constraint 0 件は WARN (知識軸が未シーディング)。
 //   B2'. superseded-premise: 現役ノードが終端 state のノードへ has_premise している組は WARN。
+//
+// Check items (project vault, run additionally when --schema project is specified):
+//   P1. Agreement exploring concentration: state=exploring with no responsible_for, ≥2 items → WARN.
+//   P2. Agreement negotiating stagnation: Agreement with state=negotiating — "is it still active?" → WARN.
+//   P3. Stakeholder overload: Stakeholder with ≥3 active Agreements → WARN.
+//   P4. Resource gap: incomplete Task with 0 requires edges → WARN.
+//   P5. Assumption orphan: Assumption not referenced by has_premise → WARN.
+//   P6. Goal no-task: active Goal with no incoming achieves edge → WARN.
+//   P7. Theme empty: Theme with 0 encompasses edges → WARN.
 import fs from "node:fs";
 import { canonicalType } from "./schema.ts";
 import {
@@ -45,6 +54,7 @@ function parseArgs(argv: string[]) {
     dominanceThreshold: Number.isFinite(Number(p["dominance-threshold"])) ? Number(p["dominance-threshold"]) : 0.7,
     duplicateThreshold: Number.isFinite(Number(p["duplicate-threshold"])) ? Number(p["duplicate-threshold"]) : 0.92,
     configPath: typeof p.config === "string" ? p.config : undefined,
+    schema: typeof p.schema === "string" ? p.schema : process.env.GRAPHRAG_SCHEMA,
     json: Boolean(p.json),
   };
 }
@@ -157,6 +167,161 @@ export function isAllowedOrphan(filePath: string): boolean {
 // orphan 検出が黙って空になる (silent pass)。ui_component / api_route / entrypoint / config 等は
 // 実装なので、builtin パターンか config の literal path に該当しない限り Component 所属を要求する。
 const ROLE_ALONE_EXEMPT = new Set(["documentation", "generated"]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project vault checks (P1–P7)
+// Receives graph and outEdges/inEdges, returns Finding[].
+// Called from check-carving.ts main() only when schema === "project".
+// ─────────────────────────────────────────────────────────────────────────────
+export function runProjectChecks(
+  graph: { nodes: any[]; edges: any[] },
+  outEdges: Record<string, any[]>,
+  inEdges: Record<string, any[]>,
+): Finding[] {
+  const findings: Finding[] = [];
+  const nodeById = new Map<string, any>(graph.nodes.map((n: any) => [n.id, n]));
+
+  // ─── P1: Agreement exploring concentration ─────────────────────────────────────────
+  // Among state=exploring Agreements, those with no responsible_for edge from any Stakeholder
+  // are considered "unassigned". If count ≥ 2, emit WARN.
+  const exploringAgreements = graph.nodes.filter(
+    (n: any) => n.type === "Agreement" && n.state === "exploring"
+  );
+  const exploringNoOwner: string[] = [];
+  for (const ag of exploringAgreements) {
+    const hasOwner = (inEdges[ag.id] ?? []).some((e: any) => e.type === "responsible_for");
+    if (!hasOwner) exploringNoOwner.push(`[Agreement] ${String(ag.id).split(":").pop()} — ${(ag.title ?? "").slice(0, 60)}`);
+  }
+  if (exploringNoOwner.length >= 2) {
+    findings.push({
+      severity: "WARN",
+      rule: "agreement-exploring-concentration",
+      message: `${exploringNoOwner.length} Agreement(s) in state=exploring with no Stakeholder responsible_for. Exploration may be stalling without an owner. Add responsible_for edges or close the exploration.`,
+      details: exploringNoOwner.slice(0, 20),
+    });
+  }
+
+  // ─── P2: Agreement negotiating stagnation ──────────────────────────────────────
+  // Agreements with state=negotiating should be checked: "is this still active?"
+  // Timestamp tracking is not implemented, so all items are shown as WARN regardless of count.
+  const negotiatingAgreements = graph.nodes.filter(
+    (n: any) => n.type === "Agreement" && n.state === "negotiating"
+  );
+  if (negotiatingAgreements.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "agreement-negotiating-stagnation",
+      message: `${negotiatingAgreements.length} Agreement(s) with state=negotiating. Check if they are still active (still negotiating / moved to signed / expired). All items listed because timestamp tracking is unavailable.`,
+      details: negotiatingAgreements.slice(0, 20).map((n: any) => `[Agreement] ${String(n.id).split(":").pop()} — ${(n.title ?? "").slice(0, 60)}`),
+    });
+  }
+
+  // ─── P3: Stakeholder overload ───────────────────────────────────────────────
+  // Count Agreements with state=active that the Stakeholder is party_to.
+  // Stakeholders with ≥ 3 such Agreements emit WARN.
+  const stakeholders = graph.nodes.filter((n: any) => n.type === "Stakeholder");
+  for (const sh of stakeholders) {
+    const activeCount = (outEdges[sh.id] ?? []).filter((e: any) => {
+      if (e.type !== "party_to") return false;
+      const ag = nodeById.get(e.to);
+      return ag && ag.state === "active";
+    }).length;
+    if (activeCount >= 3) {
+      findings.push({
+        severity: "WARN",
+        rule: "stakeholder-overload",
+        message: `Stakeholder '${String(sh.id).split(":").pop()}' is party_to ${activeCount} active Agreement(s) (≥3). Possible overload. Review ownership or split Agreements.`,
+        details: [`[Stakeholder] ${String(sh.id).split(":").pop()} — active agreements: ${activeCount}`],
+      });
+    }
+  }
+
+  // ─── P4: Resource gap ────────────────────────────────────────────────────
+  // Tasks not in completed/cancelled state with 0 requires edges.
+  // Indicates "what resources does this task consume?" is undefined.
+  const incompleteTasks = graph.nodes.filter(
+    (n: any) => n.type === "Task" && n.state !== "completed" && n.state !== "cancelled"
+  );
+  const tasksNoResource: string[] = [];
+  for (const t of incompleteTasks) {
+    const hasRequires = (outEdges[t.id] ?? []).some((e: any) => e.type === "requires");
+    if (!hasRequires) {
+      tasksNoResource.push(`[Task] ${String(t.id).split(":").pop()} — ${(t.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (tasksNoResource.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "task-resource-gap",
+      message: `${tasksNoResource.length} incomplete Task(s) have no requires edge. Unclear what resources (people, time, budget, etc.) this task consumes. Create Resource nodes and connect via requires, or reconsider the Task if it consumes nothing.`,
+      details: tasksNoResource.slice(0, 20),
+    });
+  }
+
+  // ─── P5: Assumption orphan ───────────────────────────────────────────────
+  // Assumptions not appearing on the to side of has_premise are "isolated premises".
+  // If no one depends on them, they are deletion candidates or need has_premise edges added.
+  const assumptions = graph.nodes.filter((n: any) => n.type === "Assumption");
+  const orphanAssumptions: string[] = [];
+  for (const as of assumptions) {
+    const hasDependents = (inEdges[as.id] ?? []).some((e: any) => e.type === "has_premise");
+    if (!hasDependents) {
+      orphanAssumptions.push(`[Assumption] ${String(as.id).split(":").pop()} — ${(as.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (orphanAssumptions.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "assumption-orphan",
+      message: `${orphanAssumptions.length} isolated Assumption(s) (not referenced by has_premise). Add has_premise edges from Goals / Decisions / Tasks that depend on them, or delete if the premise is unnecessary.`,
+      details: orphanAssumptions.slice(0, 20),
+    });
+  }
+
+  // ─── P6: Goal no-task ─────────────────────────────────────────────────────
+  // Active Goals with no incoming achieves edge (no Task assigned).
+  // Indicates "no one is working toward this goal".
+  const activeGoals = graph.nodes.filter(
+    (n: any) => n.type === "Goal" && n.state === "active"
+  );
+  const goalsNoTask: string[] = [];
+  for (const g of activeGoals) {
+    const hasAchieves = (inEdges[g.id] ?? []).some((e: any) => e.type === "achieves");
+    if (!hasAchieves) {
+      goalsNoTask.push(`[Goal] ${String(g.id).split(":").pop()} — ${(g.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (goalsNoTask.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "goal-no-task",
+      message: `${goalsNoTask.length} active Goal(s) have no incoming achieves edge (no Task in progress). The Goal may be floating. Create a Task and connect via achieves, or change the Goal state to planned/abandoned.`,
+      details: goalsNoTask.slice(0, 20),
+    });
+  }
+
+  // ─── P7: Theme empty ────────────────────────────────────────────────────────
+  // Themes with 0 encompasses edges are "empty cross-cutting themes".
+  // If empty, they are deletion candidates or need encompasses edges added.
+  const themes = graph.nodes.filter((n: any) => n.type === "Theme");
+  const emptyThemes: string[] = [];
+  for (const th of themes) {
+    const hasEncompasses = (outEdges[th.id] ?? []).some((e: any) => e.type === "encompasses");
+    if (!hasEncompasses) {
+      emptyThemes.push(`[Theme] ${String(th.id).split(":").pop()} — ${(th.title ?? "").slice(0, 60)}`);
+    }
+  }
+  if (emptyThemes.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "theme-empty",
+      message: `${emptyThemes.length} Theme(s) have 0 encompasses edges. Empty themes do not function as cross-cutting views. Connect Goal / Decision / Risk / Task / Resource / Assumption via encompasses, or delete the theme.`,
+      details: emptyThemes.slice(0, 20),
+    });
+  }
+
+  return findings;
+}
 
 export function main(argv: string[] = process.argv.slice(2)): void {
   const args = parseArgs(argv);
@@ -765,6 +930,14 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // Project vault 専用チェック (--schema project の場合のみ実行)
+  // ─────────────────────────────────────────────────────────────
+  if (args.schema === "project") {
+    const projectFindings = runProjectChecks(graph, outEdges, inEdges);
+    findings.push(...projectFindings);
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // 出力
   // ─────────────────────────────────────────────────────────────
   const summary = {
@@ -777,7 +950,8 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   if (args.json) {
     console.log(JSON.stringify({ summary, accounting, findings }, null, 2));
   } else {
-    console.log(`=== Carving check on ${args.graphPath} ===`);
+    const schemaLabel = args.schema ? ` [schema: ${args.schema}]` : "";
+    console.log(`=== Carving check on ${args.graphPath}${schemaLabel} ===`);
     console.log(`nodes: ${graph.nodes.length} | files: ${files.length} | components: ${components.length} | concerns: ${concerns.length} | layers: ${layers.length}`);
     console.log();
     // 免除会計 (常時印字): 免除がゼロでも「ゼロである」ことを見せる

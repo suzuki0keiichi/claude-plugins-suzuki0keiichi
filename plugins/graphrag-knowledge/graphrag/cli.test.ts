@@ -8,7 +8,8 @@ test("cli has expected primitive verbs", () => {
     "vault-build", "vault-import",
     "concern-hint", "edge-suggest-policy", "carving-check",
     "branch-merge", "world-refresh",
-    "carving-allow", "harvest-history", "staleness-check"
+    "carving-allow", "harvest-history", "staleness-check",
+    "xref-check"
   ];
   for (const v of expected) {
     assert.ok(isPrimitiveVerb(v), `expected primitive: ${v}`);
@@ -27,6 +28,8 @@ test("cli has expected headline verbs", () => {
     "ask", "carve", "commit-mutation",
     "add-decision", "add-ok", "add-risk", "add-constraint", "add-goal",
     "add-investigation", "add-rejected-option",
+    "add-stakeholder", "add-resource", "add-milestone", "add-assumption",
+    "add-agreement", "add-task", "add-source", "add-theme",
     "inspect"
   ];
   for (const v of expected) {
@@ -34,9 +37,9 @@ test("cli has expected headline verbs", () => {
   }
 });
 
-test("listKnownVerbs returns all 26 verbs (15 primitive + 11 headline)", () => {
+test("listKnownVerbs returns all 35 verbs (16 primitive + 19 headline)", () => {
   const all = listKnownVerbs();
-  assert.equal(all.length, 26);
+  assert.equal(all.length, 35);
 });
 
 test("isHeadlineVerb / isPrimitiveVerb are disjoint", () => {

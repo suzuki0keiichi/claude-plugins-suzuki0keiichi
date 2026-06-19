@@ -12,6 +12,7 @@ const FAKE_PRESET: SchemaDefinition = {
   edgeTypes: ["test_edge"],
   edgeTypeRules: { test_edge: [[["TestNode"], "File"]] },
   stateVocabulary: {},
+  requiredFields: {},
   aliases: {},
   categories: {
     knowledge: ["TestNode"],
