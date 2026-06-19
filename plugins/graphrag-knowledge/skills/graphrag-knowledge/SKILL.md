@@ -92,6 +92,7 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 - If auto-escalation reaches `evidence` and returns empty, the knowledge truly does not exist. **Try one different keyword only.** Do not repeat.
 - `repeat_state: excessive` (call_number ≥ 3) → **stop graph search, switch to code / doc direct reading.**
 - Match `state_note` (e.g. `"superseded — check refines reverse for successor"`) → follow the note, prefer successor/active nodes.
+- **`cross_vault_resolved`** — when a matched node's edges point to another vault, `ask` resolves the target node's title/summary and attaches it inline. If title/summary is insufficient, follow the pointer by running `$CLI ask "<question>" --vault <path>` against the target vault. This is a graph-structural pointer traversal, not a heuristic search — follow it proactively. Typical case: a project vault Goal/Task references a system vault Deliverable via cross-vault ref.
 - Full field reference: `$REF/ask-output-guide.md`.
 
 ## Recipe
@@ -146,6 +147,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `edge-suggest-policy` | sets_policy_for candidate extraction |
 | `carving-check` | carving quality gate |
 | `branch-merge` | semantic merge analysis of vault git branches (read-only). Procedure: `$REF/branch-merge.md` |
+| `world-join` | join a world: add this vault to world.json + write `GRAPHRAG_WORLD_DIR` to `.graphrag/.env`. Flags: `--world <dir>` `--vault <dir>` |
 | `world-refresh` | rebuild cross-vault world-cache. When `GRAPHRAG_WORLD_DIR` is set, `ask` includes `world_hints` |
 | `carving-allow` | manage `.graphrag/carving.json` (carving exemptions): `add` / `remove` / `list` / `migrate` |
 | `harvest-history` | deterministic extraction from git history (no writes): reverts → RejectedOption candidates, HACK/FIXME markers → OK/Risk candidates |

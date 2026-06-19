@@ -746,3 +746,93 @@ test("resolveCrossVaultRef: resolves cross-vault node via alias", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// world.json slug fast-path
+// ---------------------------------------------------------------------------
+
+test("findVaultBySlugWithInfo: resolves via world.json slug without directory scan", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-world-slug-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    const { vaultDir } = makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
+    });
+
+    // Write world.json with slug
+    writeFileSync(
+      path.join(worldDir, "world.json"),
+      JSON.stringify({ vaults: [{ path: vaultDir, slug: "billing" }] }, null, 2)
+    );
+
+    const result = findVaultBySlugWithInfo("billing", worldDir);
+    assert.ok(result !== null);
+    assert.equal(result!.currentSlug, "billing");
+    assert.equal(result!.matchedViaAlias, false);
+    assert.ok(result!.vaultDir.includes("billing-repo"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("findVaultBySlugWithInfo: world.json slug takes precedence, absolute paths supported", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-world-slug-"));
+  try {
+    // Vault NOT inside worldDir — would fail directory scan fallback
+    const externalRoot = mkdtempSync(path.join(tmpdir(), "xref-ext-"));
+    const extWorldDir = path.join(externalRoot, "ext");
+    mkdirSync(extWorldDir, { recursive: true });
+    const { vaultDir } = makeVault({
+      root: externalRoot,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
+    });
+
+    const worldDir = makeWorldDir(root);
+    // world.json points to external vault with slug
+    writeFileSync(
+      path.join(worldDir, "world.json"),
+      JSON.stringify({ vaults: [{ path: vaultDir, slug: "billing" }] }, null, 2)
+    );
+
+    const result = findVaultBySlugWithInfo("billing", worldDir);
+    assert.ok(result !== null, "should find vault via world.json slug even when not in worldDir");
+    assert.equal(result!.currentSlug, "billing");
+
+    rmSync(externalRoot, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveCrossVaultRef: resolves via world.json slug for absolute-path vaults", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-world-resolve-"));
+  try {
+    const externalRoot = mkdtempSync(path.join(tmpdir(), "xref-ext-"));
+    const { vaultDir } = makeVault({
+      root: externalRoot,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
+    });
+
+    const worldDir = makeWorldDir(root);
+    writeFileSync(
+      path.join(worldDir, "world.json"),
+      JSON.stringify({ vaults: [{ path: vaultDir, slug: "billing" }] }, null, 2)
+    );
+
+    const resolved = resolveCrossVaultRef("vault:billing/deliverable:billing:v2", worldDir);
+    assert.ok(resolved !== null);
+    assert.equal(resolved!.title, "Billing API v2");
+    assert.equal(resolved!.node_id, "deliverable:billing:v2");
+
+    rmSync(externalRoot, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

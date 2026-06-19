@@ -23,6 +23,16 @@
 
 state が superseded/closed/abandoned/achieved のノードはランキングスコアが 0.6 倍に減点される (除外はしない = hard reject しない原則)。減点された match には `state_note` (例 `"superseded — refines 逆引きで後継を確認"`) が付くので、注記に従い後継/現役ノードを優先する。
 
+## `cross_vault_resolved` (`GRAPHRAG_WORLD_DIR` only)
+
+When a matched node's edges (relations) contain a cross-vault ref (`vault:<slug>/<nodeId>`), `ask` resolves the target node's title/summary from the referenced vault and attaches it inline.
+
+- `cross_vault_resolved[*].ref` — original cross-vault ref string (e.g. `"vault:billing/deliverable:billing:v2-release"`)
+- `cross_vault_resolved[*].edge_type` — edge type (e.g. `"targets"`)
+- `cross_vault_resolved[*].resolved` — resolved node's title/summary. `null` means resolution failed (vault absent or node not found).
+
+**Action**: if title/summary suffices, no further ask needed. If deeper context is required, follow the pointer by running `ask "<question>" --vault <path>` against the target vault. This is a graph-structural pointer traversal, not a heuristic search — follow it proactively.
+
 ## `world_hints` (`GRAPHRAG_WORLD_DIR` 設定時のみ)
 
 「他の vault X にも知識がありそう」のヒント。

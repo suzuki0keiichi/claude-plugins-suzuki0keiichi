@@ -6,7 +6,7 @@ const PRIMITIVE_VERBS = [
   "brief", "search", "evidence", "index", "vector-index",
   "vault-build", "vault-import",
   "concern-hint", "edge-suggest-policy", "carving-check",
-  "branch-merge", "world-refresh",
+  "branch-merge", "world-refresh", "world-join",
   "carving-allow", "harvest-history", "staleness-check",
   "xref-check"
 ] as const;
@@ -53,6 +53,7 @@ const PRIMITIVE_FILE_MAP: Record<PrimitiveVerb, { file: string; exportName?: str
   "carving-check": { file: "./check-carving.ts" },
   "branch-merge": { file: "./branch-merge.ts" },
   "world-refresh": { file: "./world.ts" },
+  "world-join": { file: "./world-join.ts" },
   "carving-allow": { file: "./cli-carving-allow.ts", exportName: "runCarvingAllow" },
   "harvest-history": { file: "./harvest-history.ts", exportName: "runHarvestHistory" },
   "staleness-check": { file: "./staleness-check.ts", exportName: "runStalenessCheck" },
