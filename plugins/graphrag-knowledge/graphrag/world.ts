@@ -28,6 +28,7 @@ export const VAULT_PROFILE_FILE = "VAULT.md";
 
 export interface WorldVaultRef {
   path: string; // ローカル vault dir (絶対/相対) または git リモート URL (将来)
+  slug?: string; // vault_slug (VAULT.md の正本と一致すべき)
 }
 
 export interface WorldConfig {
@@ -123,24 +124,26 @@ export function loadWorldConfig(worldDir: string): WorldConfig {
   if (!raw || !Array.isArray(raw.vaults)) {
     throw new Error(`world.json: "vaults" must be an array (${worldPath})`);
   }
+  const ALLOWED_KEYS = new Set(["path", "slug"]);
   const vaults: WorldVaultRef[] = raw.vaults.map((entry: unknown, i: number) => {
     if (typeof entry === "string" && entry.length > 0) return { path: entry };
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      const keys = Object.keys(entry as object);
-      const p = (entry as Record<string, unknown>).path;
+      const obj = entry as Record<string, unknown>;
+      const p = obj.path;
       if (typeof p !== "string" || p.length === 0) {
         throw new Error(`world.json: vaults[${i}] needs a non-empty "path"`);
       }
-      const extra = keys.filter((k) => k !== "path");
+      const extra = Object.keys(obj).filter((k) => !ALLOWED_KEYS.has(k));
       if (extra.length > 0) {
         throw new Error(
           `world.json: vaults[${i}] has extra keys [${extra.join(", ")}]. ` +
-          `world is a pointer list only; put name/kind/description in the vault's ${VAULT_PROFILE_FILE} (the canonical self-introduction).`
+          `world carries only path and slug; put name/kind/description in the vault's ${VAULT_PROFILE_FILE} (the canonical self-introduction).`
         );
       }
-      return { path: p };
+      const slug = typeof obj.slug === "string" && obj.slug.length > 0 ? obj.slug : undefined;
+      return { path: p, ...(slug ? { slug } : {}) };
     }
-    throw new Error(`world.json: vaults[${i}] must be a path string or { "path": "..." }`);
+    throw new Error(`world.json: vaults[${i}] must be a path string or { "path": "...", "slug": "..." }`);
   });
   return { vaults };
 }

@@ -149,6 +149,15 @@ node graphrag/cli.ts staleness-check [--root <repo>] [--vault <dir>] [--threshol
 
 知識ノード (Decision/Constraint/Risk/OperationalKnowledge) の `documented_by` / `sets_policy_for` / `constrains` が指す File について、ノードの `generated_at` 以降にその path を触ったコミット数を git log で数え、閾値以上を candidate (`node_id` / `node_title` / `file_path` / `commits_since` / `last_commit_subject`) として列挙。読み取り専用・意味判断なし — 本当に陳腐化したかの判断は人間起動の audit に委ねる。vault は `--vault` か `GRAPHRAG_VAULT_DIR`。
 
+## world-join — join a vault to a world
+
+```sh
+node graphrag/cli.ts world-join --world <dir>              # vault via GRAPHRAG_VAULT_DIR / auto-discovery
+node graphrag/cli.ts world-join --world <dir> --vault <dir>  # explicit
+```
+
+Deterministic two-step: ① add this vault's path and `vault_slug` to world.json (no-op if already present), ② write `GRAPHRAG_WORLD_DIR=<dir>` to `.graphrag/.env` (overwrites existing value). Creates the world directory and world.json if absent. Warns when VAULT.md is missing; warns when `vault_slug` is not set (cross-vault refs will not resolve to this vault).
+
 ## world-refresh — cross-vault 用 world-cache 再構築
 
 ```sh
@@ -157,7 +166,7 @@ node graphrag/cli.ts world-refresh [--world <dir>]    # dir 省略時は GRAPHRA
 
 cross-vault retrieval の三層 (`正本: vault 隣の VAULT.md` / `住所録: world.json` / `写し: world-cache.json`) のうち、写しを作り直す。出力に各 vault の VAULT.md mtime (`profile_mtime`) とノード数 (`node_count`) を含め、mtime が 45 日より古い vault には `intro_hint` (「VAULT.md が <N>日前から未更新。蓄積に対して自己紹介が古い可能性」) を添える。
 
-- **world.json** (`<world-dir>/world.json`): vault dir へのポインタ列 **だけ** (`{"vaults": ["<path>", ...]}`)。説明や名前を持たせるとエラー (腐る電話帳防止) — 自己紹介は各 vault 側の `VAULT.md` に書く。
+- **world.json** (`<world-dir>/world.json`): pointer list of vault dirs (`{"vaults": ["<path>", {"path": "...", "slug": "..."}]}`). `slug` is the `vault_slug` (cross-vault ref namespace); the xref resolver looks up vaults by slug directly from world.json. Extra keys beyond `path` and `slug` are rejected (anti-rotting-phonebook) — name/kind/description belong in each vault's `VAULT.md`.
 - **VAULT.md** (vault dir の**隣**、`.graphrag`/vector.json と同じ配置): frontmatter `name:` / `kind:` (system/project/product/business 推奨) + 本文に「何の知識があるか」数行。vault フォルダの中には置かない (ノード扱いされ、mutation で孤児削除される)。
 - **world-cache.json** (world.json の隣): 各 vault の自己紹介の写し + embedding + 内容ハッシュ + 取得時刻。機械生成・手編集禁止。原子書き (tmp+rename)。
 

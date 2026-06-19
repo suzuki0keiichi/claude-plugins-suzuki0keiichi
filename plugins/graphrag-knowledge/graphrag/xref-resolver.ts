@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { importVault } from "./import-vault.ts";
+import { loadWorldConfig, WORLD_FILE, type WorldVaultRef } from "./world.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,52 +175,80 @@ export interface FindVaultResult {
 }
 
 /**
- * Walk GRAPHRAG_WORLD_DIR looking for a vault whose VAULT.md declares
- * `vault_slug: <slug>` (or lists `<slug>` in `vault_slug_aliases`).
- * Returns a FindVaultResult or null.
+ * Look up a vault by slug. Resolution strategy:
  *
- * Resolution order:
- *   1. Exact match on vault_slug — matchedViaAlias: false
- *   2. Match in vault_slug_aliases — matchedViaAlias: true
+ *   1. **world.json fast path** — if `<worldDir>/world.json` exists, scan its
+ *      entries for a matching `slug` field. This is O(n) in the entry count
+ *      with no filesystem probing beyond reading world.json itself. Entries
+ *      without a `slug` field are skipped (they fall through to step 2).
+ *   2. **VAULT.md probe** — for entries in world.json that lack a slug, and
+ *      as a full fallback when world.json is absent, read each vault's
+ *      VAULT.md and check `vault_slug` / `vault_slug_aliases`.
  *
- * The world dir layout expected: each entry in world.json points to a vault
- * directory. We walk the world dir tree shallowly — specifically, for each
- * sub-directory of worldDir we look for a `vault/` child and check the sibling
- * VAULT.md. This matches the canonical layout:
- *
- *   <worldDir>/
- *     <repoName>/
- *       VAULT.md          ← vault_slug is here
- *       vault/            ← this is vaultDir
- *
- * We also accept a flat layout where vaultDir *is* a direct child of worldDir.
- * In practice, GRAPHRAG_WORLD_DIR could be:
- *   (a) the directory containing world.json — scan its sub-dirs for vault/ children
- *   (b) a parent of multiple repo dirs
- *
- * Rather than parsing world.json (which could point to absolute paths anywhere),
- * we scan all direct child directories of worldDir. For each child we check:
- *   1. child/vault/ exists → vaultDir = child/vault
- *   2. child/ is itself a vault dir (has .md files) → vaultDir = child
- * Then we look up vault_slug for that vaultDir.
- *
- * This heuristic covers the common case. If a vault is not in worldDir's
- * direct children, it won't be found (return null).
+ * Resolution order within each strategy:
+ *   a. Exact match on vault_slug (or world.json slug) — matchedViaAlias: false
+ *   b. Match in vault_slug_aliases (VAULT.md only) — matchedViaAlias: true
  */
 export function findVaultBySlugWithInfo(slug: string, worldDir: string): FindVaultResult | null {
   if (!existsSync(worldDir)) return null;
+
+  // --- Strategy 1: world.json slug lookup ---
+  let worldConfig: { vaults: WorldVaultRef[] } | null = null;
+  try {
+    worldConfig = loadWorldConfig(worldDir);
+  } catch {
+    // world.json absent or malformed — fall through to directory scan
+  }
+
+  if (worldConfig) {
+    const aliasMatches: FindVaultResult[] = [];
+    const noSlugEntries: WorldVaultRef[] = [];
+
+    for (const ref of worldConfig.vaults) {
+      if (ref.slug) {
+        if (ref.slug === slug) {
+          const vaultDir = path.resolve(ref.path);
+          return { vaultDir, currentSlug: ref.slug, matchedViaAlias: false };
+        }
+        // world.json slug doesn't carry aliases — check VAULT.md for alias match
+        const info = readVaultSlugInfoForDir(path.resolve(ref.path));
+        if (info && info.aliases.includes(slug)) {
+          aliasMatches.push({ vaultDir: path.resolve(ref.path), currentSlug: info.slug, matchedViaAlias: true });
+        }
+      } else {
+        noSlugEntries.push(ref);
+      }
+    }
+
+    // Probe VAULT.md for entries that lack a slug in world.json
+    for (const ref of noSlugEntries) {
+      const vaultDir = path.resolve(ref.path);
+      const info = readVaultSlugInfoForDir(vaultDir);
+      if (info) {
+        if (info.slug === slug) {
+          return { vaultDir, currentSlug: info.slug, matchedViaAlias: false };
+        }
+        if (info.aliases.includes(slug)) {
+          aliasMatches.push({ vaultDir, currentSlug: info.slug, matchedViaAlias: true });
+        }
+      }
+    }
+
+    if (aliasMatches.length > 0) return aliasMatches[0];
+    return null;
+  }
+
+  // --- Strategy 2: fallback directory scan (no world.json) ---
   let entries: string[];
   try {
     entries = readdirSync(worldDir);
   } catch {
     return null;
   }
-  // Two-pass: first pass collects alias candidates to prefer primary slug matches.
   const aliasMatches: FindVaultResult[] = [];
   for (const entry of entries) {
     const entryAbs = path.join(worldDir, entry);
 
-    // Try canonical layout: child/vault/ is the vault dir
     const canonicalVault = path.join(entryAbs, "vault");
     if (existsSync(canonicalVault)) {
       const info = readVaultSlugInfoForDir(canonicalVault);
@@ -234,7 +263,6 @@ export function findVaultBySlugWithInfo(slug: string, worldDir: string): FindVau
       continue;
     }
 
-    // Try flat layout: child/ is itself the vault dir
     try {
       if (statSync(entryAbs).isDirectory()) {
         const info = readVaultSlugInfoForDir(entryAbs);
