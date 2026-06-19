@@ -137,7 +137,7 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
     [ANY_CROSSCUT_NODE, "File"]
   ],
   has_premise: [
-    [["Decision", "OperationalKnowledge", "Investigation"], ["Decision", "OperationalKnowledge", "Constraint", "Risk", "Goal"]]
+    [["Decision", "OperationalKnowledge", "Investigation", "Goal"], ["Decision", "OperationalKnowledge", "Constraint", "Risk", "Goal"]]
   ],
   refines: [
     [["Decision", "OperationalKnowledge"], ["Decision", "OperationalKnowledge"]],
