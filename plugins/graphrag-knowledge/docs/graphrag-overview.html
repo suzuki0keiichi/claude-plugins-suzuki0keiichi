@@ -1575,11 +1575,11 @@
             + git）
           </div>
           <div>
-            <span class="k">ノード型</span><span class="val">12 種</span>
+            <span class="k">ノード型</span><span class="val">13 種</span>
           </div>
           <div>
             <span class="k">エッジ型</span
-            ><span class="val">14 種</span>（型ペア検証つき）
+            ><span class="val">15 種</span>（型ペア検証つき）
           </div>
           <div>
             <span class="k">読み口</span><span class="val">ask</span>（semantic
@@ -2096,7 +2096,7 @@
                 fill="#E3E8DB"
               />
               <text x="435" y="201" text-anchor="middle">
-                File/ Layer/ Concern/ Component
+                File/ Deliverable/ Layer/ …
               </text>
             </g>
             <text
@@ -2296,11 +2296,11 @@
       <section id="nodes">
         <div class="sec-head rv">
           <span class="sec-no">§ 04</span>
-          <h2>グラフ種別 ① — 12 のノード型</h2>
+          <h2>グラフ種別 ① — 13 のノード型</h2>
         </div>
         <p class="sec-sub">
           3
-          つの系（構造・知識・横断）に分かれる。横断系は Layer / Concern / Component の 3 軸。
+          つの系（構造・知識・横断）に分かれる。構造系は File + Deliverable、横断系は Layer / Concern / Component の 3 軸。
         </p>
 
         <div class="legend rv">
@@ -2321,7 +2321,7 @@
         <div class="node-group rv">
           <div class="gh">
             <h4>構造系</h4>
-            <span class="cnt">1 型</span
+            <span class="cnt">2 型</span
             ><span class="desc"
               >— 索引が機械的に生成する、グラフと実コードの接地面</span
             >
@@ -2333,6 +2333,12 @@
                 索引されたソースファイル。embedding の主担体で、シンボルや
                 import は独立ノードにせず File
                 の配列フィールドに持つ（ノード爆発の回避）。<b>要約を機械テンプレから「意味」の要約へ書き換えること</b>が検索品質の主レバー。
+              </p>
+            </div>
+            <div class="ncard c-file">
+              <span class="ty">Deliverable</span><span class="ja">成果物</span>
+              <p>
+                リリースの産出物。並列に複数存在可能。project vault からは cross-vault ref で参照される。major 世代交代のみ <code>supersedes</code> を使う。
               </p>
             </div>
           </div>
@@ -2769,12 +2775,12 @@
           だから大事なのは、この型が完璧か・ベストかであることよりも、まず<b>型があること</b>自体なのです。
         </p>
 
-        <h3 class="rv">では、この 12 型は「王道」なのか</h3>
+        <h3 class="rv">では、この 13 型は「王道」なのか</h3>
         <p class="body rv">
           我流です。設計にあたって「知識の型の、定番とされる分類」を哲学・認知科学側まで探しに行きましたが、
           見つかったのは<b>「鉄板の発想源は数あれど、王道──誰も異を唱えない単一の基盤──は無い」</b>という事実でした。
           分類は常に、それを立てた問いと用途のために組まれてきたものです。
-          ただし我流は思いつきと同じではありません。この 12
+          ただし我流は思いつきと同じではありません。この 13
           型は、確立した知的伝統からそれぞれ design constraint
           を一つずつ抽出して組み上げています。
           また、結果として到達した設計は、独立した文脈で近い方向を向いています。
@@ -2840,7 +2846,7 @@
 
         <p class="body rv">
           一方で、「カントの何々がこのノード型に対応する」といった<b>対応表による正当化はしません</b>。
-          12 のノードから都合のよい 3 つを選ぶ組合せは 220
+          13 のノードから都合のよい 3 つを選ぶ組合せは 286
           通りあり、後付けの対応表は
           「権威に合わせて切り貼りしただけでは」という批判に耐えないからです。哲学はあくまで発想源に位置づけ、
           型の正式な定義は「概念名と、適用をどう判定するかの手続き」で書く。そして分類の正しさは権威ではなく、
@@ -2866,7 +2872,7 @@
       <section id="edges">
         <div class="sec-head rv">
           <span class="sec-no">§ 05</span>
-          <h2>グラフ種別 ② — 14 のエッジ型と「文法」</h2>
+          <h2>グラフ種別 ② — 15 のエッジ型と「文法」</h2>
         </div>
         <p class="sec-sub">
           何が何に繋がってよいかは型ペア規則で強制される。これがグラフのスープ化を防ぐ一貫性契約。
@@ -2915,6 +2921,7 @@
                 ><span class="pair"
                   ><span class="chip k"
                     >Decision | Rejected | Risk | OK | Investigation</span
+                  ><span class="chip f">Deliverable</span
                   ><span class="arrow">→</span
                   ><span class="chip f">File</span></span
                 >
@@ -2982,12 +2989,15 @@
                 ><span class="pair"
                   ><span class="chip k">Decision | OK</span
                   ><span class="arrow">→</span
-                  ><span class="chip k">RejectedOption</span></span
+                  ><span class="chip k">RejectedOption</span
+                  >&nbsp;&nbsp;/&nbsp;&nbsp;<span class="chip f">Deliverable</span
+                  ><span class="arrow">→</span
+                  ><span class="chip f">Deliverable</span></span
                 >
                 <span class="note"
                   >上書きの方向が型で固定されている。「採った案」と「捨てた案」が常にペアで残る。判断を覆す「方針転換」はここではなく
                   <code>refines</code>（新→旧）+ 旧 Decision の
-                  <code>state: "superseded"</code> で表す — supersedes は却下案専用のまま。</span
+                  <code>state: "superseded"</code> で表す — supersedes は却下案専用のまま。Deliverable 同士の supersedes は major 世代交代専用。</span
                 >
               </li>
               <li>
@@ -3023,7 +3033,7 @@
                 <span class="en">sets_policy_for</span
                 ><span class="pair"
                   ><span class="chip k">Decision</span
-                  ><span class="arrow">→</span><span class="chip f">File</span
+                  ><span class="arrow">→</span><span class="chip f">File | Deliverable</span
                   ><span class="chip k">Investigation | OK</span
                   ><span class="chip x">Layer | Concern | Component</span></span
                 >
@@ -3038,7 +3048,7 @@
                 ><span class="pair"
                   ><span class="chip k">Risk</span><span class="arrow">→</span
                   ><span class="chip k">Decision | OK | Investigation</span
-                  ><span class="chip f">File</span
+                  ><span class="chip f">File | Deliverable</span
                   ><span class="chip x">横断 3 種</span></span
                 >
               </li>
@@ -3061,6 +3071,17 @@
                 >
                 <span class="note"
                   >「この判断は何を前提にしているか」。前提が崩れたとき影響を受ける判断を逆引きできる。</span
+                >
+              </li>
+              <li>
+                <span class="en">targets</span
+                ><span class="pair"
+                  ><span class="chip k">Goal</span
+                  ><span class="arrow">→</span
+                  ><span class="chip f">Deliverable</span></span
+                >
+                <span class="note"
+                  >目的が狙う成果物。project vault では cross-vault ref で system vault の Deliverable を指す。</span
                 >
               </li>
             </ul>
@@ -3536,12 +3557,12 @@
             <tr>
               <td>型の定義</td>
               <td><code>type</code> は自由文字列。型の一覧や意味は未定義</td>
-              <td class="win">12 種の型付きノード。型ごとに必須フィールドと検証規則</td>
+              <td class="win">13 種の型付きノード。型ごとに必須フィールドと検証規則</td>
             </tr>
             <tr>
               <td>関係の表現</td>
               <td>Markdown リンクの地の文。関係の種類は機械的に取れない</td>
-              <td class="win">14 種の型付きエッジ。型ペア検証つき</td>
+              <td class="win">15 種の型付きエッジ。型ペア検証つき</td>
             </tr>
             <tr>
               <td>整合性の検証</td>

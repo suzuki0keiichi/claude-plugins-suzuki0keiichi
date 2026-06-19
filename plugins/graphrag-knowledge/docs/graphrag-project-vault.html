@@ -1,0 +1,1476 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>project vault — 時限イニシアチブのナレッジグラフ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper: #f7f3ea;
+        --paper-2: #f0eadc;
+        --paper-3: #e9e1cf;
+        --ink: #33302a;
+        --ink-soft: #5f594d;
+        --ink-faint: #8b8374;
+        --line: #dcd3bf;
+        --line-strong: #c7bca3;
+        --moss: #5e7355;
+        --moss-soft: #e3e8db;
+        --terra: #b05c42;
+        --terra-soft: #f2e0d7;
+        --ochre: #a8862f;
+        --ochre-soft: #f0e6c8;
+        --slate: #54708a;
+        --slate-soft: #dee5ea;
+        --plum: #7d5e6e;
+        --plum-soft: #eadee4;
+        --code-bg: #2e2b25;
+        --code-ink: #e8e2d2;
+        --radius: 10px;
+        --maxw: 1060px;
+        --serif: "Zen Old Mincho", "Hiragino Mincho ProN", serif;
+        --sans: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", sans-serif;
+        --mono: "IBM Plex Mono", "Menlo", monospace;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.9;
+        -webkit-font-smoothing: antialiased;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+      }
+      main,
+      header.site,
+      footer.site {
+        position: relative;
+        z-index: 1;
+      }
+
+      a {
+        color: var(--terra);
+        text-decoration: none;
+        border-bottom: 1px solid
+          color-mix(in srgb, var(--terra) 35%, transparent);
+      }
+      a:hover {
+        border-bottom-color: var(--terra);
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        background: var(--paper-3);
+        padding: 0.1em 0.4em;
+        border-radius: 4px;
+        color: var(--ink);
+      }
+      strong {
+        font-weight: 700;
+      }
+
+      /* ───────── header / nav ───────── */
+      header.site {
+        border-bottom: 1px solid var(--line);
+        background: color-mix(in srgb, var(--paper) 88%, white);
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(6px);
+      }
+      .nav {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 10px 24px;
+        display: flex;
+        align-items: baseline;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .nav .brand {
+        font-family: var(--mono);
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--ink);
+      }
+      .nav .brand .v {
+        color: var(--ink-faint);
+        font-weight: 400;
+      }
+      .nav ul {
+        list-style: none;
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-left: auto;
+      }
+      .nav ul a {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+        border: none;
+        letter-spacing: 0.02em;
+      }
+      .nav ul a:hover {
+        color: var(--terra);
+      }
+      .nav ul a .no {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--ink-faint);
+        margin-right: 3px;
+      }
+
+      /* ───────── hero ───────── */
+      .hero {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 84px 24px 56px;
+        position: relative;
+        overflow: hidden;
+      }
+      .hero .kicker {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        letter-spacing: 0.18em;
+        color: var(--plum);
+        text-transform: uppercase;
+        margin-bottom: 22px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .hero .kicker::before {
+        content: "";
+        width: 34px;
+        height: 1px;
+        background: var(--plum);
+      }
+      h1 {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: clamp(34px, 5.4vw, 56px);
+        line-height: 1.42;
+        letter-spacing: 0.01em;
+        max-width: 21em;
+      }
+      h1 .em {
+        background: linear-gradient(transparent 68%, var(--plum-soft) 68%);
+        padding: 0 0.06em;
+      }
+      .hero .lead {
+        margin-top: 30px;
+        max-width: 44em;
+        color: var(--ink-soft);
+        font-size: 16.5px;
+      }
+      .hero .lead b {
+        color: var(--ink);
+      }
+      .hero-meta {
+        margin-top: 36px;
+        display: flex;
+        gap: 0;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .hero-meta div {
+        padding: 14px 26px 14px 0;
+        margin-right: 26px;
+        font-size: 13px;
+        color: var(--ink-soft);
+        border-right: 1px solid var(--line);
+      }
+      .hero-meta div:last-child {
+        border-right: none;
+      }
+      .hero-meta .k {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        color: var(--ink-faint);
+        display: block;
+        text-transform: uppercase;
+      }
+      .hero-meta .val {
+        font-weight: 700;
+        color: var(--ink);
+      }
+
+      /* ───────── section ───────── */
+      section {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 72px 24px 8px;
+      }
+      .sec-head {
+        display: flex;
+        align-items: baseline;
+        gap: 18px;
+        margin-bottom: 8px;
+      }
+      .sec-no {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--paper);
+        background: var(--ink);
+        padding: 3px 10px;
+        border-radius: 3px;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
+      }
+      h2 {
+        font-family: var(--serif);
+        font-size: clamp(24px, 3.2vw, 32px);
+        font-weight: 700;
+        line-height: 1.5;
+      }
+      .sec-sub {
+        color: var(--ink-faint);
+        font-size: 13.5px;
+        margin: 6px 0 34px;
+        padding-left: 2px;
+      }
+      h3 {
+        font-family: var(--serif);
+        font-size: 20px;
+        font-weight: 700;
+        margin: 44px 0 14px;
+      }
+      p.body {
+        max-width: 46em;
+        color: var(--ink-soft);
+        margin-bottom: 18px;
+      }
+      p.body b,
+      p.body strong {
+        color: var(--ink);
+      }
+      .fineprint {
+        font-size: 12.5px;
+        color: var(--ink-faint);
+        border-left: 3px solid var(--line-strong);
+        padding: 8px 18px;
+        margin: 20px 0;
+        line-height: 1.9;
+        max-width: 52em;
+      }
+      .fineprint b {
+        color: var(--ink-soft);
+      }
+
+      /* reveal */
+      .rv {
+        opacity: 0;
+        transform: translateY(14px);
+        transition:
+          opacity 0.7s ease,
+          transform 0.7s ease;
+      }
+      .rv.on {
+        opacity: 1;
+        transform: none;
+      }
+
+      /* ───────── ノード型カード ───────── */
+      .legend {
+        display: flex;
+        gap: 22px;
+        flex-wrap: wrap;
+        margin: 26px 0 26px;
+        font-size: 12.5px;
+        color: var(--ink-soft);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .legend i {
+        width: 11px;
+        height: 11px;
+        border-radius: 3px;
+        display: inline-block;
+      }
+      .node-group {
+        margin: 34px 0;
+      }
+      .node-group .gh {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 16px;
+      }
+      .node-group .gh h4 {
+        font-family: var(--serif);
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .node-group .gh .cnt {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--ink-faint);
+      }
+      .node-group .gh .desc {
+        font-size: 13px;
+        color: var(--ink-soft);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+        gap: 14px;
+      }
+      .ncard {
+        background: #fcfaf4;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px 18px 16px;
+        position: relative;
+        overflow: hidden;
+        transition:
+          transform 0.25s ease,
+          box-shadow 0.25s ease;
+      }
+      .ncard:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 26px -14px rgba(70, 60, 40, 0.35);
+      }
+      .ncard::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+      }
+      .ncard.c-know::before {
+        background: var(--terra);
+      }
+      .ncard.c-proj::before {
+        background: var(--plum);
+      }
+      .ncard .ty {
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+      }
+      .ncard .ja {
+        font-size: 12px;
+        color: var(--ink-faint);
+        margin-left: 8px;
+      }
+      .ncard p {
+        font-size: 13px;
+        color: var(--ink-soft);
+        line-height: 1.75;
+        margin-top: 9px;
+      }
+      .ncard p b {
+        color: var(--ink);
+      }
+
+      /* ───────── エッジ ───────── */
+      .edge-groups {
+        display: grid;
+        gap: 18px;
+        margin: 30px 0 10px;
+      }
+      .eg {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fcfaf4;
+        overflow: hidden;
+      }
+      .eg .eg-h {
+        padding: 13px 20px;
+        background: var(--paper-2);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .eg .eg-h h4 {
+        font-family: var(--serif);
+        font-size: 15.5px;
+        font-weight: 700;
+      }
+      .eg .eg-h span {
+        font-size: 12.5px;
+        color: var(--ink-soft);
+      }
+      .eg ul {
+        list-style: none;
+      }
+      .eg li {
+        display: grid;
+        grid-template-columns: 230px 1fr;
+        gap: 14px;
+        align-items: center;
+        padding: 11px 20px;
+        border-bottom: 1px solid
+          color-mix(in srgb, var(--line) 55%, transparent);
+        font-size: 13px;
+      }
+      .eg li:last-child {
+        border-bottom: none;
+      }
+      .eg .en {
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--ink);
+      }
+      .eg .pair {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--ink-faint);
+      }
+      .chip {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 2px 9px;
+        border-radius: 99px;
+        white-space: nowrap;
+        border: 1px solid transparent;
+      }
+      .chip.k {
+        background: var(--terra-soft);
+        color: #8a4631;
+        border-color: #e3c4b6;
+      }
+      .chip.p {
+        background: var(--plum-soft);
+        color: #5e3e4e;
+        border-color: #d4c0ca;
+      }
+      .chip.g {
+        background: var(--ochre-soft);
+        color: #7a6122;
+        border-color: #dfd0a0;
+      }
+      .arrow {
+        color: var(--ink-faint);
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+      .eg .note {
+        font-size: 12px;
+        color: var(--ink-faint);
+        grid-column: 1 / -1;
+        margin-top: -4px;
+        line-height: 1.7;
+      }
+      @media (max-width: 700px) {
+        .eg li {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+      }
+
+      /* ───────── state table ───────── */
+      .state-tbl {
+        margin: 26px 0 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        overflow-x: auto;
+        background: var(--paper-2);
+      }
+      .state-tbl table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+        min-width: 500px;
+      }
+      .state-tbl th {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-align: left;
+        padding: 12px 18px;
+        color: var(--ink-faint);
+        border-bottom: 1px solid var(--line);
+        font-weight: 600;
+      }
+      .state-tbl td {
+        padding: 11px 18px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        color: var(--ink-soft);
+        line-height: 1.7;
+      }
+      .state-tbl tr:last-child td {
+        border-bottom: none;
+      }
+      .state-tbl td:first-child {
+        color: var(--ink);
+        font-weight: 700;
+        font-family: var(--mono);
+        font-size: 13px;
+        background: color-mix(in srgb, var(--paper-3) 55%, transparent);
+        white-space: nowrap;
+      }
+      .state-tbl td code {
+        background: #fff;
+        font-size: 12px;
+      }
+
+      /* ───────── certainty table ───────── */
+      .cert-tbl {
+        margin: 20px 0 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: #fcfaf4;
+      }
+      .cert-tbl table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .cert-tbl th {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-align: left;
+        padding: 10px 18px;
+        color: var(--ink-faint);
+        border-bottom: 1px solid var(--line);
+        font-weight: 600;
+      }
+      .cert-tbl td {
+        padding: 9px 18px;
+        border-bottom: 1px solid
+          color-mix(in srgb, var(--line) 55%, transparent);
+        vertical-align: top;
+        color: var(--ink-soft);
+        line-height: 1.7;
+      }
+      .cert-tbl tr:last-child td {
+        border-bottom: none;
+      }
+      .cert-tbl td:first-child {
+        color: var(--ink);
+        font-weight: 600;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+
+      /* ───────── xref box ───────── */
+      .xref-box {
+        margin: 24px 0;
+        background: var(--code-bg);
+        color: var(--code-ink);
+        border-radius: var(--radius);
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.85;
+        padding: 18px 22px;
+        overflow-x: auto;
+        box-shadow: 0 14px 34px -20px rgba(46, 43, 37, 0.55);
+      }
+      .xref-box .dim {
+        color: #8f887a;
+      }
+      .xref-box .grn {
+        color: #a8c08c;
+      }
+      .xref-box .yel {
+        color: #d9bc7a;
+      }
+
+      /* ───────── 2-vault diagram ───────── */
+      .vault-pair {
+        margin: 34px 0 14px;
+        background: var(--paper-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 30px 18px 22px;
+        overflow-x: auto;
+      }
+      .vault-pair svg {
+        display: block;
+        margin: 0 auto;
+        min-width: 580px;
+        max-width: 780px;
+        width: 100%;
+      }
+
+      /* ───────── footer ───────── */
+      footer.site {
+        margin-top: 90px;
+        border-top: 1px solid var(--line);
+        background: var(--paper-2);
+      }
+      .foot {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 34px 24px 44px;
+        font-size: 12.5px;
+        color: var(--ink-faint);
+        line-height: 2;
+      }
+      .foot .refs {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+      }
+      .foot code {
+        background: var(--paper-3);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site">
+      <nav class="nav">
+        <span class="brand"
+          >graphrag-skill
+          <span class="v">/ project vault appendix</span></span
+        >
+        <ul>
+          <li>
+            <a href="graphrag-overview.html">overview</a>
+          </li>
+          <li>
+            <a href="#nodes"><span class="no">01</span>ノード型</a>
+          </li>
+          <li>
+            <a href="#edges"><span class="no">02</span>エッジ文法</a>
+          </li>
+          <li>
+            <a href="#state"><span class="no">03</span>状態語彙</a>
+          </li>
+          <li>
+            <a href="#xref"><span class="no">04</span>cross-vault ref</a>
+          </li>
+        </ul>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ═══════════ HERO ═══════════ -->
+      <div class="hero">
+        <p class="kicker">GraphRAG Knowledge — Project Vault</p>
+        <h1>
+          <span class="em">project vault</span><br />時限イニシアチブの<br />ナレッジグラフ
+        </h1>
+        <p class="lead">
+          vault は 2 種類ある。<b>system vault</b>（受動的にコード知識を蓄積する地層）と
+          <b>project vault</b>（能動的にプロジェクト健全性を監視する時限の計器盤）。
+          この附録は後者のスキーマを記述する。
+        </p>
+        <div class="hero-meta">
+          <div>
+            <span class="k">種別</span><span class="val">project</span>（VAULT.md に
+            <code>schema: project</code>）
+          </div>
+          <div>
+            <span class="k">ノード型</span><span class="val">16 種</span>
+          </div>
+          <div>
+            <span class="k">エッジ型</span><span class="val">22 種</span>（型ペア検証つき）
+          </div>
+          <div>
+            <span class="k">Deliverable</span><span class="val">system vault の住人</span>（cross-vault ref で参照）
+          </div>
+        </div>
+        <p class="fineprint">
+          <b>system vault との関係。</b>
+          知識系ノード（Decision / RejectedOption / Risk / Constraint / Goal / OperationalKnowledge / Investigation / ConversationChunk）は
+          system vault から継承する共通の 8 型。project vault はこれに
+          <b>8 つのプロジェクト固有型</b>を加えた 16 型で動く。
+          Deliverable は system vault の構造系ノードであり、project vault からは cross-vault ref で指す。
+        </p>
+      </div>
+
+      <!-- ═══════════ 2 vault 図 ═══════════ -->
+      <div class="vault-pair rv">
+        <svg
+          viewBox="0 0 780 220"
+          font-family="IBM Plex Mono, monospace"
+          aria-label="system vault と project vault の関係図"
+        >
+          <defs>
+            <marker
+              id="ah"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M0 0 L10 5 L0 10 z" fill="#7D5E6E" />
+            </marker>
+          </defs>
+
+          <!-- system vault -->
+          <rect
+            x="20"
+            y="20"
+            width="320"
+            height="180"
+            rx="12"
+            fill="#FCFAF4"
+            stroke="#5E7355"
+            stroke-width="1.6"
+          />
+          <text
+            x="180"
+            y="50"
+            text-anchor="middle"
+            font-size="14"
+            font-weight="600"
+            fill="#33302A"
+          >
+            system vault
+          </text>
+          <text
+            x="180"
+            y="68"
+            text-anchor="middle"
+            font-size="9.5"
+            fill="#8B8374"
+            font-family="Zen Kaku Gothic New, sans-serif"
+          >
+            受動的 / コード知識の地層
+          </text>
+          <g font-size="10" fill="#5F594D">
+            <rect
+              x="38"
+              y="82"
+              width="134"
+              height="24"
+              rx="5"
+              fill="#E3E8DB"
+            />
+            <text x="105" y="98" text-anchor="middle">
+              Decision / Risk / …
+            </text>
+            <rect
+              x="38"
+              y="114"
+              width="134"
+              height="24"
+              rx="5"
+              fill="#DEE5EA"
+            />
+            <text x="105" y="130" text-anchor="middle">
+              File / Layer / …
+            </text>
+            <rect
+              x="190"
+              y="98"
+              width="134"
+              height="30"
+              rx="5"
+              fill="#DEE5EA"
+              stroke="#54708A"
+              stroke-width="1.2"
+            />
+            <text
+              x="257"
+              y="117"
+              text-anchor="middle"
+              font-weight="600"
+              fill="#33302A"
+            >
+              Deliverable
+            </text>
+          </g>
+          <text
+            x="180"
+            y="170"
+            text-anchor="middle"
+            font-size="9.5"
+            fill="#8B8374"
+            font-family="Zen Kaku Gothic New, sans-serif"
+          >
+            13 ノード型 / 15 エッジ型
+          </text>
+
+          <!-- project vault -->
+          <rect
+            x="440"
+            y="20"
+            width="320"
+            height="180"
+            rx="12"
+            fill="#FCFAF4"
+            stroke="#7D5E6E"
+            stroke-width="1.6"
+          />
+          <text
+            x="600"
+            y="50"
+            text-anchor="middle"
+            font-size="14"
+            font-weight="600"
+            fill="#33302A"
+          >
+            project vault
+          </text>
+          <text
+            x="600"
+            y="68"
+            text-anchor="middle"
+            font-size="9.5"
+            fill="#8B8374"
+            font-family="Zen Kaku Gothic New, sans-serif"
+          >
+            能動的 / 時限イニシアチブの計器盤
+          </text>
+          <g font-size="10" fill="#5F594D">
+            <rect
+              x="458"
+              y="82"
+              width="134"
+              height="24"
+              rx="5"
+              fill="#E3E8DB"
+            />
+            <text x="525" y="98" text-anchor="middle">
+              Decision / Risk / …
+            </text>
+            <rect
+              x="458"
+              y="114"
+              width="134"
+              height="24"
+              rx="5"
+              fill="#EADEE4"
+            />
+            <text x="525" y="130" text-anchor="middle">
+              Task / Milestone / …
+            </text>
+            <rect
+              x="610"
+              y="98"
+              width="134"
+              height="24"
+              rx="5"
+              fill="#EADEE4"
+            />
+            <text x="677" y="114" text-anchor="middle">
+              Stakeholder / …
+            </text>
+          </g>
+          <text
+            x="600"
+            y="170"
+            text-anchor="middle"
+            font-size="9.5"
+            fill="#8B8374"
+            font-family="Zen Kaku Gothic New, sans-serif"
+          >
+            16 ノード型 / 22 エッジ型
+          </text>
+
+          <!-- cross-vault ref arrow -->
+          <path
+            d="M440 113 C 400 113, 380 113, 340 113"
+            fill="none"
+            stroke="#7D5E6E"
+            stroke-width="1.4"
+            stroke-dasharray="5 4"
+            marker-end="url(#ah)"
+          />
+          <text
+            x="390"
+            y="100"
+            text-anchor="middle"
+            font-size="9.5"
+            fill="#7D5E6E"
+            font-family="Zen Kaku Gothic New, sans-serif"
+          >
+            cross-vault ref
+          </text>
+        </svg>
+      </div>
+
+      <!-- ═══════════ §01 ノード型 ═══════════ -->
+      <section id="nodes">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 01</span>
+          <h2>16 のノード型</h2>
+        </div>
+        <p class="sec-sub">
+          system vault から知識系 8 型を継承し、プロジェクト固有の 8 型を加える。
+        </p>
+
+        <div class="legend rv">
+          <span
+            ><i style="background: var(--terra)"></i
+            >知識系（system vault と共通）</span
+          >
+          <span
+            ><i style="background: var(--plum)"></i
+            >プロジェクト固有</span
+          >
+        </div>
+
+        <div class="node-group rv">
+          <div class="gh">
+            <h4>知識系（継承）</h4>
+            <span class="cnt">8 型</span
+            ><span class="desc"
+              >— system vault と共通の蒸留知識</span
+            >
+          </div>
+          <div class="cards">
+            <div class="ncard c-know">
+              <span class="ty">Decision</span><span class="ja">採用した判断</span>
+              <p>選択肢のなかから選んだもの。<b>なぜそう決めたか</b>を description に。</p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">RejectedOption</span><span class="ja">却下した案</span>
+              <p>試して駄目だった案。再検討時に同じ失敗を防ぐ一級市民。</p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Constraint</span><span class="ja">制約</span>
+              <p>不変の外部条件（法規・SLA・技術制限）。</p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Goal</span><span class="ja">目的・到達点</span>
+              <p>
+                プロジェクトの目的因。<b>二層パターン推奨</b>: vision Goal（active のまま）+ gate Goal（achieved / abandoned）を <code>refines</code> で接続。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Risk</span><span class="ja">リスク</span>
+              <p>
+                脅威。<b>state を持たない</b>。緩和は <code>reduces_risk</code> エッジで。「ブロック」は Risk + <code>risks_in → Task</code> で表現。
+              </p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">OperationalKnowledge</span><span class="ja">運用知識</span>
+              <p>運用で学んだ知見。<b>繰り返しプロジェクト</b>（年次予算・年次イベント等）で特に輝く。</p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">Investigation</span><span class="ja">調査</span>
+              <p><code>state: "active" | "closed"</code>。<code>led_to</code> で判断を生む。</p>
+            </div>
+            <div class="ncard c-know">
+              <span class="ty">ConversationChunk</span><span class="ja">会話の断片</span>
+              <p>出所となる生の対話記録。蒸留知識が <code>derived_from</code> で辿る一次情報。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="node-group rv">
+          <div class="gh">
+            <h4>プロジェクト固有</h4>
+            <span class="cnt">8 型</span
+            ><span class="desc"
+              >— 時限イニシアチブの監視に必要な追加型</span
+            >
+          </div>
+          <div class="cards">
+            <div class="ncard c-proj">
+              <span class="ty">Source</span><span class="ja">外部情報源</span>
+              <p>
+                URL + 鮮度を持つ外部情報源。属性: <code>source_kind</code>（document / event / regulation / incident）、<code>url</code>、<code>fetched_at</code>、<code>staleness_threshold</code>。
+              </p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Theme</span><span class="ja">横断テーマ</span>
+              <p>
+                プロジェクト横断の関心事（コスト削減、基盤移行等）。system vault の Layer / Concern / Component に相当。単一プロジェクトでは不要なことが多い。
+              </p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Stakeholder</span><span class="ja">利害関係者</span>
+              <p>人物・チーム・外部組織。</p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Resource</span><span class="ja">資源</span>
+              <p>
+                人・予算・資産・時間。属性: <code>category</code>（people / budget / asset / time）。
+              </p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Milestone</span><span class="ja">マイルストーン</span>
+              <p>
+                時間軸上のチェックポイント。Goal を時間に接地させる。<code>state: "planned" | "achieved" | "missed"</code>。
+              </p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Assumption</span><span class="ja">前提・仮説</span>
+              <p>
+                検証前の前提。<b><code>certainty</code> は必須</b>フィールド（Established / Expected / Assumed / Speculative）。<code>has_premise</code> で仮説ツリーを構成。
+              </p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Agreement</span><span class="ja">合意・契約</span>
+              <p>
+                外部とのコミットメント。<b>状態は前進のみ</b>。撤回は expire → 新規 <code>exploring</code> で。
+              </p>
+            </div>
+            <div class="ncard c-proj">
+              <span class="ty">Task</span><span class="ja">作業単位</span>
+              <p>
+                判断に関わる粒度の作業。Jira チケット粒度のものは<b>入れない</b>。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ §02 エッジ ═══════════ -->
+      <section id="edges">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 02</span>
+          <h2>22 のエッジ型</h2>
+        </div>
+        <p class="sec-sub">
+          system vault の文法を拡張し、計画構造・利害関係者・横断テーマの関係を加える。
+        </p>
+
+        <p class="body rv">
+          <b>太字</b>は system vault から拡張された from / to 型、または project vault 固有のエッジ。
+        </p>
+
+        <div class="edge-groups">
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>出所</h4>
+              <span>— 知識を一次情報に繋ぎとめる</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">documented_by</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | Rejected | Risk | OK | Investigation</span
+                  ><span class="chip p">Agreement</span
+                  ><span class="arrow">→</span
+                  ><span class="chip p">Source</span></span
+                >
+              </li>
+              <li>
+                <span class="en">derived_from</span
+                ><span class="pair"
+                  ><span class="chip k">蒸留知識 + Goal</span
+                  ><span class="chip p">Assumption | Task</span
+                  ><span class="arrow">→</span
+                  ><span class="chip g">ConversationChunk | Investigation</span
+                  ><span class="chip p">Source</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>系譜・歴史</h4>
+              <span>— 判断がどこから来て何を置き換えたか</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">supersedes</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">RejectedOption</span></span
+                >
+              </li>
+              <li>
+                <span class="en">has_premise</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK | Risk</span
+                  ><span class="chip p">Task | Assumption</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Decision | Constraint | Goal | OK</span
+                  ><span class="chip p">Assumption | Agreement</span></span
+                >
+              </li>
+              <li>
+                <span class="en">refines</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK → Decision | OK</span
+                  >&nbsp;/&nbsp;<span class="chip k">Goal → Goal</span
+                  >&nbsp;/&nbsp;<span class="chip p">Task → Task</span></span
+                >
+              </li>
+              <li>
+                <span class="en">led_to</span
+                ><span class="pair"
+                  ><span class="chip k">Investigation</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Decision | RejectedOption | OK | Risk</span></span
+                >
+              </li>
+              <li>
+                <span class="en">triggered_by</span
+                ><span class="pair"
+                  ><span class="chip k">Investigation</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Risk | ConversationChunk</span
+                  ><span class="chip p">Source | Assumption | Stakeholder</span></span
+                >
+              </li>
+              <li>
+                <span class="en">rejected_in</span
+                ><span class="pair"
+                  ><span class="chip k">RejectedOption</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Investigation</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>制約・リスク</h4>
+              <span>— 何が何を縛り、何を脅かすか</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">constrains</span
+                ><span class="pair"
+                  ><span class="chip k">Constraint</span
+                  ><span class="chip p">Agreement</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="chip p">Task | Goal</span></span
+                >
+              </li>
+              <li>
+                <span class="en">risks_in</span
+                ><span class="pair"
+                  ><span class="chip k">Risk</span
+                  ><span class="arrow">→</span
+                  ><span class="chip p">Task | Goal | Milestone</span></span
+                >
+              </li>
+              <li>
+                <span class="en">reduces_risk</span
+                ><span class="pair"
+                  ><span class="chip k">Decision | OK</span
+                  ><span class="chip p">Task</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Risk</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>計画構造</h4>
+              <span>— Goal・Task・Milestone・Resource の力学</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">achieves</span
+                ><span class="pair"
+                  ><span class="chip p">Task</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Goal</span></span
+                >
+              </li>
+              <li>
+                <span class="en">depends_on</span
+                ><span class="pair"
+                  ><span class="chip p">Task → Task</span
+                  >&nbsp;/&nbsp;<span class="chip p">Milestone → Milestone</span></span
+                >
+              </li>
+              <li>
+                <span class="en">targets</span
+                ><span class="pair"
+                  ><span class="chip p">Task</span
+                  ><span class="chip k">Goal</span
+                  ><span class="arrow">→</span
+                  ><span class="chip p">Milestone</span></span
+                >
+                <span class="note"
+                  >system vault では Goal → Deliverable。project vault では Task / Goal → Milestone。cross-vault ref で Deliverable を狙うことも可能。</span
+                >
+              </li>
+              <li>
+                <span class="en">falls_back_to</span
+                ><span class="pair"
+                  ><span class="chip p">Task → Task</span
+                  >&nbsp;/&nbsp;<span class="chip k">Goal → Goal</span></span
+                >
+                <span class="note"
+                  >Plan B。チェーン可能。</span
+                >
+              </li>
+              <li>
+                <span class="en">requires</span
+                ><span class="pair"
+                  ><span class="chip p">Task</span
+                  ><span class="arrow">→</span
+                  ><span class="chip p">Resource</span></span
+                >
+                <span class="note"
+                  >オプション属性: <code>period_start</code> / <code>period_end</code> / <code>allocation</code>。</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>利害関係者</h4>
+              <span>— 誰が何に関わり、何に責任を持つか</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">concerned_with</span
+                ><span class="pair"
+                  ><span class="chip p">Stakeholder</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Goal | Decision | Risk</span
+                  ><span class="chip p">Task | Milestone | Theme</span></span
+                >
+              </li>
+              <li>
+                <span class="en">responsible_for</span
+                ><span class="pair"
+                  ><span class="chip p">Stakeholder</span
+                  ><span class="arrow">→</span
+                  ><span class="chip p">Task | Milestone | Agreement</span
+                  ><span class="chip k">Goal</span></span
+                >
+              </li>
+              <li>
+                <span class="en">party_to</span
+                ><span class="pair"
+                  ><span class="chip p">Stakeholder</span
+                  ><span class="arrow">→</span
+                  ><span class="chip p">Agreement</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>横断テーマ</h4>
+              <span>— プロジェクト横断の関心事をまとめる</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">encompasses</span
+                ><span class="pair"
+                  ><span class="chip p">Theme</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Goal | Decision | Risk</span
+                  ><span class="chip p">Task | Resource | Assumption</span></span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="eg rv">
+            <div class="eg-h">
+              <h4>基盤</h4>
+              <span>— インフラストラクチャ</span>
+            </div>
+            <ul>
+              <li>
+                <span class="en">discussed_in</span
+                ><span class="pair"
+                  ><span class="chip g">ConversationChunk</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">Investigation</span></span
+                >
+              </li>
+              <li>
+                <span class="en">temporary_relation_candidate</span
+                ><span class="pair"
+                  ><span class="chip k">任意</span
+                  ><span class="arrow">→</span
+                  ><span class="chip k">任意</span></span
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ §03 状態語彙 ═══════════ -->
+      <section id="state">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 03</span>
+          <h2>状態語彙</h2>
+        </div>
+        <p class="sec-sub">
+          state を持つ型と、その遷移の制約。Risk と Assumption は state を持たない。
+        </p>
+
+        <div class="state-tbl rv">
+          <table>
+            <tr>
+              <th>型</th>
+              <th>許容される state</th>
+            </tr>
+            <tr>
+              <td>Investigation</td>
+              <td><code>active</code> | <code>closed</code></td>
+            </tr>
+            <tr>
+              <td>Decision / OK</td>
+              <td><code>superseded</code> のみ（state なし = 現行）</td>
+            </tr>
+            <tr>
+              <td>Goal</td>
+              <td><code>planned</code> | <code>active</code> | <code>achieved</code> | <code>abandoned</code></td>
+            </tr>
+            <tr>
+              <td>Agreement</td>
+              <td><code>exploring</code> | <code>negotiating</code> | <code>signed</code> | <code>active</code> | <code>expired</code></td>
+            </tr>
+            <tr>
+              <td>Task</td>
+              <td><code>planned</code> | <code>active</code> | <code>completed</code> | <code>cancelled</code></td>
+            </tr>
+            <tr>
+              <td>Milestone</td>
+              <td><code>planned</code> | <code>achieved</code> | <code>missed</code></td>
+            </tr>
+          </table>
+        </div>
+
+        <p class="body rv">
+          <b>Risk</b> は state を持たない。緩和は <code>reduces_risk</code> エッジで表現する。
+          <b>Assumption</b> も state を持たない。確信度は <code>certainty</code> 属性で管理する。
+        </p>
+
+        <h3 class="rv">Assumption の <code>certainty</code>（必須フィールド）</h3>
+
+        <div class="cert-tbl rv">
+          <table>
+            <tr>
+              <th>Level</th>
+              <th>意味</th>
+              <th>使いどころ</th>
+            </tr>
+            <tr>
+              <td>Established</td>
+              <td>確認済みの事実</td>
+              <td>契約済み・実測済み・過去の実績</td>
+            </tr>
+            <tr>
+              <td>Expected</td>
+              <td>証拠に裏付けられた高い確信</td>
+              <td>過去パターン・口頭合意・強い兆候</td>
+            </tr>
+            <tr>
+              <td>Assumed</td>
+              <td>未検証の前提</td>
+              <td>合理的な推測。迷ったらこれ</td>
+            </tr>
+            <tr>
+              <td>Speculative</td>
+              <td>希望的観測</td>
+              <td>根拠なし。「やってみないと分からない」</td>
+            </tr>
+          </table>
+        </div>
+
+        <p class="fineprint rv">
+          <code>certainty</code> は Assumption ノードの必須フィールド。<code>commit-mutation</code> は未指定を reject する。
+          迷ったら <code>Assumed</code>。定期的に再評価: <code>Assumed</code> → <code>Established</code>（検証済み）or <code>Assumed</code> → <code>Speculative</code>（反証あり）。
+        </p>
+      </section>
+
+      <!-- ═══════════ §04 cross-vault ref ═══════════ -->
+      <section id="xref">
+        <div class="sec-head rv">
+          <span class="sec-no">§ 04</span>
+          <h2>cross-vault ref</h2>
+        </div>
+        <p class="sec-sub">
+          Deliverable は system vault の住人。project vault からは ref 構文で指す。
+        </p>
+
+        <p class="body rv">
+          エッジの <code>to</code> フィールドに <code>vault:&lt;slug&gt;/deliverable:&lt;system&gt;:&lt;slug&gt;</code> 形式を書く。
+          <code>vault:</code> プレフィクス付きのターゲットは、ローカルの存在チェックと型ペア検証をスキップする。
+        </p>
+
+        <div class="xref-box rv">
+          <span class="dim">// Task が特定の Deliverable を必要とする</span>
+          <br />{ <span class="grn">"type"</span>: <span class="yel">"requires"</span>,
+            <span class="grn">"from"</span>: <span class="yel">"task:proj:integration"</span>,
+            <span class="grn">"to"</span>: <span class="yel">"vault:platform-x/deliverable:platform-x:product-v2.0"</span> }
+          <br /><br />
+          <span class="dim">// Goal が Deliverable を狙う</span>
+          <br />{ <span class="grn">"type"</span>: <span class="yel">"targets"</span>,
+            <span class="grn">"from"</span>: <span class="yel">"goal:proj:demo-on-v4"</span>,
+            <span class="grn">"to"</span>: <span class="yel">"vault:platform-x/deliverable:platform-x:product-v1.5"</span> }
+          <br /><br />
+          <span class="dim">// Goal の前提が Deliverable の完成</span>
+          <br />{ <span class="grn">"type"</span>: <span class="yel">"has_premise"</span>,
+            <span class="grn">"from"</span>: <span class="yel">"goal:proj:launch"</span>,
+            <span class="grn">"to"</span>: <span class="yel">"vault:platform-x/deliverable:platform-x:product-v2.0"</span> }
+        </div>
+
+        <p class="fineprint rv">
+          <b>VAULT.md の設定。</b>project vault の VAULT.md には <code>schema: project</code> と <code>vault_slug</code> が必要。
+          <code>vault_slug_aliases</code> でリネーム時の後方互換を確保できる。
+        </p>
+      </section>
+    </main>
+
+    <footer class="site">
+      <div class="foot">
+        <div>
+          graphrag-skill — project vault appendix（system vault overview は <a href="graphrag-overview.html">こちら</a>）
+        </div>
+        <div class="refs">
+          <span>スキーマ: <code>graphrag/schema-project.ts</code></span>
+          <span>クイックリファレンス: <code>references/schema-quickref-project.md</code></span>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      const io = new IntersectionObserver(
+        (es) => {
+          es.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add("on");
+              io.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.08, rootMargin: "0px 0px -40px 0px" },
+      );
+      document.querySelectorAll(".rv").forEach((el) => io.observe(el));
+    </script>
+  </body>
+</html>
