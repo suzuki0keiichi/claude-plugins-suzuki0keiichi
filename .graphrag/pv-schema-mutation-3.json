@@ -1,0 +1,70 @@
+{
+  "reason": "非エンジニアリング5プロジェクト (来期予算/会社移転/R&Dチップ・論文/採用イベント/自動運転チャレンジ) での検証結果を永続化。計12プロジェクトでスキーマ検証完了。",
+  "nodes": [
+    {
+      "op": "create",
+      "id": "investigation:graphrag-skill-dev:pv-non-engineering-validation",
+      "type": "Investigation",
+      "title": "project vault スキーマの非エンジニアリング検証: 来期予算/会社移転/R&D/採用イベント/自動運転チャレンジの5プロジェクトで16型を検証",
+      "summary": "コードが一切ないプロジェクトでスキーマが機能するかを、AIが架空のリアルなサンプルデータを生成してロールプレイ検証。全5プロジェクトで14-16/16型が自然に埋まり、スキーマ破壊的な問題はゼロ。Assumption+certainty level が事業計画の仮定ツリーとして普遍的に機能することを実証。",
+      "description": "検証対象: (1)来期予算策定 — 6部門の予算要求集約、売上仮説ツリー(拠点数×ARPU×継続率)、為替リスク、取締役会承認。(2)会社移転 — 賃貸契約交渉、レイアウト設計、IT移行、法的手続き、引越し業者選定。(3)R&Dチップ開発(3年) — TSMC委託、ARM IP、ステージゲート。(4)R&D論文投稿(3ヶ月) — 仮説検証、投稿、査読対応。(5)採用イベント — ハッカソン企画、会場予約、集客、フォローアップ。(6)自動運転チャレンジ — 車両改造、コース対応、前回学びの活用。エンジニアリング7PJ + 非エンジニアリング5PJ = 計12プロジェクトでスキーマ検証完了。",
+      "raw_content": "使用率:\n来期予算: 15/16 (OK薄い)\n会社移転: 16/16\nR&Dチップ: 15/16 (Theme薄い)\nR&D論文: 14/16 (Theme,Resource薄い)\n採用イベント: 14/16 (Layer,Component不要)\n自動運転チャレンジ: 14/16 (Layer,Component不要)\n\n全プロジェクト共通の発見:\n1. Assumption+certainty が普遍的に機能(予算の売上仮説ツリーが圧巻)\n2. Agreement state が契約ライフサイクルと完全一致(移転の賃貸契約で実証)\n3. Goal 2層パターンが3PJで独立に発見された\n4. OK が繰り返すプロジェクト(年次予算,年次イベント,年次大会)で真価\n5. スキーマ破壊的問題ゼロ。全て運用ガイドか属性追加で対処可能",
+      "state": "closed"
+    },
+    {
+      "op": "create",
+      "id": "ok:graphrag-skill-dev:pv-goal-two-layer-pattern",
+      "type": "OperationalKnowledge",
+      "title": "Goal の2層パターン: ビジョン(常にactive) + ゲート(achieved/abandoned) を refines で接続。achieved タイミングの曖昧さを解消する",
+      "summary": "R&D・採用イベント・予算策定の3プロジェクトで独立に同じ問題が発見された — 「いつGoalがachievedか」が曖昧。解決: 上位Goal(ビジョン/継続目標)は長くactiveのまま維持し、下位Goal(ゲート/マイルストーン的目標)だけachieved/abandonedに遷移。refinesエッジで上下を接続。スキーマ変更不要。",
+      "description": "具体例: (1)R&Dチップ: 「NVIDIA脱却」(ビジョン,常にactive) → refines → 「テープアウト完了」(ゲート,achieved可能)。(2)採用イベント: 「パイプライン強化」(継続,active) → refines → 「イベント開催成功」(ゲート,8/23→achieved) + 「面接オファー10名」(ゲート)。(3)予算: 「FY27予算承認」→ refines → 「取締役会承認」+ 「配賦完了」。vault が閉じるのは最上位Goalのachieved/abandonedだが、最上位がビジョン型なら「全ゲートGoalがachieved + 最上位をachievedに手動遷移」が閉じる条件。"
+    },
+    {
+      "op": "create",
+      "id": "ok:graphrag-skill-dev:pv-assumption-tree-universal",
+      "type": "OperationalKnowledge",
+      "title": "Assumption + certainty level は事業計画の仮定ツリーとして普遍的に機能する。スプレッドシートが what を計算し、graph が why と if を追跡する",
+      "summary": "予算策定PJの検証で実証: 売上=拠点数(Assumed)×ARPU(Expected)×継続率(Expected) の仮定ツリーが has_premise でGoalに接続。「この売上目標は3つのAssumptionのうち2つがExpected以下」が構造から自動導出される。certainty が Assumed→Speculative に後退した時、依存する全Decision/Goalへの影響波及が即座に特定可能。",
+      "description": "graph がやるのは数値計算ではなく計算の前提構造の管理。スプレッドシートが what を計算し、graph が why (なぜその数字か) と if (その前提が崩れたら何が壊れるか) を追跡する。この分業で「売上予測が外れた時にどの仮定が間違っていたか」を即座に特定できる。Session 1 §2.4 の設計意図がそのまま実証された。"
+    },
+    {
+      "op": "create",
+      "id": "ok:graphrag-skill-dev:pv-ok-shines-for-recurring",
+      "type": "OperationalKnowledge",
+      "title": "OperationalKnowledge は繰り返すプロジェクト(年次予算/年次イベント/年次大会)で真価を発揮する。「次にこのPJをやる人」のための知識",
+      "summary": "5PJ検証で共通パターン: OK → has_premise → 次回の Decision が最も自然な因果チェーン。自動運転チャレンジ「PID制御は100km/h超で遅延」→次回「MPC導入」、採用イベント「connpass告知は4週間前必要」→次回「7/26告知」、予算「実績なしだと15-20%過少」→次回「実績ベース算定義務化」。単発PJでも価値はあるが、繰り返すPJで指数関数的に価値が上がる。"
+    },
+    {
+      "op": "create",
+      "id": "decision:graphrag-skill-dev:pv-agreement-no-backward-transition",
+      "type": "Decision",
+      "title": "Agreement の state 後退 (negotiating→exploring) は許容しない。旧を expired → 新を exploring で作り直す",
+      "summary": "予算策定PJで「交渉決裂→やり直し」パターンが指摘された。state マシンを双方向にすると複雑化するため、後退は「旧Agreement を expired にして新Agreement を exploring で立てる」で対処。supersedes エッジで新旧を接続。追跡性が高く、state 語彙は一方向のまま維持。",
+      "description": "予算策定エージェントが「negotiating → exploring の後退」と「active → negotiating の条件改定」を指摘。双方向 state は「あるからいけない」原則に反する。旧 Agreement を expired にして新しいものを立てる方が、交渉の各フェーズが独立したノードとして残り、「何回交渉し直したか」「前回の条件は何だったか」が追跡可能。"
+    },
+    {
+      "op": "create",
+      "id": "decision:graphrag-skill-dev:pv-resource-fetched-at",
+      "type": "Decision",
+      "title": "Resource の allocated 値は Source の fetched_at パターンを適用。スナップショット時点を明示する",
+      "summary": "会社移転PJで指摘: 予算配賦(allocated)は策定中に変化し続ける。Source の fetched_at/staleness_threshold と同じパターンで、Resource にも「この値は○○時点のスナップショット」を持たせる。Resource の属性設計(§7.6)に組み込む。"
+    },
+    {
+      "op": "update",
+      "id": "risk:graphrag-skill-dev:pv-small-project-untested",
+      "updates": {
+        "title": "17ノード×21エッジの小規模・非エンジニアリングPJ検証 → 12PJで検証完了。スキーマ破壊的問題なし",
+        "summary": "当初リスク: 巨大PJでしか検証していなかった。対処: エンジニアリング小規模3PJ (VDU初回リリース, FMS API v2, Remote L4対応) + 非エンジニアリング5PJ (予算/移転/R&D×2/イベント/チャレンジ) で追加検証。全プロジェクトで14-16/16型が自然に埋まり、スキーマ破壊的問題ゼロ。残リスクは実運用での state 腐敗のみ (C3: LLM が state を適切に更新し続けるか)。"
+      }
+    }
+  ],
+  "edges": [
+    { "op": "create", "id": "edge:pv-noneng-derived-goal2layer", "type": "derived_from", "from": "ok:graphrag-skill-dev:pv-goal-two-layer-pattern", "to": "investigation:graphrag-skill-dev:pv-non-engineering-validation" },
+    { "op": "create", "id": "edge:pv-noneng-derived-assumption", "type": "derived_from", "from": "ok:graphrag-skill-dev:pv-assumption-tree-universal", "to": "investigation:graphrag-skill-dev:pv-non-engineering-validation" },
+    { "op": "create", "id": "edge:pv-noneng-derived-ok-recurring", "type": "derived_from", "from": "ok:graphrag-skill-dev:pv-ok-shines-for-recurring", "to": "investigation:graphrag-skill-dev:pv-non-engineering-validation" },
+    { "op": "create", "id": "edge:pv-noneng-derived-agreement-noback", "type": "derived_from", "from": "decision:graphrag-skill-dev:pv-agreement-no-backward-transition", "to": "investigation:graphrag-skill-dev:pv-non-engineering-validation" },
+    { "op": "create", "id": "edge:pv-noneng-derived-resource-fetched", "type": "derived_from", "from": "decision:graphrag-skill-dev:pv-resource-fetched-at", "to": "investigation:graphrag-skill-dev:pv-non-engineering-validation" },
+    { "op": "create", "id": "edge:pv-agreement-noback-premise-state", "type": "has_premise", "from": "decision:graphrag-skill-dev:pv-agreement-no-backward-transition", "to": "decision:graphrag-skill-dev:pv-state-minimalism" },
+    { "op": "create", "id": "edge:pv-noneng-risk-derived", "type": "derived_from", "from": "risk:graphrag-skill-dev:pv-small-project-untested", "to": "investigation:graphrag-skill-dev:pv-non-engineering-validation" }
+  ]
+}

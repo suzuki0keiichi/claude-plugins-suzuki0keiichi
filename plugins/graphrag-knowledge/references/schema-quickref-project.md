@@ -64,13 +64,19 @@ For time-bounded initiatives (business projects). Differences from system vault:
 
 ## Cross-Vault Ref
 
-Edge `to` field accepts `vault:<vault_slug>/deliverable:<system>:<slug>`:
+Edge `to` field accepts `vault:<vault_slug>/deliverable:<system>:<slug>`. Local existence check and type-pair check are skipped for `vault:` prefixed targets.
 
+Common patterns:
 ```json
-{ "type": "requires", "from": "task:proj:backend-integration", "to": "vault:platform-x/deliverable:platform-x:product-v2.0" }
-```
+// Task requires a specific Deliverable
+{ "type": "requires", "from": "task:proj:integration", "to": "vault:platform-x/deliverable:platform-x:product-v2.0" }
 
-Local existence check and type-pair check are skipped for `vault:` prefixed targets.
+// Goal targets a Deliverable ("we run on this version" / "we aim for this release")
+{ "type": "targets", "from": "goal:proj:demo-on-v4", "to": "vault:platform-x/deliverable:platform-x:product-v1.5" }
+
+// Goal depends on a Deliverable being ready (stronger: if it breaks, goal is at risk)
+{ "type": "has_premise", "from": "goal:proj:launch", "to": "vault:platform-x/deliverable:platform-x:product-v2.0" }
+```
 
 ## ID Convention
 

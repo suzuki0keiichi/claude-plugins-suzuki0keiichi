@@ -1,0 +1,63 @@
+{
+  "reason": "Session 2 後半の追加設計決定: (1) platform vault 不要→system vault に Deliverable 追加、(2) vault 粒度の精緻化 (時限イニシアチブ)、(3) cross-vault ref のスキーマ設計 (vault_slug/aliases/Component vault_ref)、(4) system 階層はデプロイ単位でフラット化。既存の pv-platform-vault-concept Decision を update。",
+  "nodes": [
+    {
+      "op": "update",
+      "id": "decision:graphrag-skill-dev:pv-platform-vault-concept",
+      "updates": {
+        "title": "platform vault は不要。system vault に Deliverable を追加するだけで済む (13ノード型, 15エッジ型)",
+        "summary": "当初「プロダクトプラットフォーム vault」を第3の vault 種類として提案したが、検証の結果 system vault に Deliverable + produces を追加するだけで十分と判明。vault は2種類のみ: system vault (プロダクト/コード、受動的) と project vault (時限イニシアチブ、能動的)。",
+        "description": "Deliverable は system vault の住人。project vault は cross-vault ref で参照する。system vault のスキーマは 12→13ノード型 (Deliverable 追加)、14→15エッジ型 (produces 追加) に拡張。project vault は 16ノード型 (Deliverable なし) + 21エッジ型。ユーザーの問い「system vault と分けて存在する理由がイマイチ分からない」が突破口。MOT も対応バージョンが沢山あるケースで Deliverable が解決策になることをユーザーが確認。"
+      }
+    },
+    {
+      "op": "update",
+      "id": "decision:graphrag-skill-dev:pv-vault-granularity",
+      "updates": {
+        "title": "project vault = 時限付きイニシアチブ。Goal の achieved/abandoned で vault が閉じる。システムやチームは vault ではない",
+        "summary": "vault 粒度の精緻化: (1) システム/プロダクト (VDU, FMS等) は system vault の Deliverable、(2) チーム/組織 (Remote Op, Fleet Hub) は Stakeholder の集合で vault ではない、(3) プロジェクト (VDU初回リリース, FMS API v2リニューアル) だけが project vault。Goal が achieved/abandoned になったら vault のライフサイクルが閉じる。",
+        "description": "小規模プロジェクト検証で発覚: 当初「VDU」「Fleet Hub」「Remote Op」をプロジェクトとして扱ったが、VDU はシステム、Fleet Hub/Remote Op はチーム名。正しくは「VDU初回リリース & bagpicker置き換え」「FMS API v2リニューアル」「Autoware Drive V2 遠隔L4対応」がプロジェクト。ユーザー (VDU 担当者) の指摘「VDU はシステムで、プロジェクトにするなら VDU の初回リリース」が決定的。vault が閉じる = アーカイブ化 (read-only)。system vault の Deliverable は vault クローズ後も生き続ける。"
+      }
+    },
+    {
+      "op": "create",
+      "id": "decision:graphrag-skill-dev:pv-cross-vault-ref-schema",
+      "type": "Decision",
+      "title": "cross-vault ref: edge の to に vault:<slug>/... を許容 + VAULT.md に vault_slug/aliases + Component に vault_ref 属性",
+      "summary": "cross-vault 参照のスキーマ設計。(1) edge の to フィールドが vault:<slug>/node-type:<system>:<slug> 形式を許容、(2) VAULT.md に vault_slug (変更不可の正式名) + vault_slug_aliases (永久欠番), (3) Component ノードに vault_ref 属性 (子 vault へのポインタ)。ユニーク性は各自管理、中央レジストリなし。",
+      "description": "段階的実装: Stage 1 (今ある world_hints でヒント検索)、Stage 2 (to フィールドに qualified ID を文字列保存、validator は vault: prefix の存在チェックをスキップ)、Stage 3 (resolver が cross-vault ID を実際に辿る + 壊れた ref 検出)。vault_slug_aliases は過去の slug を永久欠番として保持し、resolver がフォールバック解決する。新しい ref を旧 alias で書くのは lint で禁止。Component の vault_ref はエッジではなく属性 — Component→vault全体 は「ノードではないもの」への接続になるため、エッジより属性が自然。vault_ref が null なら vault 内の File/Decision 等で完結、値があれば「詳細は別 vault」。",
+      "raw_content": "VAULT.md frontmatter 例:\n---\nsystem: fleet-management-system\nschema: system\nvault_slug: fms\nvault_slug_aliases:\n  - fleet-hub\n---\n\nedge 例:\n{\n  type: requires,\n  from: task:odaiba-l4:dp-integration,\n  to: vault:pilot-auto/deliverable:pilot-auto:x2-v5.0.0\n}\n\nComponent 例:\n[Web.Auto system vault]\n  Component: fms (vault_ref: fms)\n  Component: mot (vault_ref: mot)\n  Component: auth (vault_ref: null) ← 独立vaultにしない"
+    },
+    {
+      "op": "create",
+      "id": "decision:graphrag-skill-dev:pv-system-hierarchy-flat",
+      "type": "Decision",
+      "title": "system vault の階層はデプロイ単位でフラット化。フラクタル構造にしない",
+      "summary": "判断基準: 独自にデプロイするかどうか。デプロイ単位 = vault 単位。親システム (Pilot.Auto, Web.Auto) は vault として存在し、子を Component で持つ。子が独自リリースサイクルを持つなら独立 vault (FMS, MOT)、親と一緒にリリースされるなら Component のまま (Diffusion Planner)。「Web.Auto」のようなブランド名/組織名は vault ではない。",
+      "description": "ユーザーの懸念「フラクタル構造みたいな事をしないといけないのでは」に対する回答。Pilot.Auto の中の Diffusion Planner は Component として存在し、独自リリースを始めたら vault 分割する。Web.Auto は実はブランド名であり、中身の FMS/MOT/Drive Console/OTA/Auth がそれぞれデプロイ単位で独立 vault。Component の vault_ref 属性が親→子 vault のポインタを担う。"
+    },
+    {
+      "op": "create",
+      "id": "rejected-option:graphrag-skill-dev:pv-edge-reason-attribute",
+      "type": "RejectedOption",
+      "title": "cross-vault エッジに reason 属性を追加する案 → 不要。エッジ種別自体が reason",
+      "summary": "同じ Deliverable を異なるプロジェクトが参照する際に「なぜ参照するか」が見えない問題に対し、reason 属性追加案が出たがユーザーが却下。エッジ種別 (requires/achieves/depends_on) 自体が関係の理由を表しており、追加属性はエッジ種別の意味を薄める。参照の文脈は参照元の Task/Goal の description で語れば十分。"
+    },
+    {
+      "op": "create",
+      "id": "ok:graphrag-skill-dev:pv-small-project-validation-result",
+      "type": "OperationalKnowledge",
+      "title": "小規模プロジェクト検証結果: 14-15/16型が自然に埋まる。vault が閉じる条件の明確化が最大の収穫",
+      "summary": "3プロジェクト (VDU初回リリース, FMS API v2リニューアル, Autoware Drive V2 遠隔L4対応) を正しい粒度 (時限イニシアチブ) で検証。14-15/16型使用。最大の改善点は vault クローズ条件の明確化: VDU=全顧客移行完了, FMS v2=旧API終了, Remote L4=v5.0.0に遠隔監視搭載。前回「組織/システムとして扱った」時には終了条件がなかった。"
+    }
+  ],
+  "edges": [
+    { "op": "create", "id": "edge:pv-crossvault-derived", "type": "derived_from", "from": "decision:graphrag-skill-dev:pv-cross-vault-ref-schema", "to": "investigation:graphrag-skill-dev:pv-schema-concrete-validation" },
+    { "op": "create", "id": "edge:pv-hierarchy-derived", "type": "derived_from", "from": "decision:graphrag-skill-dev:pv-system-hierarchy-flat", "to": "investigation:graphrag-skill-dev:pv-schema-concrete-validation" },
+    { "op": "create", "id": "edge:pv-reason-derived", "type": "derived_from", "from": "rejected-option:graphrag-skill-dev:pv-edge-reason-attribute", "to": "investigation:graphrag-skill-dev:pv-schema-concrete-validation" },
+    { "op": "create", "id": "edge:pv-smallpj-derived", "type": "derived_from", "from": "ok:graphrag-skill-dev:pv-small-project-validation-result", "to": "investigation:graphrag-skill-dev:pv-schema-concrete-validation" },
+    { "op": "create", "id": "edge:pv-crossvault-premise-granularity", "type": "has_premise", "from": "decision:graphrag-skill-dev:pv-cross-vault-ref-schema", "to": "decision:graphrag-skill-dev:pv-vault-granularity" },
+    { "op": "create", "id": "edge:pv-hierarchy-premise-platform", "type": "has_premise", "from": "decision:graphrag-skill-dev:pv-system-hierarchy-flat", "to": "decision:graphrag-skill-dev:pv-platform-vault-concept" },
+    { "op": "create", "id": "edge:pv-schema-premise-crossvault", "type": "has_premise", "from": "decision:graphrag-skill-dev:pv-schema-17-21", "to": "decision:graphrag-skill-dev:pv-cross-vault-ref-schema" }
+  ]
+}
