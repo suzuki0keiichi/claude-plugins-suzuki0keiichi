@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.1.0
+version: 4.2.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④⑤ 実装一段落・結論確定・却下・記録指示で書き戻す (詳細は §Proactive Persistence)。【初回】⑥ 未知のリポジトリを初回索引したい時。
 ---
 
@@ -141,7 +141,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `evidence` | provenance-attached answer packet (reads vault) |
 | `index` | deterministic indexing (git ls-files + role classification + deps) → graph.json |
 | `vector-index` | build vector index (from vault) |
-| `vault-build` | graph.json → vault (only for converting indexer output to vault) |
+| `vault-build` | graph.json → vault (**empty-vault initial build only**; wipes & rebuilds. Guarded: refuses if the existing vault holds nodes absent from the source graph, since those non-indexed knowledge nodes would be lost. `--force` to override) |
 | `vault-import` | vault → graph.json (for round-trip verification) |
 | `concern-hint` | machine hints for Concerns (embedding proximity clustering). For blind-spot checking after LLM modeling |
 | `edge-suggest-policy` | sets_policy_for candidate extraction |

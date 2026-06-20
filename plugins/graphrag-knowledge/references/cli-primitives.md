@@ -78,10 +78,12 @@ embedding endpoint (`GRAPHRAG_EMBEDDING_ENDPOINT` 自動検出 or 明示) で Fi
 ## vault-build — graph.json → Obsidian vault
 
 ```sh
-node graphrag/cli.ts vault-build <graph.json> <vault-dir>
+node graphrag/cli.ts vault-build <graph.json> <vault-dir> [--force]
 ```
 
 graph.json (索引器出力など) から vault を生成。通常の知識書込は `commit-mutation` が graph.json を介さず直接 vault に原子書込するので不要。索引器出力を vault 化する時などに使う。`GRAPHRAG_GRAPH_JSON_PATH` / `GRAPHRAG_VAULT_DIR` 設定済みなら引数省略可。
+
+**全消し→再構築なので空 vault の初回構築専用**。`<vault-dir>` を一旦削除して graph.json から作り直す。索引 (graph.json) には File / Pocket / Stratum しか入らないので、手で書き戻された知識ノード (Decision / OK / Risk / Constraint / Vein …) が既に在る vault に対して実行すると、それらは索引外なので消える。**上書きガード**: 既存 vault に「source graph に無いノード」があれば中断 (exit 1) する。空 vault の初回構築・graph が superset の再索引はそのまま通る。知識が蓄積された vault を再索引したいなら build-vault ではなく commit-mutation / merge フローを使う。どうしても全消しするなら `--force` (or `GRAPHRAG_VAULT_BUILD_FORCE=1`)。
 
 ## vault-import — vault → graph.json (round-trip)
 

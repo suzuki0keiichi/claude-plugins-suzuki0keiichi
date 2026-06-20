@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildVaultFiles, slugifyTitle } from "./build-vault.ts";
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { buildVaultFiles, slugifyTitle, nodesLostByOverwrite, main } from "./build-vault.ts";
 import { importVaultFile } from "./import-vault.ts";
 
 // Mirror importVault's in-memory reconstruction (file-path sorted, edge-deduped)
@@ -188,5 +191,130 @@ test("import -> build is idempotent for slug-colliding nodes (no period-2 churn)
   assert.equal(m2.size, m1.size);
   for (const [rel, content] of m1) {
     assert.equal(m2.get(rel), content, `round-trip changed ${rel}`);
+  }
+});
+
+// --- 上書きガード: vault-build が既存知識を全消ししないことを保証する ---
+
+test("nodesLostByOverwrite flags nodes present in the vault but absent from the source graph", () => {
+  const existing = {
+    nodes: [
+      { id: "file:proj:src/a.ts", type: "File" },
+      { id: "decision:proj:keep-x", type: "Decision" },
+      { id: "ok:proj:do-y", type: "OK" },
+    ],
+  };
+  // 索引出力は File しか持たない。
+  const source = { nodes: [{ id: "file:proj:src/a.ts", type: "File" }] };
+  const lost = nodesLostByOverwrite(existing, source);
+  assert.deepEqual(
+    lost.map((n) => n.id).sort(),
+    ["decision:proj:keep-x", "ok:proj:do-y"]
+  );
+});
+
+test("nodesLostByOverwrite is empty when the source graph is a superset (safe re-index)", () => {
+  const existing = { nodes: [{ id: "file:proj:src/a.ts", type: "File" }] };
+  const source = {
+    nodes: [
+      { id: "file:proj:src/a.ts", type: "File" },
+      { id: "file:proj:src/b.ts", type: "File" },
+    ],
+  };
+  assert.deepEqual(nodesLostByOverwrite(existing, source), []);
+});
+
+test("nodesLostByOverwrite is empty for an empty existing vault (initial build)", () => {
+  assert.deepEqual(nodesLostByOverwrite({ nodes: [] }, { nodes: [{ id: "x" }] }), []);
+  assert.deepEqual(nodesLostByOverwrite({}, { nodes: [{ id: "x" }] }), []);
+});
+
+// main() を実ディスクで叩く統合テスト。process.exit を捕えて検証する。
+function runMain(argv: string[]): { exitCode: number | null } {
+  const realExit = process.exit;
+  let exitCode: number | null = null;
+  // @ts-expect-error テスト用に exit を差し替える
+  process.exit = (code?: number) => {
+    exitCode = code ?? 0;
+    throw new Error("__exit__");
+  };
+  try {
+    main(argv);
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== "__exit__") throw err;
+  } finally {
+    process.exit = realExit;
+  }
+  return { exitCode };
+}
+
+function writeGraphJson(dir: string, graph: unknown): string {
+  const p = path.join(dir, "graph.json");
+  writeFileSync(p, JSON.stringify(graph));
+  return p;
+}
+
+test("main refuses to overwrite a vault holding nodes absent from the source graph", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "graphrag-build-"));
+  try {
+    // 既存 vault: 索引出力 (File) + 手書きの知識ノード (Decision)。
+    const graphPath = writeGraphJson(tmp, {
+      nodes: [{ id: "file:proj:src/a.ts", type: "File", title: "a.ts", path: "src/a.ts" }],
+    });
+    const vaultDir = path.join(tmp, "vault");
+    main([graphPath, vaultDir]); // 初回構築 (空) は通る
+    // 手で Decision を足す。
+    mkdirSync(path.join(vaultDir, "Decision"), { recursive: true });
+    writeFileSync(
+      path.join(vaultDir, "Decision", "keep-x.md"),
+      "---\nid: \"decision:proj:keep-x\"\ntype: \"Decision\"\ntitle: \"Keep X\"\ngraph_edges: []\nlinks: {}\n---\n\n# Keep X\n"
+    );
+
+    // 同じ索引 (File のみ) で再 build → Decision が失われるので拒否。
+    const { exitCode } = runMain([graphPath, vaultDir]);
+    assert.equal(exitCode, 1, "should refuse with exit 1");
+    // Decision ファイルは消えずに残っている。
+    assert.ok(existsSync(path.join(vaultDir, "Decision", "keep-x.md")), "knowledge node must survive");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("main --force overwrites even when knowledge nodes would be lost", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "graphrag-build-"));
+  try {
+    const graphPath = writeGraphJson(tmp, {
+      nodes: [{ id: "file:proj:src/a.ts", type: "File", title: "a.ts", path: "src/a.ts" }],
+    });
+    const vaultDir = path.join(tmp, "vault");
+    main([graphPath, vaultDir]);
+    mkdirSync(path.join(vaultDir, "Decision"), { recursive: true });
+    writeFileSync(
+      path.join(vaultDir, "Decision", "keep-x.md"),
+      "---\nid: \"decision:proj:keep-x\"\ntype: \"Decision\"\ntitle: \"Keep X\"\ngraph_edges: []\nlinks: {}\n---\n\n# Keep X\n"
+    );
+
+    const { exitCode } = runMain([graphPath, vaultDir, "--force"]);
+    assert.equal(exitCode, null, "--force should not exit early");
+    // 全消し→再構築されたので Decision は消える (--force は明示同意)。
+    assert.ok(!existsSync(path.join(vaultDir, "Decision")), "force rebuild drops non-indexed nodes");
+    assert.ok(existsSync(path.join(vaultDir, "File")), "indexed nodes are rebuilt");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("main allows initial build on an empty/absent vault directory", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "graphrag-build-"));
+  try {
+    const graphPath = writeGraphJson(tmp, {
+      nodes: [{ id: "file:proj:src/a.ts", type: "File", title: "a.ts", path: "src/a.ts" }],
+    });
+    const vaultDir = path.join(tmp, "vault");
+    const { exitCode } = runMain([graphPath, vaultDir]);
+    assert.equal(exitCode, null, "initial build must not be blocked");
+    assert.ok(readdirSync(vaultDir).length > 0, "vault was written");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 });

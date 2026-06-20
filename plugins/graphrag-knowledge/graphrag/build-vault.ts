@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { deriveShortLabel } from "./labels.ts";
+import { importVault } from "./import-vault.ts";
 
 // Minimal, conservative YAML emitter for the node value shapes we have
 // (string / number / boolean / null / string[] / nested plain object).
@@ -248,12 +249,32 @@ export function buildVaultFiles(graph: any) {
   return files;
 }
 
+// vault-build は graph.json から vault を全消し→再構築する初回構築用の primitive。
+// 索引 (graph.json) には File / Pocket / Stratum しか入らないので、手動で書き戻された
+// 知識ノード (Decision / OK / Risk / Constraint / Vein …) が既に在る vault に対して
+// 実行すると、それらは索引に居ないまま rmSync で消える。これを実行時に検知するため、
+// 「target vault に在って source graph に無いノード」= 上書きで失われるノードを返す。
+// 空配列なら損失なし (空 vault の初回構築・graph が superset の再索引) で安全に通せる。
+export function nodesLostByOverwrite(
+  existingGraph: { nodes?: any[] },
+  sourceGraph: { nodes?: any[] }
+): { id: string; type: string }[] {
+  const sourceIds = new Set((sourceGraph.nodes ?? []).map((n: any) => String(n.id)));
+  return (existingGraph.nodes ?? [])
+    .filter((n: any) => !sourceIds.has(String(n.id)))
+    .map((n: any) => ({ id: String(n.id), type: String(n.type ?? "Unknown") }));
+}
+
 export function main(argv: string[] = process.argv.slice(2)): void {
+  // フラグ (--force) は位置引数の前後どこに来てもよいよう分離する。
+  const flags = argv.filter((a) => a.startsWith("--"));
+  const positionals = argv.filter((a) => !a.startsWith("--"));
+  const force = flags.includes("--force") || process.env.GRAPHRAG_VAULT_BUILD_FORCE === "1";
   // 出力先の決定: CLI 引数 > env > エラー停止
   // スキルリポジトリ配下の default は意図的に提供しない (利用先プロジェクトの知識が
   // スキルリポジトリに混入するのを避けるため。明示指定を強制する)。
-  const graphPath = argv[0] ?? process.env.GRAPHRAG_GRAPH_JSON_PATH;
-  const outDir = argv[1] ?? process.env.GRAPHRAG_VAULT_DIR;
+  const graphPath = positionals[0] ?? process.env.GRAPHRAG_GRAPH_JSON_PATH;
+  const outDir = positionals[1] ?? process.env.GRAPHRAG_VAULT_DIR;
   if (!graphPath) {
     console.error("Refusing to build vault: graph.json input path is not specified.");
     console.error("Pass it as the first CLI argument or set GRAPHRAG_GRAPH_JSON_PATH env.");
@@ -277,6 +298,44 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     );
   }
   const files = buildVaultFiles(graph);
+  // 上書きガード: vault-build は outDir を全消し→再構築する。既存 vault に索引外の
+  // 知識ノードが在ると黙って消えるので、rmSync の前に「失われるノード」を検査する。
+  // --force (または GRAPHRAG_VAULT_BUILD_FORCE=1) で明示的に握りつぶせる。
+  if (existsSync(outDir) && !force) {
+    let blocked = false;
+    try {
+      const lost = nodesLostByOverwrite(importVault(outDir), graph);
+      if (lost.length > 0) {
+        blocked = true;
+        const byType: Record<string, number> = {};
+        for (const n of lost) byType[n.type] = (byType[n.type] ?? 0) + 1;
+        console.error(
+          `Refusing to build vault: ${outDir} already contains ${lost.length} node(s) absent from the source graph.`
+        );
+        console.error(
+          `これらは索引 (graph.json) に無いため vault-build の全消しで失われる: ${JSON.stringify(byType)}`
+        );
+        console.error(
+          "vault-build は空 vault の初回構築用。知識が蓄積された vault を再索引するなら、既存 vault を取り込んでから" +
+          " merge する mutation/reconcile フローを使うこと (通常の書込は commit-mutation が graph.json を介さず直接 vault に書く)。"
+        );
+      }
+    } catch (err) {
+      // 既存ディレクトリを vault として読めない = 上書きで失う知識が無いと保証できない。安全側で止める。
+      blocked = true;
+      console.error(
+        `Refusing to build vault: existing directory ${outDir} could not be read as a vault ` +
+        `(${err instanceof Error ? err.message : String(err)}).`
+      );
+      console.error(
+        "vault-build はこのディレクトリを全消しして作り直すが、中身を検証できないため上書きで失われる知識が無いと保証できない。"
+      );
+    }
+    if (blocked) {
+      console.error("どうしても全消しして作り直すなら --force を付けて再実行する。");
+      process.exit(1);
+    }
+  }
   if (existsSync(outDir)) rmSync(outDir, { recursive: true, force: true });
   for (const f of files) {
     const abs = path.join(outDir, f.relPath);
