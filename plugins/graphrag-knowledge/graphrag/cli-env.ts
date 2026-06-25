@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
 import path from "node:path";
 
 /**
@@ -105,6 +106,28 @@ export function discoverAndLoadGraphragEnv(cwd: string = process.cwd()): void {
   if (!root || !root.hasEnv) return;
   const text = readFileSync(path.join(root.dir, ".env"), "utf8");
   applyDotEnv(parseDotEnv(text));
+}
+
+/**
+ * `~/.graphrag/.env` を読み、applyDotEnv する。無ければ no-op。
+ *
+ * これは「環境 (マシン/ユーザ) ごと」のグローバル設定。典型は vector index
+ * 用の embedding API サーバ位置 (GRAPHRAG_EMBEDDING_ENDPOINT /
+ * GRAPHRAG_EMBEDDING_API_KEY / GRAPHRAG_EMBEDDING_MODEL) — vault ごとではなく
+ * 環境ごとに決まる値を置く。各 vault の `.graphrag/.env` から API サーバ URL を
+ * 消し、ここ 1 箇所に集約できる。
+ *
+ * 優先順位は最下位 (フォールバック)。applyDotEnv は first-wins なので、
+ * ローカルの `.graphrag/.env` / cwd `.env` / vault 自動発見をすべて読んだ後に
+ * 呼ぶ。これにより:
+ *   - vault 固有のキー (GRAPHRAG_VAULT_DIR 等) は常にローカルが勝つ
+ *     (home に紛れ込んでも closest-wins (#14) を壊さない)
+ *   - 環境固有のキー (embedding endpoint) はローカルが触れていなければ home が埋める
+ */
+export function loadHomeGraphragEnv(home: string = homedir()): void {
+  const homeEnvPath = path.join(home, ".graphrag", ".env");
+  if (!isFile(homeEnvPath)) return;
+  applyDotEnv(parseDotEnv(readFileSync(homeEnvPath, "utf8")));
 }
 
 // ── vault isolation detection ──────────────────────────────────

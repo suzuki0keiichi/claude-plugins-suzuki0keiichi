@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
-import { discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir } from "./cli-env.ts";
+import { discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir, loadHomeGraphragEnv } from "./cli-env.ts";
 import { pathToFileURL } from "node:url";
 
 const PRIMITIVE_VERBS = [
@@ -77,12 +77,17 @@ async function dispatchHeadline(verb: HeadlineVerb, argv: string[]) {
 
 export async function runCli(argv: string[]) {
   // 共通 init: env を 1 度読む (verb 個別の env 上書きは CLI flag のみ)。
-  // 優先順位: shell env > .graphrag/.env (walk-up) > cwd .env > .graphrag/vault auto-discovery。
+  // 優先順位 (high→low): shell env > .graphrag/.env (walk-up) > cwd .env
+  //   > .graphrag/vault auto-discovery > ~/.graphrag/.env (環境ごとのグローバル fallback)。
+  // applyDotEnv は first-wins なので、ローカル→グローバルの順で読むとローカルが勝つ。
   // .graphrag/.env は worktree・サブディレクトリからでも親を拾えるよう walk-up する。
   discoverAndLoadGraphragEnv();
   loadDotEnvFromCwd();
   // GRAPHRAG_VAULT_DIR がまだ未設定なら、cwd 上方向の `.graphrag/vault` を発見して焼く。
   discoverVaultDir();
+  // 最後に ~/.graphrag/.env を読む。embedding API サーバ位置など、vault ごとではなく
+  // 環境ごとに決まる値を 1 箇所に集約するためのグローバル fallback (最下位優先度)。
+  loadHomeGraphragEnv();
 
   const [verb, ...rest] = argv;
   if (!verb || verb === "--help" || verb === "-h" || verb === "help") {

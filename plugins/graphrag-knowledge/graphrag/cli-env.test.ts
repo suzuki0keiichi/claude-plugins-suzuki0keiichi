@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv } from "./cli-env.ts";
+import { parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv, loadHomeGraphragEnv } from "./cli-env.ts";
 
 test("parseDotEnv handles plain KEY=value", () => {
   const out = parseDotEnv("FOO=bar\nBAZ=qux\n");
@@ -143,6 +143,60 @@ test("parent .graphrag/.env is inherited when the subdir has no local .graphrag/
     discoverAndLoadGraphragEnv(sub);
     discoverVaultDir(sub);
     assert.equal(process.env.GRAPHRAG_VAULT_DIR, parentVault);
+  });
+});
+
+// ── ~/.graphrag/.env: env-wide global fallback (embedding endpoint etc.) ──
+
+function withCleanEmbeddingEnv(fn: (home: string) => void): void {
+  const originals = {
+    GRAPHRAG_EMBEDDING_ENDPOINT: process.env.GRAPHRAG_EMBEDDING_ENDPOINT,
+    GRAPHRAG_VAULT_DIR: process.env.GRAPHRAG_VAULT_DIR,
+  };
+  const home = realpathSync(mkdtempSync(path.join(tmpdir(), "grag-home-")));
+  try {
+    delete process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
+    delete process.env.GRAPHRAG_VAULT_DIR;
+    fn(home);
+  } finally {
+    for (const [k, v] of Object.entries(originals)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test("loadHomeGraphragEnv fills an unset key from ~/.graphrag/.env", () => {
+  withCleanEmbeddingEnv((home) => {
+    mkdirSync(path.join(home, ".graphrag"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".graphrag", ".env"),
+      "GRAPHRAG_EMBEDDING_ENDPOINT=http://localhost:11434/v1\n"
+    );
+    loadHomeGraphragEnv(home);
+    assert.equal(process.env.GRAPHRAG_EMBEDDING_ENDPOINT, "http://localhost:11434/v1");
+  });
+});
+
+test("loadHomeGraphragEnv does NOT overwrite a value already set by local config", () => {
+  withCleanEmbeddingEnv((home) => {
+    mkdirSync(path.join(home, ".graphrag"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".graphrag", ".env"),
+      "GRAPHRAG_EMBEDDING_ENDPOINT=http://home-default:11434/v1\n"
+    );
+    // simulate local .graphrag/.env having already applied a value
+    process.env.GRAPHRAG_EMBEDDING_ENDPOINT = "http://local-wins:1234/v1";
+    loadHomeGraphragEnv(home);
+    assert.equal(process.env.GRAPHRAG_EMBEDDING_ENDPOINT, "http://local-wins:1234/v1");
+  });
+});
+
+test("loadHomeGraphragEnv is a no-op when ~/.graphrag/.env is absent", () => {
+  withCleanEmbeddingEnv((home) => {
+    loadHomeGraphragEnv(home);
+    assert.equal(process.env.GRAPHRAG_EMBEDDING_ENDPOINT, undefined);
   });
 });
 
