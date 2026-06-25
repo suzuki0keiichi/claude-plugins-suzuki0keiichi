@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseDotEnv, applyDotEnv, discoverVaultDir } from "./cli-env.ts";
+import { parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv } from "./cli-env.ts";
 
 test("parseDotEnv handles plain KEY=value", () => {
   const out = parseDotEnv("FOO=bar\nBAZ=qux\n");
@@ -75,6 +75,75 @@ test("discoverVaultDir leaves env unset when no .graphrag/vault exists", () => {
     else process.env.GRAPHRAG_VAULT_DIR = original;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── #14: closest .graphrag/ wins over a parent .graphrag/.env ──
+
+function withCleanVaultEnv(fn: (root: string) => void): void {
+  const original = process.env.GRAPHRAG_VAULT_DIR;
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "grag-root-")));
+  try {
+    delete process.env.GRAPHRAG_VAULT_DIR;
+    fn(root);
+  } finally {
+    if (original === undefined) delete process.env.GRAPHRAG_VAULT_DIR;
+    else process.env.GRAPHRAG_VAULT_DIR = original;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("local .graphrag/vault wins over parent .graphrag/.env (no local .env)", () => {
+  // worktree subdir has its own vault (e.g. from rebase) but no local .env;
+  // the parent repo has a .graphrag/.env pointing at its own vault. The local
+  // vault must win — the parent's .env must NOT clobber it.
+  withCleanVaultEnv((root) => {
+    const parentVault = path.join(root, ".graphrag", "vault");
+    mkdirSync(parentVault, { recursive: true });
+    writeFileSync(path.join(root, ".graphrag", ".env"), `GRAPHRAG_VAULT_DIR=${parentVault}\n`);
+
+    const sub = path.join(root, ".claude", "worktrees", "foo");
+    const localVault = path.join(sub, ".graphrag", "vault");
+    mkdirSync(localVault, { recursive: true });
+
+    discoverAndLoadGraphragEnv(sub);
+    discoverVaultDir(sub);
+    assert.equal(process.env.GRAPHRAG_VAULT_DIR, localVault);
+  });
+});
+
+test("local .graphrag/.env wins over parent .graphrag/.env", () => {
+  withCleanVaultEnv((root) => {
+    mkdirSync(path.join(root, ".graphrag", "vault"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".graphrag", ".env"),
+      `GRAPHRAG_VAULT_DIR=${path.join(root, ".graphrag", "vault")}\n`
+    );
+
+    const sub = path.join(root, ".claude", "worktrees", "foo");
+    const localVault = path.join(sub, ".graphrag", "vault");
+    mkdirSync(localVault, { recursive: true });
+    writeFileSync(path.join(sub, ".graphrag", ".env"), `GRAPHRAG_VAULT_DIR=${localVault}\n`);
+
+    discoverAndLoadGraphragEnv(sub);
+    discoverVaultDir(sub);
+    assert.equal(process.env.GRAPHRAG_VAULT_DIR, localVault);
+  });
+});
+
+test("parent .graphrag/.env is inherited when the subdir has no local .graphrag/", () => {
+  // No local graphrag root at all → walk up and inherit the parent's .env.
+  withCleanVaultEnv((root) => {
+    const parentVault = path.join(root, ".graphrag", "vault");
+    mkdirSync(parentVault, { recursive: true });
+    writeFileSync(path.join(root, ".graphrag", ".env"), `GRAPHRAG_VAULT_DIR=${parentVault}\n`);
+
+    const sub = path.join(root, "a", "b");
+    mkdirSync(sub, { recursive: true });
+
+    discoverAndLoadGraphragEnv(sub);
+    discoverVaultDir(sub);
+    assert.equal(process.env.GRAPHRAG_VAULT_DIR, parentVault);
+  });
 });
 
 test("applyDotEnv does not overwrite existing process.env entries", () => {

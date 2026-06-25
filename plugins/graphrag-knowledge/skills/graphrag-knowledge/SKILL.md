@@ -50,7 +50,7 @@ This skill is the read/write foundation. Three derived skills review changes and
 
 ## Setup prerequisites (retrieval hard-errors without these)
 
-- **Vault directory** must exist. Resolution order: **shell env `GRAPHRAG_VAULT_DIR` > `.graphrag/.env` (walk-up from cwd) > `.env` > convention path `.graphrag/vault` (walk-up from cwd)**. Placing the vault at `.graphrag/vault` requires zero env configuration. For vaults in external repos, set `GRAPHRAG_VAULT_DIR=<absolute-path>` in `.graphrag/.env` (most stable — walk-up discovery works from worktrees and subdirectories). Hard-errors if nothing found.
+- **Vault directory** must exist. Resolution order: **shell env `GRAPHRAG_VAULT_DIR` > closest `.graphrag/` (walk-up from cwd) > `.env` > parent `.graphrag/`**. The walk-up anchors on the *closest* `.graphrag/` directory that has either a `.env` or a `vault/` — so a worktree's own `.graphrag/vault` wins over a parent repo's `.graphrag/.env` (closest-wins; the walk-up does not descend into a parent's `.env` once a closer `.graphrag/` root is found). Placing the vault at `.graphrag/vault` requires zero env configuration. For vaults in external repos, set `GRAPHRAG_VAULT_DIR=<absolute-path>` in `.graphrag/.env` (most stable — walk-up discovery works from worktrees and subdirectories). Hard-errors if nothing found.
 - OpenAI-compatible embedding endpoint. Auto-detects Ollama (`http://localhost:11434/v1`) and LM Studio (`http://localhost:1234/v1`) when unconfigured. Model pinned to `nomic-embed-text`. **Hard-errors** if unreachable.
 - **Launcher reads `.env` once at startup.** All verbs see the same env — no per-verb inconsistency.
 - **Output env** (only when vault resolution above is insufficient):

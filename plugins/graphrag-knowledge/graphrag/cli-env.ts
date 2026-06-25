@@ -53,6 +53,37 @@ export function loadDotEnvFromCwd(cwd: string = process.cwd()): void {
   applyDotEnv(parseDotEnv(text));
 }
 
+function isFile(p: string): boolean {
+  try { return existsSync(p) && !statSync(p).isDirectory(); }
+  catch { return false; }
+}
+
+function isDir(p: string): boolean {
+  try { return existsSync(p) && statSync(p).isDirectory(); }
+  catch { return false; }
+}
+
+/**
+ * cwd から上方向へ、graphrag の「アクティブな root」を探す。
+ * root = 最も近い `.graphrag/` で、`.env` か `vault/` の少なくとも一方を持つもの。
+ *
+ * worktree や subdir に自前の `.graphrag/vault` があれば、たとえ `.env` を
+ * 持たなくてもそこが root になる。これにより親の `.graphrag/.env` が
+ * ローカルの vault を覆い隠す事故 (#14) を防ぐ — closest-wins。
+ */
+function findGraphragRoot(cwd: string): { dir: string; hasEnv: boolean; hasVault: boolean } | null {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const graphragDir = path.join(dir, ".graphrag");
+    const hasEnv = isFile(path.join(graphragDir, ".env"));
+    const hasVault = isDir(path.join(graphragDir, "vault"));
+    if (hasEnv || hasVault) return { dir: graphragDir, hasEnv, hasVault };
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 /**
  * cwd から上方向へ `.graphrag/.env` を探し、見つけたら applyDotEnv する。
  *
@@ -63,20 +94,17 @@ export function loadDotEnvFromCwd(cwd: string = process.cwd()): void {
  * 典型: vault が外部リポジトリにある時に
  *   GRAPHRAG_VAULT_DIR=/path/to/other-repo/.graphrag/vault
  * と書いておく。gitignore に `.graphrag/.env` を足せばリポには残らない。
+ *
+ * closest-wins (#14): 最も近い `.graphrag/` root が `vault/` を持つのに
+ * `.env` を持たない場合、親の `.graphrag/.env` までは降りない。ローカルの
+ * vault がアクティブなので、親の設定を継承して上書きしてはいけない
+ * (worktree はそれぞれ独立した root)。
  */
 export function discoverAndLoadGraphragEnv(cwd: string = process.cwd()): void {
-  let dir = path.resolve(cwd);
-  for (;;) {
-    const candidate = path.join(dir, ".graphrag", ".env");
-    if (existsSync(candidate) && !statSync(candidate).isDirectory()) {
-      const text = readFileSync(candidate, "utf8");
-      applyDotEnv(parseDotEnv(text));
-      return;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return;
-    dir = parent;
-  }
+  const root = findGraphragRoot(cwd);
+  if (!root || !root.hasEnv) return;
+  const text = readFileSync(path.join(root.dir, ".env"), "utf8");
+  applyDotEnv(parseDotEnv(text));
 }
 
 // ── vault isolation detection ──────────────────────────────────
