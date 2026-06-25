@@ -37,9 +37,11 @@ test("cli has expected headline verbs", () => {
   }
 });
 
-test("listKnownVerbs returns all 35 verbs (16 primitive + 19 headline)", () => {
+test("listKnownVerbs returns all 36 verbs (17 primitive + 19 headline)", () => {
   const all = listKnownVerbs();
-  assert.equal(all.length, 35);
+  assert.equal(all.length, 36);
+  // Guard against a verb id being registered twice across the primitive/headline lists.
+  assert.equal(new Set(all).size, all.length, "duplicate verb id across primitive/headline lists");
 });
 
 test("isHeadlineVerb / isPrimitiveVerb are disjoint", () => {
