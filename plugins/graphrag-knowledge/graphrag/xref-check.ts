@@ -17,7 +17,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
-import { checkCrossVaultRefs } from "./xref-resolver.ts";
+import { checkCrossVaultRefs, checkVaultParent } from "./xref-resolver.ts";
 import { resolveWorldDir } from "./world.ts";
 
 export async function runXRefCheck(argv: string[]): Promise<void> {
@@ -72,6 +72,10 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
   const orphan = results.filter((r) => r.status === "orphan");
   const unresolvable = results.filter((r) => r.status === "unresolvable");
 
+  // Structural parent (containment) check — independent of node edges.
+  const parent = checkVaultParent(resolvedVaultDir, worldDir);
+  const parentOk = parent.status === "none" || parent.status === "resolved";
+
   const output = {
     vault: resolvedVaultDir,
     world_dir: worldDir ?? null,
@@ -80,8 +84,11 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
       resolved: resolved.length,
       broken: broken.length,
       orphan: orphan.length,
-      unresolvable: unresolvable.length
+      unresolvable: unresolvable.length,
+      parent_status: parent.status,
+      parent_ok: parentOk
     },
+    parent,
     results
   };
 

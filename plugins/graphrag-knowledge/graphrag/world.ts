@@ -39,6 +39,9 @@ export interface VaultProfile {
   name: string;
   kind: string | null; // system / project / product / business を推奨 (旧 ANY_ROOT_NODE 4型の転生)
   description: string;
+  // 構造的な「親 vault」の vault_slug。ノード間リンクではなく vault 同士の包含関係を表す。
+  // 単一の親のみ (スカラ)。ノードに表れない containment を vault 自身が知るための欄。null = 親なし (root)。
+  parent: string | null;
 }
 
 export type WorldCacheEntryStatus = "ok" | "no-profile" | "remote-unsupported";
@@ -158,9 +161,10 @@ export function vaultProfilePath(vaultDir: string): string {
  * 人手で書く VAULT.md をパースする。寛容な frontmatter (key: value 行のみ) + 本文。
  * frontmatter: name (無ければ vault 親フォルダ名で補完される), kind。本文 = 何の知識があるか。
  */
-export function parseVaultProfile(content: string): { name: string | null; kind: string | null; description: string } {
+export function parseVaultProfile(content: string): { name: string | null; kind: string | null; description: string; parent: string | null } {
   let name: string | null = null;
   let kind: string | null = null;
+  let parent: string | null = null;
   let body = content;
   const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
   if (fm) {
@@ -171,9 +175,12 @@ export function parseVaultProfile(content: string): { name: string | null; kind:
       const value = m[2].trim().replace(/^["']|["']$/g, "");
       if (m[1] === "name" && value) name = value;
       if (m[1] === "kind" && value) kind = value;
+      // parent はスカラのみ受け付ける。YAML シーケンス (parent: 改行 - a - b) は value 空で無視され、
+      // 結果的に「親は単一」という規約が構造的に強制される。
+      if (m[1] === "parent" && value) parent = value;
     }
   }
-  return { name, kind, description: body.trim() };
+  return { name, kind, description: body.trim(), parent };
 }
 
 export function readVaultProfile(
@@ -188,7 +195,8 @@ export function readVaultProfile(
     profile: {
       name: parsed.name ?? fallbackName,
       kind: parsed.kind,
-      description: parsed.description
+      description: parsed.description,
+      parent: parsed.parent
     },
     contentHash: hashText(content)
   };

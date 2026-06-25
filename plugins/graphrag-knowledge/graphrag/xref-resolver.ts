@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { importVault } from "./import-vault.ts";
-import { loadWorldConfig, WORLD_FILE, type WorldVaultRef } from "./world.ts";
+import { loadWorldConfig, WORLD_FILE, parseVaultProfile, type WorldVaultRef } from "./world.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,6 +137,28 @@ export function parseVaultSlugAliases(vaultMdContent: string): string[] {
     }
   }
   return aliases;
+}
+
+/**
+ * Parse the `parent` field from VAULT.md frontmatter.
+ *
+ * `parent` is the vault_slug of the structural parent vault — a *containment*
+ * relation between vaults, NOT a node-to-node link. Single parent only: the
+ * value is a scalar, so a YAML sequence (`parent:` then `- a` / `- b`) parses
+ * to an empty value and is ignored, which structurally enforces "one parent".
+ * Returns null if absent.
+ */
+export function parseVaultParent(vaultMdContent: string): string | null {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(vaultMdContent);
+  if (!fm) return null;
+  for (const line of fm[1].split(/\r?\n/)) {
+    const m = /^parent\s*:\s*(.*)$/.exec(line.trim());
+    if (m) {
+      const value = m[1].trim().replace(/^["']|["']$/g, "");
+      if (value) return value;
+    }
+  }
+  return null;
 }
 
 /** Parsed vault identity from VAULT.md: primary slug + optional aliases */
@@ -476,4 +498,201 @@ export function augmentMatchesWithXRefResolutions(
     if (xrefs.length === 0) return match;
     return { ...match, cross_vault_resolved: xrefs };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Vault parentage (structural containment between vaults)
+// ---------------------------------------------------------------------------
+
+/**
+ * Status of a vault's `parent` declaration.
+ *   none         — vault declares no parent (it is a root)
+ *   resolved     — parent found, same kind, no cycle: a valid containment edge
+ *   orphan       — parent slug declared but no vault with that slug found in world
+ *   unresolvable — GRAPHRAG_WORLD_DIR not configured; can't resolve the parent
+ *   self         — parent points to the declaring vault itself
+ *   kind-mismatch — parent kind differs from child kind (parent must be same kind)
+ *   cycle        — the parent chain loops (A → B → A …)
+ */
+export type VaultParentStatus =
+  | "none"
+  | "resolved"
+  | "orphan"
+  | "unresolvable"
+  | "self"
+  | "kind-mismatch"
+  | "cycle";
+
+export interface VaultParentCheckResult {
+  /** Absolute path to the vault directory being checked */
+  vault_dir: string;
+  /** The `parent` vault_slug declared in this vault's VAULT.md (null if none) */
+  parent_slug: string | null;
+  status: VaultParentStatus;
+  /** Human-readable explanation for non-resolved statuses */
+  detail?: string;
+  /** Populated when status === "resolved" / "kind-mismatch" / "cycle" (parent vault was located) */
+  resolved?: { vault_path: string; slug: string; kind: string | null };
+  /** Populated when the parent slug matched via a vault_slug_alias instead of the current slug */
+  alias_warning?: string;
+}
+
+/** Read the `parent` slug declared in the VAULT.md beside a resolved vault dir. */
+function readParentSlugForDir(vaultDir: string): string | null {
+  const profilePath = path.join(path.dirname(path.resolve(vaultDir)), "VAULT.md");
+  if (!existsSync(profilePath)) return null;
+  try {
+    return parseVaultParent(readFileSync(profilePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Read the `kind` declared in the VAULT.md beside a resolved vault dir. */
+function readKindForDir(vaultDir: string): string | null {
+  const profilePath = path.join(path.dirname(path.resolve(vaultDir)), "VAULT.md");
+  if (!existsSync(profilePath)) return null;
+  try {
+    return parseVaultProfile(readFileSync(profilePath, "utf8")).kind;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Walk up the parent chain starting from `firstParentDir`, treating `childDir`
+ * as already visited. Returns a detail string if a loop is detected, else null.
+ * A missing VAULT.md, a root (no parent), or an unresolvable upstream parent all
+ * terminate the walk cleanly (those are reported by checkVaultParent on their own
+ * vault, not folded into this vault's cycle status).
+ */
+function detectParentCycle(childDir: string, firstParentDir: string, worldDir: string): string | null {
+  const MAX_DEPTH = 64;
+  const visited = new Set<string>([path.resolve(childDir)]);
+  let currentDir = path.resolve(firstParentDir);
+  for (let i = 0; i < MAX_DEPTH; i++) {
+    if (visited.has(currentDir)) {
+      return `parent chain loops back to ${currentDir}`;
+    }
+    visited.add(currentDir);
+    const nextSlug = readParentSlugForDir(currentDir);
+    if (!nextSlug) return null; // reached a root
+    const found = findVaultBySlugWithInfo(nextSlug, worldDir);
+    if (!found) return null; // upstream orphan — not this vault's cycle to report
+    currentDir = path.resolve(found.vaultDir);
+  }
+  return `parent chain exceeds ${MAX_DEPTH} levels (possible cycle)`;
+}
+
+/**
+ * Validate the `parent` declaration of a single vault.
+ *
+ * Enforces the strict containment rules:
+ *   - single parent (scalar `parent` field; lists are ignored by the parser)
+ *   - same kind (a project's parent is a project; a system's parent is a system)
+ *   - resolvable (parent slug must name a real vault in the world)
+ *   - no self-reference, no cycles
+ *
+ * Read-only. `parent` is an organizational pointer with NO lifecycle cascade —
+ * this check never archives or mutates anything.
+ */
+export function checkVaultParent(vaultDir: string, worldDir?: string): VaultParentCheckResult {
+  const resolvedVaultDir = path.resolve(vaultDir);
+  const profilePath = path.join(path.dirname(resolvedVaultDir), "VAULT.md");
+  if (!existsSync(profilePath)) {
+    return { vault_dir: resolvedVaultDir, parent_slug: null, status: "none", detail: "VAULT.md not found beside vault dir" };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(profilePath, "utf8");
+  } catch (err) {
+    return { vault_dir: resolvedVaultDir, parent_slug: null, status: "none", detail: `VAULT.md unreadable: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  const parentSlug = parseVaultParent(content);
+  if (!parentSlug) {
+    return { vault_dir: resolvedVaultDir, parent_slug: null, status: "none" };
+  }
+
+  const childKind = parseVaultProfile(content).kind;
+  const ownSlug = parseVaultSlug(content);
+  const ownAliases = parseVaultSlugAliases(content);
+
+  // Self-reference by slug — catchable before touching the world.
+  if (parentSlug === ownSlug || ownAliases.includes(parentSlug)) {
+    return {
+      vault_dir: resolvedVaultDir,
+      parent_slug: parentSlug,
+      status: "self",
+      detail: `parent '${parentSlug}' refers to this vault itself`
+    };
+  }
+
+  const resolvedWorldDir = worldDir ?? process.env.GRAPHRAG_WORLD_DIR;
+  if (!resolvedWorldDir) {
+    return {
+      vault_dir: resolvedVaultDir,
+      parent_slug: parentSlug,
+      status: "unresolvable",
+      detail: "GRAPHRAG_WORLD_DIR not set; cannot resolve parent vault"
+    };
+  }
+
+  const found = findVaultBySlugWithInfo(parentSlug, resolvedWorldDir);
+  if (!found) {
+    return {
+      vault_dir: resolvedVaultDir,
+      parent_slug: parentSlug,
+      status: "orphan",
+      detail: `no vault with vault_slug '${parentSlug}' found in ${resolvedWorldDir}`
+    };
+  }
+
+  // Self-reference by resolved directory (slug differs but points back here).
+  if (path.resolve(found.vaultDir) === resolvedVaultDir) {
+    return {
+      vault_dir: resolvedVaultDir,
+      parent_slug: parentSlug,
+      status: "self",
+      detail: `parent '${parentSlug}' resolves to this vault itself`
+    };
+  }
+
+  const parentKind = readKindForDir(found.vaultDir);
+  const aliasWarning = found.matchedViaAlias
+    ? `parent ref uses alias '${parentSlug}', current slug is '${found.currentSlug}' — update parent to use current slug`
+    : undefined;
+  const resolved = { vault_path: found.vaultDir, slug: found.currentSlug, kind: parentKind };
+
+  if (childKind && parentKind && childKind !== parentKind) {
+    return {
+      vault_dir: resolvedVaultDir,
+      parent_slug: parentSlug,
+      status: "kind-mismatch",
+      detail: `child kind '${childKind}' != parent kind '${parentKind}'; parent must be the same kind`,
+      resolved,
+      ...(aliasWarning ? { alias_warning: aliasWarning } : {})
+    };
+  }
+
+  const cycle = detectParentCycle(resolvedVaultDir, found.vaultDir, resolvedWorldDir);
+  if (cycle) {
+    return {
+      vault_dir: resolvedVaultDir,
+      parent_slug: parentSlug,
+      status: "cycle",
+      detail: cycle,
+      resolved,
+      ...(aliasWarning ? { alias_warning: aliasWarning } : {})
+    };
+  }
+
+  return {
+    vault_dir: resolvedVaultDir,
+    parent_slug: parentSlug,
+    status: "resolved",
+    resolved,
+    ...(aliasWarning ? { alias_warning: aliasWarning } : {})
+  };
 }

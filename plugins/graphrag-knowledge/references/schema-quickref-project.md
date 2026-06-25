@@ -128,3 +128,29 @@ vault_slug_aliases:       # optional — list old slugs that still appear in exi
 `schema: project` is required. `vault_slug` is the cross-vault ref namespace.
 
 `vault_slug_aliases` lets you rename a vault slug without breaking existing cross-vault refs. The resolver accepts both the current slug and any alias. New refs **must** use the current `vault_slug`; `xref-check` warns when a ref uses an alias (`"ref uses alias '…', current slug is '…' — update ref to use current slug"`).
+
+## parent — vertical containment between vaults
+
+A sub-project may declare its parent program/project in VAULT.md:
+
+```yaml
+---
+name: dc-migration-tokyo
+kind: project
+schema: project
+vault_slug: dc-migration-tokyo
+parent: dc-migration-fy26   # this wave is part of the FY26 program
+---
+```
+
+`parent` is a **containment** relation between *vaults*, not a node edge. Three axes must not be confused:
+
+| Axis | Mechanism | Question it answers |
+|---|---|---|
+| **Vertical** (containment / hierarchy) | `parent` in VAULT.md | "Which vault is this one *part of*?" |
+| **Vertical** (goal alignment) | `refines` (Goal→Goal) + cross-vault ref | "Which specific Goal does this Goal *serve*?" |
+| **Horizontal** (crosscut) | `Theme` + `encompasses` | "Which single concern slices *across* many vaults?" |
+
+`parent` is the structural backbone; `refines`/cross-vault refs express *which* parent goal a child serves (it can be a subset, or even a goal owned elsewhere). `Theme` stays for many-to-many crosscuts. Use `parent` only for genuine single-parent containment — a sub-project with its own lifecycle that still rolls up to one program.
+
+Strict rules (validated by `xref-check`): **single parent** (scalar; lists ignored), **same kind** (a project's parent is a project — `kind-mismatch` otherwise; depending on a system Deliverable is a cross-vault ref, not parentage), **resolvable** (else `orphan`; alias-aware with `alias_warning`), **acyclic / no self-reference** (`cycle` / `self`), and **no lifecycle cascade** — a child project archives on its own top Goal independently of the parent.

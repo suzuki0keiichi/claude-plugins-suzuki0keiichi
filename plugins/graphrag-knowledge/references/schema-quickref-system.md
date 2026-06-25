@@ -68,6 +68,32 @@ vault_slug_aliases:
 
 The cross-vault resolver accepts both the current `vault_slug` and any alias. New refs **must** use the current slug; `xref-check` warns when a ref uses an alias instead of the current slug.
 
+## parent — structural containment between vaults
+
+A vault may declare a single parent vault in its VAULT.md frontmatter:
+
+```yaml
+---
+name: payments-fraud
+kind: system
+schema: system
+vault_slug: payments-fraud
+parent: payments-core   # this subsystem is organizationally part of payments-core
+---
+```
+
+`parent` records a **containment** relation between *vaults* — not a link between *nodes*. It answers "which vault is this one a part of," a fact that no node-to-node edge can carry. Use it when a subsystem releases independently (so it earns its own vault) yet still belongs under a parent system. The payoff is **scope disambiguation**: when a concept could legitimately be filed in either the parent or the child vault, a knowledge-gathering crawler walks the parent tree and files it in the **narrowest correctly-scoped** vault.
+
+Strict rules (validated by `xref-check`, surfaced under `parent`):
+
+- **Single parent** — `parent` is a scalar; a YAML list is ignored. If you can't name exactly one containing vault, it has no parent (it's a dependency → use a cross-vault ref, or a crosscut → use `Concern`).
+- **Same kind** — a system's parent must be a system (status `kind-mismatch` otherwise). A system is never the parent of a project; that drill-down is the node-level `vault_ref` / cross-vault ref instead.
+- **Resolvable** — the parent slug must name a real vault in the world (else `orphan`); alias-aware, with an `alias_warning` when matched via `vault_slug_aliases`.
+- **Acyclic, no self-reference** — `self` / `cycle` statuses flag loops.
+- **No lifecycle cascade** — `parent` is an organizational pointer only. Archiving is independent: a child can outlive its parent and vice versa. It is NOT an ownership/GC root.
+
+**`parent` vs `vault_ref`**: opposite directions. `vault_ref` lives on a `Component` node and points *down* ("this component's internals are in child vault X"). `parent` lives in VAULT.md and points *up* ("this whole vault is contained by parent vault X"). They are complementary.
+
 ## ID Convention
 
 `<typeSlug>:<system>:<slug>` (e.g. `decision:graphrag:vault-single-source`).

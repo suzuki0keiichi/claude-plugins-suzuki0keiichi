@@ -87,6 +87,9 @@ vault_slug: <slug>
 - `schema`: `project` — **omitting this causes system schema to be used, which will reject project node types**
 - `vault_slug`: Cross-vault ref namespace. Short kebab-case. **Immutable once set.**
 
+**Optional fields:**
+- `parent`: vault_slug of the single parent program/project this sub-project is contained by. Same-kind, single-parent containment only — see Decision Criteria → "the `parent` field".
+
 ### Step 3: Gather Information & Populate — Model Division Strategy
 
 Initial construction has three distinct cognitive tasks. Use the right model for each:
@@ -207,6 +210,23 @@ For the full project vault schema (16 node types, 22 edge types, state vocabular
 - ✅ Independently deployed system → system vault
 - ❌ Team / org → NOT a vault (use Stakeholder)
 - ❌ Sub-component that doesn't release independently → Component in parent system vault
+
+### "Both nested levels are valid vaults — which one owns a given node?" (the `parent` field)
+
+When a containment relationship holds and **both** the container and the contained legitimately exist as vaults (a subsystem that releases on its own; a sub-project with its own lifecycle), a node can plausibly be filed in either — neither is wrong. A node-to-node edge cannot resolve this, because the ambiguity is about *vault scope*, not about a link. Declare the containment in the child's VAULT.md:
+
+```yaml
+parent: <parent vault_slug>
+```
+
+This lets a knowledge-gathering crawler choose the **narrowest correctly-scoped** vault for each node instead of guessing. Rules — keep them strict or the tree rots into a junk-drawer pointer:
+
+- **Single parent only.** If you can't name exactly one containing vault, it's not a parent — it's a dependency (cross-vault ref) or a crosscut (`Theme`/`Concern`).
+- **Same kind.** project→project, system→system. A project under a system is a cross-vault Deliverable ref, not parentage.
+- **No lifecycle cascade.** `parent` is organizational only; archiving stays independent (a child may outlive its parent).
+- **Not goal-alignment.** "Which goal does this serve" stays `refines` (Goal→Goal) + cross-vault ref; "which concern cuts across many vaults" stays `Theme`. `parent` is purely *which vault contains which*.
+
+Validate with `xref-check` — it reports `parent` status (`resolved` / `orphan` / `self` / `kind-mismatch` / `cycle` / `unresolvable`).
 
 ### "Decision or OperationalKnowledge?"
 
