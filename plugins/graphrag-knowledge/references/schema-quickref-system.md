@@ -84,6 +84,8 @@ parent: payments-core   # this subsystem is organizationally part of payments-co
 
 `parent` records a **containment** relation between *vaults* — not a link between *nodes*. It answers "which vault is this one a part of," a fact that no node-to-node edge can carry. Use it when a subsystem releases independently (so it earns its own vault) yet still belongs under a parent system. The payoff is **scope disambiguation**: when a concept could legitimately be filed in either the parent or the child vault, a knowledge-gathering crawler walks the parent tree and files it in the **narrowest correctly-scoped** vault.
 
+**Genuine structural containment only — not a collective label.** `parent` means the child is *literally part of* the parent system. A set of peer systems that the business currently bundles under one umbrella name ("A, B, C are sold as product X") is **not** parentage: that grouping is a business framing that drifts when the product is renamed, repackaged, or reorganized, and baking it into `parent` makes the structural backbone churn with org/marketing changes. The test: would the part-of relation survive renaming the product? If it only holds because they're "currently called X together," it's a crosscut → model it as a `Concern` (shared label over peers), not `parent`.
+
 Strict rules (validated by `xref-check`, surfaced under `parent`):
 
 - **Single parent** — `parent` is a scalar; a YAML list is ignored. If you can't name exactly one containing vault, it has no parent (it's a dependency → use a cross-vault ref, or a crosscut → use `Concern`).
