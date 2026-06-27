@@ -31,6 +31,14 @@
    GRAPHRAG_VAULT_DIR=/path/to/vault
    ```
 
+> `.env` の解決順、`VAULT.md` の書式、embedding サーバ（NPU 推奨）の詳細は **[セットアップマニュアル](docs/setup.md)** を参照。
+
+## ドキュメント
+
+- **[セットアップマニュアル](docs/setup.md)** — embedding サーバ / `.env` / `VAULT.md` の設定詳細
+- [graphrag-overview.html](docs/graphrag-overview.html) — 設計思想の俯瞰
+- [graphrag-project-vault.html](docs/graphrag-project-vault.html) — project vault の解説
+
 ## 使い方
 
 プラグインインストール後はスキルが自動で CLI を呼ぶため、直接コマンドを叩く必要は基本的にない。
