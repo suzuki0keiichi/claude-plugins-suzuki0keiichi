@@ -58,14 +58,12 @@ function makeWorld(structure: { [vaultName: string]: string | null }): {
 
 const PAYMENT_PROFILE = `---
 name: payment-vault
-kind: product
 ---
 決済まわりの設計判断・リスク・運用知識のグラフ。
 `;
 
 const AUTH_PROFILE = `---
 name: auth-vault
-kind: system
 ---
 認証・認可基盤の設計判断のグラフ。
 `;
@@ -115,17 +113,15 @@ test("isRemoteRef detects git URLs but not local paths", () => {
 
 // --- VAULT.md (自己紹介の正本) -------------------------------------------------
 
-test("parseVaultProfile reads frontmatter name/kind and body description", () => {
+test("parseVaultProfile reads frontmatter name and body description", () => {
   const parsed = parseVaultProfile(PAYMENT_PROFILE);
   assert.equal(parsed.name, "payment-vault");
-  assert.equal(parsed.kind, "product");
   assert.match(parsed.description, /決済まわり/);
 });
 
 test("parseVaultProfile works without frontmatter (description only)", () => {
   const parsed = parseVaultProfile("ただの説明文。\n");
   assert.equal(parsed.name, null);
-  assert.equal(parsed.kind, null);
   assert.equal(parsed.description, "ただの説明文。");
 });
 
@@ -275,7 +271,7 @@ test("buildWorldHints ranks the semantically close vault and excludes the curren
   const { worldDir, root, vaultDirs } = makeWorld({
     pay: PAYMENT_PROFILE,
     auth: AUTH_PROFILE,
-    dev: `---\nname: dev-vault\nkind: project\n---\n開発プロセスの vault。\n`
+    dev: `---\nname: dev-vault\n---\n開発プロセスの vault。\n`
   });
   try {
     await refreshWorldCache(worldDir, { embedder: fakeEmbedder() });
@@ -289,7 +285,6 @@ test("buildWorldHints ranks the semantically close vault and excludes the curren
     assert.equal(result.considered, 2); // dev (current) は除外
     assert.ok(result.hints.length >= 1);
     assert.equal(result.hints[0].vault.name, "payment-vault");
-    assert.equal(result.hints[0].vault.kind, "product");
     assert.match(result.hints[0].vault.description, /決済まわり/); // 自己紹介本文も判断材料として載る
     assert.ok(result.hints[0].ask_command.includes(`--vault ${path.resolve(vaultDirs.pay)}`));
     assert.ok(result.hints.every((h) => h.vault.path !== path.resolve(vaultDirs.dev)));
@@ -360,7 +355,7 @@ test("buildWorldHints detects a changed VAULT.md by hash and re-embeds only that
   try {
     await refreshWorldCache(worldDir, { embedder: fakeEmbedder() });
     // pay の自己紹介を書き換え → 内容が認証寄りに変わる
-    writeFileSync(path.join(root, "pay", "VAULT.md"), `---\nname: payment-vault\nkind: product\n---\n実は認証も扱う。\n`);
+    writeFileSync(path.join(root, "pay", "VAULT.md"), `---\nname: payment-vault\n---\n実は認証も扱う。\n`);
     const calls: string[] = [];
     const result = await buildWorldHints("認証 フロー", {
       worldDir,
@@ -456,7 +451,7 @@ test("buildWorldHints upgrades a clearly standing-out top1 from low to high", as
 test("buildWorldHints reports crowd (no upgrade) when candidates are neck and neck", async () => {
   const { worldDir, root, vaultDirs } = makeWorld({
     pay: PAYMENT_PROFILE,
-    pay2: `---\nname: payment-vault-2\nkind: product\n---\n決済まわりの設計判断のグラフその2。\n`,
+    pay2: `---\nname: payment-vault-2\n---\n決済まわりの設計判断のグラフその2。\n`,
     dev: `---\nname: dev-vault\n---\n開発プロセス。\n`
   });
   try {
@@ -498,7 +493,7 @@ test("buildWorldHints reports single when only one candidate vault exists", asyn
 test("buildWorldHints filters out vaults with no meaningful match (confidence none)", async () => {
   const { worldDir, root, vaultDirs } = makeWorld({
     pay: PAYMENT_PROFILE,
-    other: `---\nname: other-vault\nkind: business\n---\n営業資料の置き場。\n`
+    other: `---\nname: other-vault\n---\n営業資料の置き場。\n`
   });
   try {
     await refreshWorldCache(worldDir, { embedder: fakeEmbedder() });

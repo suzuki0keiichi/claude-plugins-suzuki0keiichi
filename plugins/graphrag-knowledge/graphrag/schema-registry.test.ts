@@ -60,7 +60,7 @@ describe("schema-registry", () => {
     const base = path.join(tmpDir, "no-schema");
     const vaultDir = path.join(base, "vault");
     mkdirSync(vaultDir, { recursive: true });
-    writeFileSync(path.join(base, "VAULT.md"), "---\nname: test\nkind: system\n---\nsome description\n");
+    writeFileSync(path.join(base, "VAULT.md"), "---\nname: test\n---\nsome description\n");
     assert.strictEqual(resolveSchema(vaultDir), DEFAULT_SCHEMA);
   });
 
@@ -68,7 +68,7 @@ describe("schema-registry", () => {
     const base = path.join(tmpDir, "with-schema");
     const vaultDir = path.join(base, "vault");
     mkdirSync(vaultDir, { recursive: true });
-    writeFileSync(path.join(base, "VAULT.md"), "---\nname: test\nkind: project\nschema: test-preset\n---\nsome description\n");
+    writeFileSync(path.join(base, "VAULT.md"), "---\nname: test\nschema: test-preset\n---\nsome description\n");
     assert.strictEqual(resolveSchema(vaultDir), FAKE_PRESET);
   });
 

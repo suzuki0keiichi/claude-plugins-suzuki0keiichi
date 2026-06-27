@@ -59,7 +59,7 @@ If a system vault needs to be renamed, add the old slug(s) to `vault_slug_aliase
 ```yaml
 ---
 name: Billing API
-kind: system
+schema: system
 vault_slug: billing
 vault_slug_aliases:
   - billing-service-legacy
@@ -75,7 +75,6 @@ A vault may declare a single parent vault in its VAULT.md frontmatter:
 ```yaml
 ---
 name: payments-fraud
-kind: system
 schema: system
 vault_slug: payments-fraud
 parent: payments-core   # this subsystem is organizationally part of payments-core
@@ -89,7 +88,7 @@ parent: payments-core   # this subsystem is organizationally part of payments-co
 Strict rules (validated by `xref-check`, surfaced under `parent`):
 
 - **Single parent** — `parent` is a scalar; a YAML list is ignored. If you can't name exactly one containing vault, it has no parent (it's a dependency → use a cross-vault ref, or a crosscut → use `Concern`).
-- **Same kind** — a system's parent must be a system (status `kind-mismatch` otherwise). A system is never the parent of a project; that drill-down is the node-level `vault_ref` / cross-vault ref instead.
+- **Same schema** — a system's parent must be a system (status `schema-mismatch` otherwise). A system is never the parent of a project; that drill-down is the node-level `vault_ref` / cross-vault ref instead.
 - **Resolvable** — the parent slug must name a real vault in the world (else `orphan`); alias-aware, with an `alias_warning` when matched via `vault_slug_aliases`.
 - **Acyclic, no self-reference** — `self` / `cycle` statuses flag loops.
 - **No lifecycle cascade** — `parent` is an organizational pointer only. Archiving is independent: a child can outlive its parent and vice versa. It is NOT an ownership/GC root.

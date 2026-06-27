@@ -85,7 +85,7 @@ test("upsertDotEnvKey no-ops when value already matches", () => {
 test("worldJoin creates world.json with slug when VAULT.md has vault_slug", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "grag-join-"));
   try {
-    const profile = `---\nname: repo-a\nkind: system\nvault_slug: repo-a\n---\nA vault.\n`;
+    const profile = `---\nname: repo-a\nvault_slug: repo-a\n---\nA vault.\n`;
     const vaultDir = makeVault(root, "repo-a", profile);
     const worldDir = makeWorldDir(root);
 
@@ -106,7 +106,7 @@ test("worldJoin creates world.json with slug when VAULT.md has vault_slug", asyn
 test("worldJoin creates world.json without slug when VAULT.md has no vault_slug", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "grag-join-"));
   try {
-    const profile = `---\nname: repo-a\nkind: system\n---\nA vault.\n`;
+    const profile = `---\nname: repo-a\n---\nA vault.\n`;
     const vaultDir = makeVault(root, "repo-a", profile);
     const worldDir = makeWorldDir(root);
 

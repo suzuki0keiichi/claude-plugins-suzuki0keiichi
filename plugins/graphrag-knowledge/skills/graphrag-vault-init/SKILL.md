@@ -37,7 +37,6 @@ VAULT.md for system vault:
 ```yaml
 ---
 name: <system name>
-kind: system
 schema: system
 vault_slug: <slug>
 ---
@@ -74,7 +73,6 @@ mkdir -p <system-root>/vault/Deliverable
 ```yaml
 ---
 name: <project name>
-kind: project
 schema: project
 vault_slug: <slug>
 ---
@@ -83,12 +81,11 @@ vault_slug: <slug>
 
 **Required fields:**
 - `name`: Human-readable project name
-- `kind`: `project`
-- `schema`: `project` — **omitting this causes system schema to be used, which will reject project node types**
+- `schema`: `project` — selects the project schema. **Omitting this causes system schema to be used, which will reject project node types.** A vault's schema is its kind: `system` or `project`.
 - `vault_slug`: Cross-vault ref namespace. Short kebab-case. **Immutable once set.**
 
 **Optional fields:**
-- `parent`: vault_slug of the single parent program/project this sub-project is contained by. Same-kind, single-parent, *genuine structural* containment only (not a business/marketing grouping under a product name) — see Decision Criteria → "the `parent` field".
+- `parent`: vault_slug of the single parent program/project this sub-project is contained by. Same-schema, single-parent, *genuine structural* containment only (not a business/marketing grouping under a product name) — see Decision Criteria → "the `parent` field".
 
 ### Step 3: Gather Information & Populate — Model Division Strategy
 
@@ -222,12 +219,12 @@ parent: <parent vault_slug>
 This lets a knowledge-gathering crawler choose the **narrowest correctly-scoped** vault for each node instead of guessing. Rules — keep them strict or the tree rots into a junk-drawer pointer:
 
 - **Single parent only.** If you can't name exactly one containing vault, it's not a parent — it's a dependency (cross-vault ref) or a crosscut (`Theme`/`Concern`).
-- **Same kind.** project→project, system→system. A project under a system is a cross-vault Deliverable ref, not parentage.
+- **Same schema.** project→project, system→system. A project under a system is a cross-vault Deliverable ref, not parentage.
 - **Genuine containment, not a collective label.** The child must be *literally part of* the parent, not just grouped with peers under a name the business uses now. "Systems A/B/C are currently sold as product X" is a business framing that drifts when the product is renamed or repackaged — wiring it into `parent` makes the tree churn with org/marketing changes. Test: would the part-of relation survive dropping the product name? If it holds only because they're "called X together," it's a crosscut (`Theme`/`Concern`), not `parent`.
 - **No lifecycle cascade.** `parent` is organizational only; archiving stays independent (a child may outlive its parent).
 - **Not goal-alignment.** "Which goal does this serve" stays `refines` (Goal→Goal) + cross-vault ref; "which concern cuts across many vaults" stays `Theme`. `parent` is purely *which vault contains which*.
 
-Validate with `xref-check` — it reports `parent` status (`resolved` / `orphan` / `self` / `kind-mismatch` / `cycle` / `unresolvable`).
+Validate with `xref-check` — it reports `parent` status (`resolved` / `orphan` / `self` / `schema-mismatch` / `cycle` / `unresolvable`).
 
 ### "Decision or OperationalKnowledge?"
 

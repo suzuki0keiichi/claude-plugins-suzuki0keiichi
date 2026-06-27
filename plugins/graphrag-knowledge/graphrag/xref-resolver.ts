@@ -18,7 +18,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { importVault } from "./import-vault.ts";
-import { loadWorldConfig, WORLD_FILE, parseVaultProfile, type WorldVaultRef } from "./world.ts";
+import { loadWorldConfig, WORLD_FILE, type WorldVaultRef } from "./world.ts";
+import { resolveSchema } from "./schema-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -506,13 +507,13 @@ export function augmentMatchesWithXRefResolutions(
 
 /**
  * Status of a vault's `parent` declaration.
- *   none         — vault declares no parent (it is a root)
- *   resolved     — parent found, same kind, no cycle: a valid containment edge
- *   orphan       — parent slug declared but no vault with that slug found in world
- *   unresolvable — GRAPHRAG_WORLD_DIR not configured; can't resolve the parent
- *   self         — parent points to the declaring vault itself
- *   kind-mismatch — parent kind differs from child kind (parent must be same kind)
- *   cycle        — the parent chain loops (A → B → A …)
+ *   none           — vault declares no parent (it is a root)
+ *   resolved       — parent found, same schema, no cycle: a valid containment edge
+ *   orphan         — parent slug declared but no vault with that slug found in world
+ *   unresolvable   — GRAPHRAG_WORLD_DIR not configured; can't resolve the parent
+ *   self           — parent points to the declaring vault itself
+ *   schema-mismatch — parent schema differs from child schema (parent must be same schema)
+ *   cycle          — the parent chain loops (A → B → A …)
  */
 export type VaultParentStatus =
   | "none"
@@ -520,7 +521,7 @@ export type VaultParentStatus =
   | "orphan"
   | "unresolvable"
   | "self"
-  | "kind-mismatch"
+  | "schema-mismatch"
   | "cycle";
 
 export interface VaultParentCheckResult {
@@ -531,8 +532,8 @@ export interface VaultParentCheckResult {
   status: VaultParentStatus;
   /** Human-readable explanation for non-resolved statuses */
   detail?: string;
-  /** Populated when status === "resolved" / "kind-mismatch" / "cycle" (parent vault was located) */
-  resolved?: { vault_path: string; slug: string; kind: string | null };
+  /** Populated when status === "resolved" / "schema-mismatch" / "cycle" (parent vault was located) */
+  resolved?: { vault_path: string; slug: string; schema: string | null };
   /** Populated when the parent slug matched via a vault_slug_alias instead of the current slug */
   alias_warning?: string;
 }
@@ -548,12 +549,14 @@ function readParentSlugForDir(vaultDir: string): string | null {
   }
 }
 
-/** Read the `kind` declared in the VAULT.md beside a resolved vault dir. */
-function readKindForDir(vaultDir: string): string | null {
-  const profilePath = path.join(path.dirname(path.resolve(vaultDir)), "VAULT.md");
-  if (!existsSync(profilePath)) return null;
+/**
+ * Read the effective schema id for a vault dir (from its VAULT.md `schema`
+ * field, defaulting to the system preset). This is the vault's real "kind":
+ * a system vault resolves to "system", a project vault to "project".
+ */
+function readSchemaIdForDir(vaultDir: string): string | null {
   try {
-    return parseVaultProfile(readFileSync(profilePath, "utf8")).kind;
+    return resolveSchema(vaultDir).id;
   } catch {
     return null;
   }
@@ -589,7 +592,7 @@ function detectParentCycle(childDir: string, firstParentDir: string, worldDir: s
  *
  * Enforces the strict containment rules:
  *   - single parent (scalar `parent` field; lists are ignored by the parser)
- *   - same kind (a project's parent is a project; a system's parent is a system)
+ *   - same schema (a project's parent is a project; a system's parent is a system)
  *   - resolvable (parent slug must name a real vault in the world)
  *   - no self-reference, no cycles
  *
@@ -615,7 +618,7 @@ export function checkVaultParent(vaultDir: string, worldDir?: string): VaultPare
     return { vault_dir: resolvedVaultDir, parent_slug: null, status: "none" };
   }
 
-  const childKind = parseVaultProfile(content).kind;
+  const childSchema = readSchemaIdForDir(resolvedVaultDir);
   const ownSlug = parseVaultSlug(content);
   const ownAliases = parseVaultSlugAliases(content);
 
@@ -659,18 +662,18 @@ export function checkVaultParent(vaultDir: string, worldDir?: string): VaultPare
     };
   }
 
-  const parentKind = readKindForDir(found.vaultDir);
+  const parentSchema = readSchemaIdForDir(found.vaultDir);
   const aliasWarning = found.matchedViaAlias
     ? `parent ref uses alias '${parentSlug}', current slug is '${found.currentSlug}' — update parent to use current slug`
     : undefined;
-  const resolved = { vault_path: found.vaultDir, slug: found.currentSlug, kind: parentKind };
+  const resolved = { vault_path: found.vaultDir, slug: found.currentSlug, schema: parentSchema };
 
-  if (childKind && parentKind && childKind !== parentKind) {
+  if (childSchema && parentSchema && childSchema !== parentSchema) {
     return {
       vault_dir: resolvedVaultDir,
       parent_slug: parentSlug,
-      status: "kind-mismatch",
-      detail: `child kind '${childKind}' != parent kind '${parentKind}'; parent must be the same kind`,
+      status: "schema-mismatch",
+      detail: `child schema '${childSchema}' != parent schema '${parentSchema}'; parent must use the same schema`,
       resolved,
       ...(aliasWarning ? { alias_warning: aliasWarning } : {})
     };

@@ -37,7 +37,6 @@ export interface WorldConfig {
 
 export interface VaultProfile {
   name: string;
-  kind: string | null; // system / project / product / business を推奨 (旧 ANY_ROOT_NODE 4型の転生)
   description: string;
   // 構造的な「親 vault」の vault_slug。ノード間リンクではなく vault 同士の包含関係を表す。
   // 単一の親のみ (スカラ)。ノードに表れない containment を vault 自身が知るための欄。null = 親なし (root)。
@@ -67,7 +66,7 @@ export interface WorldCache {
 }
 
 export interface WorldHint {
-  vault: { name: string; kind: string | null; path: string; description: string };
+  vault: { name: string; path: string; description: string };
   score: number;
   gap_above_next: number | null; // top1 のみ: 2 位との合算スコア差 (相対判定の根拠)
   reasons: string[];
@@ -140,7 +139,7 @@ export function loadWorldConfig(worldDir: string): WorldConfig {
       if (extra.length > 0) {
         throw new Error(
           `world.json: vaults[${i}] has extra keys [${extra.join(", ")}]. ` +
-          `world carries only path and slug; put name/kind/description in the vault's ${VAULT_PROFILE_FILE} (the canonical self-introduction).`
+          `world carries only path and slug; put name/description in the vault's ${VAULT_PROFILE_FILE} (the canonical self-introduction).`
         );
       }
       const slug = typeof obj.slug === "string" && obj.slug.length > 0 ? obj.slug : undefined;
@@ -159,11 +158,10 @@ export function vaultProfilePath(vaultDir: string): string {
 
 /**
  * 人手で書く VAULT.md をパースする。寛容な frontmatter (key: value 行のみ) + 本文。
- * frontmatter: name (無ければ vault 親フォルダ名で補完される), kind。本文 = 何の知識があるか。
+ * frontmatter: name (無ければ vault 親フォルダ名で補完される)。本文 = 何の知識があるか。
  */
-export function parseVaultProfile(content: string): { name: string | null; kind: string | null; description: string; parent: string | null } {
+export function parseVaultProfile(content: string): { name: string | null; description: string; parent: string | null } {
   let name: string | null = null;
-  let kind: string | null = null;
   let parent: string | null = null;
   let body = content;
   const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
@@ -174,13 +172,12 @@ export function parseVaultProfile(content: string): { name: string | null; kind:
       if (!m) continue;
       const value = m[2].trim().replace(/^["']|["']$/g, "");
       if (m[1] === "name" && value) name = value;
-      if (m[1] === "kind" && value) kind = value;
       // parent はスカラのみ受け付ける。YAML シーケンス (parent: 改行 - a - b) は value 空で無視され、
       // 結果的に「親は単一」という規約が構造的に強制される。
       if (m[1] === "parent" && value) parent = value;
     }
   }
-  return { name, kind, description: body.trim(), parent };
+  return { name, description: body.trim(), parent };
 }
 
 export function readVaultProfile(
@@ -194,7 +191,6 @@ export function readVaultProfile(
   return {
     profile: {
       name: parsed.name ?? fallbackName,
-      kind: parsed.kind,
       description: parsed.description,
       parent: parsed.parent
     },
@@ -203,7 +199,7 @@ export function readVaultProfile(
 }
 
 export function profileVectorText(profile: VaultProfile): string {
-  return [profile.name, profile.kind, profile.description]
+  return [profile.name, profile.description]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join("\n");
 }
@@ -497,7 +493,7 @@ export async function buildWorldHints(
       type: "Vault",
       title: e.profile!.name,
       summary: e.profile!.description,
-      tags: e.profile!.kind ? [e.profile!.kind] : []
+      tags: []
     })),
     edges: []
   };
@@ -536,10 +532,9 @@ export async function buildWorldHints(
       if (i === 0 && standout === "clear" && confidence === "low") confidence = "high";
       return {
         // description (自己紹介の本文) も添える: 上位 2-3 件に絞った後なので量は小さく、
-        // 呼び手の LLM が「実際に掛けるか」を判断する材料になる (名前と種別だけでは薄い)
+        // 呼び手の LLM が「実際に掛けるか」を判断する材料になる (名前だけでは薄い)
         vault: {
           name: entry.profile!.name,
-          kind: entry.profile!.kind,
           path: entry.vault_path,
           description: truncateDescription(entry.profile!.description)
         },
@@ -584,7 +579,6 @@ export interface WorldRefreshVaultReport {
   vault_path: string;
   status: WorldCacheEntryStatus;
   name: string | null;
-  kind: string | null;
   fetched_at: string | null;
   profile_mtime: string | null;
   node_count: number | null;
@@ -611,7 +605,6 @@ export function buildWorldRefreshReport(
         vault_path: e.vault_path,
         status: e.status,
         name: e.profile?.name ?? null,
-        kind: e.profile?.kind ?? null,
         fetched_at: e.fetched_at,
         profile_mtime: e.profile_mtime ?? null,
         node_count: e.node_count ?? null,

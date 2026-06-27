@@ -117,7 +117,6 @@ Risk and Assumption have NO state. Risk mitigation via `reduces_risk` edge. Assu
 ```yaml
 ---
 name: <project name>
-kind: project
 schema: project
 vault_slug: <slug>
 vault_slug_aliases:       # optional — list old slugs that still appear in existing refs
@@ -136,7 +135,6 @@ A sub-project may declare its parent program/project in VAULT.md:
 ```yaml
 ---
 name: dc-migration-tokyo
-kind: project
 schema: project
 vault_slug: dc-migration-tokyo
 parent: dc-migration-fy26   # this wave is part of the FY26 program
@@ -155,4 +153,4 @@ parent: dc-migration-fy26   # this wave is part of the FY26 program
 
 **Genuine containment only — not a collective label.** The child must be *literally part of* the parent program, not merely grouped with peers under a name the business happens to use now. A handful of projects the org currently markets together as "X" is **not** a parent: such umbrella names drift with portfolio/business reframing, and wiring them into `parent` makes the backbone churn whenever the grouping is renamed or reshuffled. The test: would the part-of relation survive dropping the product/portfolio name? If it holds only because they're "currently called X together," it's a crosscut → use a `Theme`, not `parent`.
 
-Strict rules (validated by `xref-check`): **single parent** (scalar; lists ignored), **same kind** (a project's parent is a project — `kind-mismatch` otherwise; depending on a system Deliverable is a cross-vault ref, not parentage), **resolvable** (else `orphan`; alias-aware with `alias_warning`), **acyclic / no self-reference** (`cycle` / `self`), and **no lifecycle cascade** — a child project archives on its own top Goal independently of the parent.
+Strict rules (validated by `xref-check`): **single parent** (scalar; lists ignored), **same schema** (a project's parent is a project — `schema-mismatch` otherwise; depending on a system Deliverable is a cross-vault ref, not parentage), **resolvable** (else `orphan`; alias-aware with `alias_warning`), **acyclic / no self-reference** (`cycle` / `self`), and **no lifecycle cascade** — a child project archives on its own top Goal independently of the parent.

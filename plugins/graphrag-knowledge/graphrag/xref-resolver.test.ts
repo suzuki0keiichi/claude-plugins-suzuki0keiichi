@@ -28,7 +28,7 @@ function makeVault(opts: {
   repoName: string;
   slug: string;
   aliases?: string[];
-  kind?: string;
+  schema?: string;
   parent?: string;
   node: { id: string; type: string; title: string; summary: string };
 }): { vaultDir: string } {
@@ -40,13 +40,13 @@ function makeVault(opts: {
     opts.aliases && opts.aliases.length > 0
       ? `vault_slug_aliases:\n${opts.aliases.map((a) => `  - ${a}`).join("\n")}\n`
       : "";
-  const kind = opts.kind ?? "system";
+  const schema = opts.schema ?? "system";
   const parentYaml = opts.parent ? `parent: ${opts.parent}\n` : "";
 
   // VAULT.md (sibling of vault/)
   writeFileSync(
     path.join(repoDir, "VAULT.md"),
-    `---\nname: ${opts.repoName}\nkind: ${kind}\nschema: ${kind}\nvault_slug: ${opts.slug}\n${parentYaml}${aliasesYaml}---\nA test vault.\n`
+    `---\nname: ${opts.repoName}\nschema: ${schema}\nvault_slug: ${opts.slug}\n${parentYaml}${aliasesYaml}---\nA test vault.\n`
   );
 
   // Write node file via buildVaultFiles to get proper import-compatible format
@@ -109,12 +109,12 @@ test("parseCrossVaultRef: returns null for empty slug or empty nodeId", () => {
 // ---------------------------------------------------------------------------
 
 test("parseVaultSlug: reads vault_slug from frontmatter", () => {
-  const content = `---\nname: billing\nkind: system\nschema: system\nvault_slug: billing\n---\nA system vault.\n`;
+  const content = `---\nname: billing\nschema: system\nvault_slug: billing\n---\nA system vault.\n`;
   assert.equal(parseVaultSlug(content), "billing");
 });
 
 test("parseVaultSlug: returns null when vault_slug is absent", () => {
-  const content = `---\nname: billing\nkind: system\n---\nA system vault.\n`;
+  const content = `---\nname: billing\nschema: system\n---\nA system vault.\n`;
   assert.equal(parseVaultSlug(content), null);
 });
 
@@ -848,18 +848,18 @@ test("resolveCrossVaultRef: resolves via world.json slug for absolute-path vault
 // ---------------------------------------------------------------------------
 
 test("parseVaultParent: parses a scalar parent slug", () => {
-  const content = `---\nname: child\nkind: project\nschema: project\nvault_slug: child\nparent: program-x\n---\nbody`;
+  const content = `---\nname: child\nschema: project\nvault_slug: child\nparent: program-x\n---\nbody`;
   assert.equal(parseVaultParent(content), "program-x");
 });
 
 test("parseVaultParent: returns null when absent", () => {
-  const content = `---\nname: child\nkind: project\nvault_slug: child\n---\nbody`;
+  const content = `---\nname: child\nschema: project\nvault_slug: child\n---\nbody`;
   assert.equal(parseVaultParent(content), null);
 });
 
 test("parseVaultParent: ignores a YAML sequence (single-parent rule)", () => {
   // A list value leaves `parent:` empty → null, structurally enforcing one parent.
-  const content = `---\nname: child\nkind: project\nvault_slug: child\nparent:\n  - a\n  - b\n---\nbody`;
+  const content = `---\nname: child\nschema: project\nvault_slug: child\nparent:\n  - a\n  - b\n---\nbody`;
   assert.equal(parseVaultParent(content), null);
 });
 
@@ -881,16 +881,16 @@ test("checkVaultParent: status 'none' when no parent declared", () => {
   }
 });
 
-test("checkVaultParent: 'resolved' for a valid same-kind parent", () => {
+test("checkVaultParent: 'resolved' for a valid same-schema parent", () => {
   const root = mkdtempSync(path.join(tmpdir(), "xref-parent-"));
   try {
-    makeVault({ root, repoName: "program", slug: "program-x", kind: "project", node: DELIV("deliverable:program-x:a") });
-    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", kind: "project", parent: "program-x", node: DELIV("deliverable:child:a") });
+    makeVault({ root, repoName: "program", slug: "program-x", schema: "project", node: DELIV("deliverable:program-x:a") });
+    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", schema: "project", parent: "program-x", node: DELIV("deliverable:child:a") });
     const res = checkVaultParent(vaultDir, root);
     assert.equal(res.status, "resolved");
     assert.equal(res.parent_slug, "program-x");
     assert.equal(res.resolved?.slug, "program-x");
-    assert.equal(res.resolved?.kind, "project");
+    assert.equal(res.resolved?.schema, "project");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -899,7 +899,7 @@ test("checkVaultParent: 'resolved' for a valid same-kind parent", () => {
 test("checkVaultParent: 'orphan' when parent slug is absent from the world", () => {
   const root = mkdtempSync(path.join(tmpdir(), "xref-parent-"));
   try {
-    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", kind: "project", parent: "ghost", node: DELIV("deliverable:child:a") });
+    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", schema: "project", parent: "ghost", node: DELIV("deliverable:child:a") });
     const res = checkVaultParent(vaultDir, root);
     assert.equal(res.status, "orphan");
   } finally {
@@ -910,7 +910,7 @@ test("checkVaultParent: 'orphan' when parent slug is absent from the world", () 
 test("checkVaultParent: 'self' when parent points to the vault's own slug", () => {
   const root = mkdtempSync(path.join(tmpdir(), "xref-parent-"));
   try {
-    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", kind: "project", parent: "child", node: DELIV("deliverable:child:a") });
+    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", schema: "project", parent: "child", node: DELIV("deliverable:child:a") });
     const res = checkVaultParent(vaultDir, root);
     assert.equal(res.status, "self");
   } finally {
@@ -918,13 +918,13 @@ test("checkVaultParent: 'self' when parent points to the vault's own slug", () =
   }
 });
 
-test("checkVaultParent: 'kind-mismatch' when parent is a different kind", () => {
+test("checkVaultParent: 'schema-mismatch' when parent uses a different schema", () => {
   const root = mkdtempSync(path.join(tmpdir(), "xref-parent-"));
   try {
-    makeVault({ root, repoName: "platform", slug: "platform", kind: "system", node: DELIV("deliverable:platform:a") });
-    const { vaultDir } = makeVault({ root, repoName: "proj", slug: "proj", kind: "project", parent: "platform", node: DELIV("deliverable:proj:a") });
+    makeVault({ root, repoName: "platform", slug: "platform", schema: "system", node: DELIV("deliverable:platform:a") });
+    const { vaultDir } = makeVault({ root, repoName: "proj", slug: "proj", schema: "project", parent: "platform", node: DELIV("deliverable:proj:a") });
     const res = checkVaultParent(vaultDir, root);
-    assert.equal(res.status, "kind-mismatch");
+    assert.equal(res.status, "schema-mismatch");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -934,8 +934,8 @@ test("checkVaultParent: 'cycle' when the parent chain loops", () => {
   const root = mkdtempSync(path.join(tmpdir(), "xref-parent-"));
   try {
     // a -> b -> a
-    makeVault({ root, repoName: "a", slug: "a", kind: "project", parent: "b", node: DELIV("deliverable:a:x") });
-    const { vaultDir: bDir } = makeVault({ root, repoName: "b", slug: "b", kind: "project", parent: "a", node: DELIV("deliverable:b:x") });
+    makeVault({ root, repoName: "a", slug: "a", schema: "project", parent: "b", node: DELIV("deliverable:a:x") });
+    const { vaultDir: bDir } = makeVault({ root, repoName: "b", slug: "b", schema: "project", parent: "a", node: DELIV("deliverable:b:x") });
     const res = checkVaultParent(bDir, root);
     assert.equal(res.status, "cycle");
   } finally {
@@ -946,8 +946,8 @@ test("checkVaultParent: 'cycle' when the parent chain loops", () => {
 test("checkVaultParent: alias_warning when parent matches via a vault_slug_alias", () => {
   const root = mkdtempSync(path.join(tmpdir(), "xref-parent-"));
   try {
-    makeVault({ root, repoName: "program", slug: "program-x", kind: "project", aliases: ["old-program"], node: DELIV("deliverable:program-x:a") });
-    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", kind: "project", parent: "old-program", node: DELIV("deliverable:child:a") });
+    makeVault({ root, repoName: "program", slug: "program-x", schema: "project", aliases: ["old-program"], node: DELIV("deliverable:program-x:a") });
+    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", schema: "project", parent: "old-program", node: DELIV("deliverable:child:a") });
     const res = checkVaultParent(vaultDir, root);
     assert.equal(res.status, "resolved");
     assert.ok(res.alias_warning && res.alias_warning.includes("program-x"));
@@ -961,7 +961,7 @@ test("checkVaultParent: 'unresolvable' when no world dir is available", () => {
   const savedWorld = process.env.GRAPHRAG_WORLD_DIR;
   delete process.env.GRAPHRAG_WORLD_DIR;
   try {
-    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", kind: "project", parent: "program-x", node: DELIV("deliverable:child:a") });
+    const { vaultDir } = makeVault({ root, repoName: "child", slug: "child", schema: "project", parent: "program-x", node: DELIV("deliverable:child:a") });
     const res = checkVaultParent(vaultDir);
     assert.equal(res.status, "unresolvable");
   } finally {
