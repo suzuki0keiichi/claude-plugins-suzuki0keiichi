@@ -13,7 +13,7 @@
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { applyMutationToVault } from "./mutate-vault.ts";
-import { detectVaultIsolation } from "./cli-env.ts";
+import { detectVaultIsolation, stateDirForVault, stateDirUnder, discoverStateDir } from "./cli-env.ts";
 import { loadMutationPlan } from "./mutation-core.ts";
 import {
   buildAddDecisionPlan,
@@ -336,13 +336,16 @@ export async function runAsk(argv: string[]) {
   // R5 --graph-rerank on|off (default off — hub-heavy net-negative observed in real vault. See R5 comment in retrieval.ts).
   const graphRerank = parseOnOff(f["graph-rerank"]);
 
-  // --call-number auto-incremented (manual LLM assignment removed → excessive detection runs structurally)
-  const stateDir = process.env.GRAPHRAG_STATE_DIR ?? path.join(process.cwd(), ".graphrag");
-  const callNumber = bumpCallCount(question, stateDir);
-
   // v3: vault is the single source of truth. Resolve vault via --vault flag > GRAPHRAG_VAULT_DIR env,
   // and pass explicitly to read operations (brief/evidence) rather than relying on env.
   const vaultDir = (typeof f.vault === "string" ? f.vault : undefined) ?? process.env.GRAPHRAG_VAULT_DIR;
+
+  // --call-number auto-incremented (manual LLM assignment removed → excessive detection runs structurally)
+  // call-count は vault を保持する .graphrag に集約する。vault が解決できないときだけ
+  // cwd から walk-up して既存 .graphrag を辿る (vault 内実行でも .graphrag/vault/.graphrag を掘らない)。
+  const stateDir = process.env.GRAPHRAG_STATE_DIR
+    ?? (vaultDir ? stateDirForVault(vaultDir) : discoverStateDir());
+  const callNumber = bumpCallCount(question, stateDir);
 
   // When world (directory) is configured or --gist is specified, load and embed query
   // ahead of time to share with brief
@@ -517,7 +520,9 @@ async function runCarve(argv: string[]) {
   const system = requireFlag(f, "system");
   const previous = typeof f.previous === "string" ? f.previous : undefined;
   const vault = typeof f.vault === "string" ? f.vault : undefined;
-  const stateDir = process.env.GRAPHRAG_STATE_DIR ?? path.join(process.cwd(), ".graphrag");
+  // carve の成果物 (indexed-graph.json 等) は索引対象 root の .graphrag に置く規約
+  // (<root>/.graphrag/indexed-graph.json)。cwd 依存だとサブディレクトリ実行で散らばる。
+  const stateDir = process.env.GRAPHRAG_STATE_DIR ?? stateDirUnder(root);
 
   process.stderr.write(`[carve] stage 1/3: index (root=${root}, system=${system})\n`);
   // Use the same vault-trust path as the standalone index verb. Previous genuine File summaries come from the canonical vault

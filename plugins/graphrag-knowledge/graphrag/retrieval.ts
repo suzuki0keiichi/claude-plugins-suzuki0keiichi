@@ -6,6 +6,7 @@ import {
 } from "./vector.ts";
 import { importVault } from "./import-vault.ts";
 import { readVaultConsistent } from "./vault-lock.ts";
+import { stateDirForVault } from "./cli-env.ts";
 
 // v3: vault が単一正本。検索系の読み込みは vault からのみ行う。
 // 旧 FalkorDB / graph.json の読み込み経路は撤廃した (両方から読めると移行が
@@ -27,9 +28,10 @@ export async function loadGraph(
       "(v3: vault is the single source of truth; FalkorDB/graph.json read paths were removed.)"
     );
   }
-  // writer が打刻する場所と同じ規約: vault dir の隣 (.graphrag) sibling。
-  // defaultVectorIndexPath と同一の dirname ロジック (path.resolve → dirname)。
-  const stateDir = path.join(path.dirname(path.resolve(vaultDir)), ".graphrag");
+  // writer が打刻する場所と同じ規約: vault を保持する単一の .graphrag。
+  // 既定レイアウト <root>/.graphrag/vault でも <root>/.graphrag/.graphrag に
+  // ずれないよう、冪等な stateDirForVault に集約する。
+  const stateDir = stateDirForVault(vaultDir);
   return readVaultConsistent(stateDir, () => importVault(vaultDir), seqOpts);
 }
 
@@ -46,8 +48,7 @@ export async function loadVectorIndex(vectorPath: string, deltaPath?: string) {
 // ベクトル索引の既定の置き場所: vault のすぐ隣 (vault 親フォルダ) の
 // .graphrag/vector.json。同じ vault を参照する全エージェントが同じ場所を見る。
 export function defaultVectorIndexPath(vaultDir: string): string {
-  const abs = path.resolve(vaultDir);
-  return path.join(path.dirname(abs), ".graphrag", "vector.json");
+  return path.join(stateDirForVault(vaultDir), "vector.json");
 }
 
 // vault 内のファイルが vector index より新しいかを mtime で判定する。

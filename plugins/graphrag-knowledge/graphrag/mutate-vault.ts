@@ -19,6 +19,7 @@ import {
 } from "./mutation-core.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
 import { defaultVectorIndexPath, loadVectorIndex } from "./retrieval.ts";
+import { stateDirForVault } from "./cli-env.ts";
 import { withVaultLock, beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
 import { runDuplicateCheck } from "./duplicate-check.ts";
 import { embedQueryForVectorIndex } from "./vector.ts";
@@ -341,7 +342,9 @@ export async function applyMutationToVault(args: {
   ) => { written: string[]; removed: string[]; created: string[] };
 }): Promise<any> {
   const vaultDir = path.resolve(args.vaultDir);
-  const stateDir = args.stateDir ?? path.join(path.dirname(vaultDir), ".graphrag");
+  // 既定レイアウト <root>/.graphrag/vault でも <root>/.graphrag/.graphrag を
+  // 掘らないよう、冪等な stateDirForVault に集約 (retrieval.loadGraph と同一規約)。
+  const stateDir = args.stateDir ?? stateDirForVault(vaultDir);
   // 既定の索引ビルドは buildAndWriteVectorIndex (out へ実際に書き出す版)。
   // buildVectorIndex は payload を返すだけなので直に使うと索引が更新されない。
   // vectorDeps は provider 等の DI 用 (テストで endpoint 非依存にする等)。

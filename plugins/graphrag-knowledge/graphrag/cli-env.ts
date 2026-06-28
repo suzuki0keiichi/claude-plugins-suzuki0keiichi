@@ -65,6 +65,53 @@ function isDir(p: string): boolean {
 }
 
 /**
+ * baseDir 直下の state dir (`.graphrag`) を冪等に返す。
+ *
+ * baseDir が既に `.graphrag` ならそれ自身を返す。これを欠くと
+ * `<root>/.graphrag` を baseDir に渡したとき `<root>/.graphrag/.graphrag` を
+ * 掘ってしまう (carving-config.resolveCarvingConfigPath と同じ防御)。
+ */
+export function stateDirUnder(baseDir: string): string {
+  const abs = path.resolve(baseDir);
+  if (path.basename(abs) === ".graphrag") return abs;
+  return path.join(abs, ".graphrag");
+}
+
+/**
+ * vault dir を保持する state dir (`.graphrag`) を冪等に解決する。
+ *
+ * 既定レイアウト `<root>/.graphrag/vault` では state dir は vault の親
+ * (`<root>/.graphrag`) 自身。legacy/sibling レイアウト `<root>/vault` では
+ * vault の隣 `<root>/.graphrag`。どちらでも vector.json / lock / call-count /
+ * carving.json は単一の `.graphrag` に集約される。
+ *
+ * 以前は `path.join(path.dirname(vaultDir), ".graphrag")` を各所に直書きしており、
+ * 既定レイアウトに対して `<root>/.graphrag/.graphrag` を量産していた。
+ */
+export function stateDirForVault(vaultDir: string): string {
+  return stateDirUnder(path.dirname(path.resolve(vaultDir)));
+}
+
+/**
+ * cwd から上方向に既存の `.graphrag` を探し、無ければ cwd 直下の `.graphrag` を返す。
+ *
+ * vault を解決できない verb (carving-allow 等) の state dir fallback 用。
+ * vault ディレクトリ内から実行しても、walk-up で `<root>/.graphrag` を辿り当てる
+ * (素朴な `path.join(cwd, ".graphrag")` だと `<root>/.graphrag/vault/.graphrag` を掘る)。
+ */
+export function discoverStateDir(cwd: string = process.cwd()): string {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const candidate = path.join(dir, ".graphrag");
+    if (isDir(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.join(path.resolve(cwd), ".graphrag");
+}
+
+/**
  * cwd から上方向へ、graphrag の「アクティブな root」を探す。
  * root = 最も近い `.graphrag/` で、`.env` か `vault/` の少なくとも一方を持つもの。
  *

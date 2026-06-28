@@ -3,7 +3,45 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv, loadHomeGraphragEnv } from "./cli-env.ts";
+import { parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv, loadHomeGraphragEnv, stateDirUnder, stateDirForVault, discoverStateDir } from "./cli-env.ts";
+
+// 回帰: state dir (.graphrag) の解決は冪等であること。
+// 既定レイアウト <root>/.graphrag/vault に対して <root>/.graphrag/.graphrag や
+// <root>/.graphrag/vault/.graphrag を掘っていたのが本バグの正体。
+test("stateDirUnder: legacy/sibling layout — <root> → <root>/.graphrag", () => {
+  assert.equal(stateDirUnder("/repo"), path.join("/repo", ".graphrag"));
+});
+
+test("stateDirUnder: idempotent — already-.graphrag dir returns itself (no nesting)", () => {
+  const g = path.join("/repo", ".graphrag");
+  assert.equal(stateDirUnder(g), g);
+});
+
+test("stateDirForVault: default layout <root>/.graphrag/vault → <root>/.graphrag (not .graphrag/.graphrag)", () => {
+  const root = "/repo";
+  const vault = path.join(root, ".graphrag", "vault");
+  assert.equal(stateDirForVault(vault), path.join(root, ".graphrag"));
+});
+
+test("stateDirForVault: legacy layout <root>/vault → <root>/.graphrag", () => {
+  const root = "/repo";
+  assert.equal(stateDirForVault(path.join(root, "vault")), path.join(root, ".graphrag"));
+});
+
+test("discoverStateDir: walks up to an existing .graphrag even from inside the vault (not vault/.graphrag)", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "statedir-")));
+  try {
+    const stateDir = path.join(root, ".graphrag");
+    const vault = path.join(stateDir, "vault");
+    mkdirSync(vault, { recursive: true });
+    // vault ディレクトリ内から実行しても <root>/.graphrag を辿り当てる。
+    assert.equal(discoverStateDir(vault), stateDir);
+    // <root>/.graphrag 直下からでも自分自身を返す (掘り増やさない)。
+    assert.equal(discoverStateDir(stateDir), stateDir);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("parseDotEnv handles plain KEY=value", () => {
   const out = parseDotEnv("FOO=bar\nBAZ=qux\n");

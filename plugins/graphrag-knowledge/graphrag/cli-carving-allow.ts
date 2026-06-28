@@ -20,6 +20,7 @@ import {
   type CarvingConfig,
 } from "./carving-config.ts";
 import { REMOVED_BUILTIN_ORPHAN_PATTERNS } from "./check-carving.ts";
+import { discoverStateDir } from "./cli-env.ts";
 
 function parseArgs(argv: string[]): { verb: string | undefined; flags: Record<string, string | true> } {
   const flags: Record<string, string | true> = {};
@@ -49,7 +50,9 @@ function requireString(flags: Record<string, string | true>, name: string): stri
 
 function defaultConfigPath(flags: Record<string, string | true>): string {
   if (typeof flags.config === "string") return path.resolve(flags.config);
-  const stateDir = process.env.GRAPHRAG_STATE_DIR ?? path.join(process.cwd(), ".graphrag");
+  // vault ディレクトリ内から実行しても walk-up で既存 <root>/.graphrag を辿り当てる
+  // (素朴な cwd/.graphrag だと <root>/.graphrag/vault/.graphrag を量産していた)。
+  const stateDir = process.env.GRAPHRAG_STATE_DIR ?? discoverStateDir();
   return path.join(stateDir, CARVING_CONFIG_BASENAME);
 }
 
