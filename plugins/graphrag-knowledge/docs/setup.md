@@ -196,6 +196,40 @@ parent: myapp-platform
 
 ---
 
+### `.gitignore`
+
+`.graphrag/` には性質の違うものが同居します。**知識・意図的な設定は追跡し、機械ローカル／再生成可能なものだけ無視**します。`.graphrag/` を丸ごと無視すると vault（＝知識の正本）まで失うので避けてください。
+
+| パス | 性質 | git |
+|---|---|---|
+| `.graphrag/vault/` | 知識グラフ（単一正本） | **追跡** |
+| `.graphrag/VAULT.md` | vault の自己紹介（schema/slug/parent） | **追跡** |
+| `.graphrag/carving.json` | carving 免除（意図的な判断の記録） | **追跡** |
+| `.graphrag/.env` | vault パス・mode・embedding endpoint。マシン／worktree ごと | 無視 |
+| `.graphrag/vector.json` | ベクトル索引。vault から再生成可能 | 無視 |
+| `.graphrag/vector-index.json` | carve のベクトル索引。再生成可能 | 無視 |
+| `.graphrag/indexed-graph.json` | carve の索引出力。再生成可能 | 無視 |
+| `.graphrag/ask-state.json` | `ask` の呼び出し回数・履歴。セッションローカル | 無視 |
+| `.graphrag/vault.lock` / `.graphrag/vault.seq` | 書き込みロック／seqlock。一時ファイル | 無視 |
+
+そのまま貼れる `.gitignore`:
+
+```gitignore
+# graphrag-knowledge — 機械ローカル / 再生成可能（コミットしない）
+.graphrag/.env
+.graphrag/vault.lock
+.graphrag/vault.seq
+.graphrag/ask-state.json
+.graphrag/vector.json
+.graphrag/vector-index.json
+.graphrag/indexed-graph.json
+# 追跡したまま: .graphrag/vault/ , .graphrag/VAULT.md , .graphrag/carving.json
+```
+
+> vault を別リポジトリ（`GRAPHRAG_VAULT_DIR` で外部パス）に置く構成なら、vault はそのリポ側で管理され、プロジェクト側 `.graphrag/` には上記の「無視」ファイルしか残らないので、無視リストはそのまま使えます。
+
+---
+
 ## 関連
 
 - [プラグイン README](../README.md) — インストール・使い方の概要
