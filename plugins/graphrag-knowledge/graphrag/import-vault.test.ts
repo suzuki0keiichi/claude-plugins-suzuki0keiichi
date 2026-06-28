@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
@@ -103,16 +102,66 @@ test("synthetic graph round-trips losslessly (nodes + edges)", () => {
   }
 });
 
-test("FalkorDB graph.json fixture round-trips losslessly", (t) => {
-  // Optional real-data check. The spin-off carries no graphrag data/graph.json
-  // (it is graphrag's knowledge content, not skill code). Skip when absent;
-  // the synthetic round-trip test below is the always-on change gate.
-  const graphPath = path.join(process.cwd(), "data", "graph.json");
-  if (!existsSync(graphPath)) {
-    t.skip("data/graph.json absent (graphrag-specific fixture; synthetic test covers the gate)");
-    return;
+// Large-graph round-trip gate. Previously this loaded an optional real
+// data/graph.json fixture (graphrag's own knowledge content, not shipped with
+// the spin-off) and SKIPPED when absent — so in this repo it never actually
+// ran. Replaced with a self-contained generator that builds a graph of the
+// same scale (>=400 nodes / >=1000 edges) and variety, so the at-scale
+// round-trip property is always exercised with no external fixture, no skip.
+// Only field shapes already proven lossless by the synthetic tests above are
+// used (explicit per-node generated_at, number vs string confidence,
+// description / aliases / raw_content, edge updated_at with tz offset).
+function generateLargeGraph(): { generated_at: string; nodes: Rec[]; edges: Rec[] } {
+  const NODE_TYPES = [
+    "Decision", "Risk", "OperationalKnowledge", "Goal", "Investigation",
+    "Constraint", "RejectedOption", "Concern", "Component", "Layer"
+  ];
+  const EDGE_TYPES = [
+    "has_premise", "refines", "reduces_risk", "sets_policy_for",
+    "risks_in", "documented_by"
+  ];
+  const N = 500;
+  const nodes: Rec[] = [];
+  for (let i = 0; i < N; i++) {
+    const type = NODE_TYPES[i % NODE_TYPES.length];
+    const node: Rec = {
+      id: `${type.toLowerCase()}:gen:n${i}`,
+      type,
+      title: `ノード ${i} "${type}" 引用入り`,
+      summary: `要約 ${i}\n複数行も\nありうる`,
+      // alternate number vs string to preserve the confidence type distinction
+      confidence: i % 2 === 0 ? 1 : "0.9",
+      // explicit per-node stamp → round-trips verbatim (no banner inheritance)
+      generated_at: new Date(Date.UTC(2026, 0, 1, 0, 0, 0) + i * 60000).toISOString()
+    };
+    if (i % 3 === 0) node.description = `説明 ${i}\n空行を含む\n\n末尾`;
+    if (i % 5 === 0) node.aliases = [`alias-${i}`, `別名B${i}`];
+    if (i % 7 === 0) node.raw_content = `RAW 一次情報 ${i}\n\n空行を含む\n末尾なし`;
+    nodes.push(node);
   }
-  const graph = JSON.parse(readFileSync(graphPath, "utf8"));
+  const edges: Rec[] = [];
+  let ec = 0;
+  for (let i = 0; i < N; i++) {
+    for (const off of [1, 2, 3]) {
+      const j = i + off;
+      if (j >= N) continue;
+      const edge: Rec = {
+        id: `edge:gen:${ec}`,
+        type: EDGE_TYPES[ec % EDGE_TYPES.length],
+        from: nodes[i].id,
+        to: nodes[j].id,
+        summary: `関係 ${ec}`
+      };
+      if (ec % 4 === 0) edge.updated_at = "2026-05-17T00:00:00+09:00";
+      edges.push(edge);
+      ec++;
+    }
+  }
+  return { generated_at: "2026-01-01T00:00:00.000Z", nodes, edges };
+}
+
+test("large generated graph round-trips losslessly (>=400 nodes / >=1000 edges)", () => {
+  const graph = generateLargeGraph();
   const files = buildVaultFiles(graph);
   const dir = writeVault(files);
   try {
