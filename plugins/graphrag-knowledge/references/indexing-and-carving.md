@@ -17,9 +17,11 @@ node graphrag/cli.ts carve --root <repo> --system <name> [--vault <dir>] [--prev
    **再索引で前回の本物 File 要約を継ぐのは正本 vault からだけ**(`<root>/.graphrag/vault` を自動解決、`GRAPHRAG_VAULT_DIR` / `--vault` でも指定可)。`--previous` の graph.json / indexed-graph.json scaffold は change_status 専用で、その summary は機械テンプレなので継がない(詳細は `cli-primitives.md` の index 節)。**よって「再索引 → vault を scaffold から作り直す」はやってはいけない**(再 author 済みの要約を握り潰す)。再索引が更新するのは scaffold(indexed-graph.json)で、vault は概念化パスの mutation でのみ書く。
 2. `concern-hint` — vector index 経由で異なる Component をまたぐ File 群を Union-Find クラスタ化 (Concern の機械ヒント)。概念化パスで LLM がモデリングした Concern の盲点チェック用であり、Concern 発見の主役ではない (主役は LLM の概念的モデリング。`conceptual-pass.md` §2 参照)。**`summary_provisional` が残る File があると既定で拒否する**(テンプレ要約は embedding が言語語に支配され、クラスタが typescript/components 等に退化して縦串が無意味になるため。承知の上なら `--allow-provisional`)。
 3. `edge-suggest-policy` — 各 Decision/OK/Risk に対し embedding 近接で sets_policy_for 候補抽出
-4. `carving-check` — 品質ゲート (連番 slug / Layer 混入 / 網羅性 / 免除会計 / 重複 / 紐付け不在 / knowledge-floor / superseded-premise)
+4. `carving-check` — 品質ゲート (連番 slug / Layer 混入 / 網羅性 / 免除会計 / 重複 / 紐付け不在 / knowledge-floor / superseded-premise / superseded-no-successor)
 
-**vector index が無い段階 (初回) でも 1 コマンドで通る**: carve は vector index 不在を検知すると、index 後に自動構築して suggest 系 (2・3) まで一気に進む (かつての「carve → `vector-index` → もう一度 carve」の 3 段の手動往復は不要)。embedding endpoint 不達時は従来どおり suggest 系を skip し、出力に明示注記が出る (非致命)。
+**vector index が無い段階 (初回) でも 1 コマンドで通る**: carve は vector index 不在を検知すると、index 後に自動構築して suggest 系 (2・3) まで一気に進む (かつての「carve → `vector-index` → もう一度 carve」の 3 段の手動往復は不要)。embedding endpoint 不達時は従来どおり suggest 系を skip し、出力に明示注記が出る (非致命)。なお `GRAPHRAG_VECTOR_INDEX_PATH` は **vault 索引専用の env** であり、carve は読まない (carve の作業索引は `.graphrag/cache/` 配下の規約パス)。
+
+**summary_provisional の ERROR 免除**: packaging / generated / lockfile 類の File は意味要約の強制対象外 (embedding から除外済み) — ERROR でなく INFO 件数として報告される。免除対象以外の実装 File に `summary_provisional` が残れば従来どおり ERROR。
 
 ## 足場と解釈の分担 (不変)
 
@@ -37,7 +39,7 @@ node graphrag/cli.ts carve --root <repo> --system <name> [--vault <dir>] [--prev
 3. **carving 品質ゲート** — mutation apply 前に `carving-rules.md` の「carving 提出前チェックリスト」を通す。特に **要約の provisional 残存禁止 (`summary-provisional` ERROR。File / Component / Layer candidate 共通)**・網羅性ゲート (`src/` 配下 File は Component / Layer に所属)・連番 slug 禁止・Component と Concern の二重表現禁止は強制。`carving-check` は canonical / 旧 alias どちらの型名でも検出する (`canonicalType` 正規化)。
 4. **知識軸シーディング (初回索引時の知識収穫)** — carve 完了後、`harvest-history --root <repo> [--system <name>] [--out <path>]` で git 履歴から revert コミット (= `RejectedOption` candidate) とコメントマーカー HACK / FIXME / WORKAROUND / XXX (= `OperationalKnowledge` / `Risk` candidate) を**決定論抽出**する (書き込みなし・candidate JSON。concern-hint と同じ思想で、採否は LLM が個別判断して typed-add)。あわせてユーザーへの短いインタビューで Goal ツリー (refines で 3〜7 個) と主要 Constraint を起こす。手順は `references/conceptual-pass.md` の「知識軸シーディング」。Goal 0 件のまま放置すると `carving-check` が `knowledge-floor` WARN (`knowledge-floor-goal-missing`) を出し、design-review の scope-creep / roadmap 観点が無効なままになる。
 
-設計根拠・意図的な非対応・実証 (5/5 収束、無コンテキストで影響波及追跡、品質回帰ゲート) は `references/carving-rationale.md` と `references/indexer-redesign-notes.md`。
+設計根拠・意図的な非対応は `references/carving-rationale.md`。実証の履歴 (5/5 収束、無コンテキストで影響波及追跡、品質回帰ゲート) は `docs/history/indexer-redesign-notes.md` (historical)。
 
 ## 同梱 references (carving 関連)
 
@@ -45,4 +47,4 @@ node graphrag/cli.ts carve --root <repo> --system <name> [--vault <dir>] [--prev
 - `references/interpretation-guidance.md`: **File 解釈 summary の汎用ガイダンス**(LLM が従う。リポ/クエリ非依存)。retrieval 品質の主レバー。
 - `references/conceptual-pass.md`: 概念解釈パスのスキーマ合法マッピング (Component/Layer 命名・Concern 概念グルーピング・doc 蒸留・git 履歴→知識・知識軸シーディング)。**手順**を規定。
 - `references/carving-rules.md`: Component / Concern / Layer の切り方・粒度・命名・異物検査・網羅性ゲート・増分追従の **品質ガード**。conceptual-pass.md の各 step で本ルールを満たすこと。carving 提出前チェックリストを必ず通す。
-- `references/indexer-redesign-notes.md`: indexer エッセンス・再設計指針・実力 eval の実測と 5/5 収束ログ。
+- `docs/history/indexer-redesign-notes.md` (historical): indexer エッセンス・再設計指針・実力 eval の実測と 5/5 収束ログ。

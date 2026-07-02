@@ -145,7 +145,7 @@ GRAPHRAG_VAULT_DIR=/Users/me/projects/myapp/.graphrag/vault
 |---|---|---|
 | `GRAPHRAG_EMBEDDING_TIMEOUT_MS` | `60000` | 埋め込み 1 件あたりの待ち時間上限（ミリ秒） |
 | `GRAPHRAG_VECTOR_PROVIDER` | `openai-compatible-embedding` | サーバ種別（`openai-compatible-embedding` / `lm-studio-embedding`） |
-| `GRAPHRAG_VAULT_MODE` | — | vault 書き込みモード |
+| `GRAPHRAG_VAULT_MODE` | — | vault 書き込みモード（`readonly` / `direct`） |
 | `GRAPHRAG_SCHEMA` | `VAULT.md` の `schema` | schema プリセットの上書き |
 
 > ほかに `GRAPHRAG_GRAPH_JSON_PATH` / `GRAPHRAG_INDEXED_GRAPH_PATH` / `GRAPHRAG_STATE_DIR` / `GRAPHRAG_VECTOR_INDEX_PATH` / `GRAPHRAG_VECTOR_INDEX_BASE` / `GRAPHRAG_VAULT_BUILD_FORCE` / `GRAPHRAG_EMBEDDING_PROBE_TIMEOUT_MS` などもありますが、いずれも個別コマンドの引数の代わりで、日常運用では設定不要です。
@@ -166,7 +166,7 @@ GRAPHRAG_VAULT_DIR=/Users/me/projects/myapp/.graphrag/vault
 ```
 .graphrag/
 ├── VAULT.md        ← ここ（vault の隣）
-├── vector.json
+├── cache/          ← 機械ローカルの再生成物（vector.json など）
 └── vault/          ← vault 本体（ノード = .md ファイル群）
 ```
 
@@ -206,27 +206,26 @@ parent: myapp-platform
 | `.graphrag/VAULT.md` | vault の自己紹介（schema/slug/parent） | **追跡** |
 | `.graphrag/carving.json` | carving 免除（意図的な判断の記録） | **追跡** |
 | `.graphrag/.env` | vault パス・mode・embedding endpoint。マシン／worktree ごと | 無視 |
-| `.graphrag/vector.json` | ベクトル索引。vault から再生成可能 | 無視 |
-| `.graphrag/vector-index.json` | carve のベクトル索引。再生成可能 | 無視 |
-| `.graphrag/indexed-graph.json` | carve の索引出力。再生成可能 | 無視 |
-| `.graphrag/ask-state.json` | `ask` の呼び出し回数・履歴。セッションローカル | 無視 |
-| `.graphrag/vault.lock` / `.graphrag/vault.seq` | 書き込みロック／seqlock。一時ファイル | 無視 |
+| `.graphrag/cache/` | 機械ローカルの再生成物ぜんぶ — ベクトル索引（`vector.json` / `vector-index.json`）、carve の索引出力（`indexed-graph.json`）、`ask` の呼び出し履歴（`ask-state.json`）、書き込みロック／seqlock（`vault.lock` / `vault.seq`） | 無視 |
 
 そのまま貼れる `.gitignore`:
 
 ```gitignore
 # graphrag-knowledge — 機械ローカル / 再生成可能（コミットしない）
 .graphrag/.env
-.graphrag/vault.lock
-.graphrag/vault.seq
-.graphrag/ask-state.json
-.graphrag/vector.json
-.graphrag/vector-index.json
-.graphrag/indexed-graph.json
+.graphrag/cache/
 # 追跡したまま: .graphrag/vault/ , .graphrag/VAULT.md , .graphrag/carving.json
 ```
 
-> vault を別リポジトリ（`GRAPHRAG_VAULT_DIR` で外部パス）に置く構成なら、vault はそのリポ側で管理され、プロジェクト側 `.graphrag/` には上記の「無視」ファイルしか残らないので、無視リストはそのまま使えます。
+`cache/` は**書き込み（typed-add / commit-mutation / carve）が走っていない時なら丸ごと削除して安全**です。ベクトル索引は次の検索時に自動再構築され、`vault.seq` のリセットも設計上許容されています。なお v1.9 以前はこれらのファイルが `.graphrag/` 直下にありました。旧配置のファイルが残っていても読み取りは自動でフォールバックし、次の書き込みから新配置（`cache/`）に移ります（旧ファイルは消して問題ありません）。
+
+> vault を別リポジトリ（`GRAPHRAG_VAULT_DIR` で外部パス）に置く構成なら、vault はそのリポ側で管理され、プロジェクト側 `.graphrag/` には上記の「無視」ファイルしか残らないので、無視リストはそのまま使えます。外部 vault を `GRAPHRAG_VAULT_MODE=readonly` で参照する場合、ask の履歴や自動再構築されたベクトル索引は**参照側**（ローカル `.graphrag/cache/external/<hash>/`）に書かれ、外部 vault リポジトリには何も書き込まれません（pull したての vault がそのまま使えます）。
+
+---
+
+### アップグレード時の注意（v1.10）
+
+**ベクトル索引を一度作り直してください**（`vector-index` を 1 回実行）。検索の確度判定（`match_confidence`）は索引構築時に打刻されるノイズ分布（`noise_baseline`）からの**コーパス相対マージン**で行います。旧バージョンで作った索引には打刻が無く、暫定の絶対値バンドに落ちます — 再構築すれば相対判定になります。
 
 ---
 

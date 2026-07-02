@@ -16,7 +16,7 @@ carving-rules.md の該当節を必ず満たすこと。手順だけ追って ca
 - **構成要素のサマリ** = 中身の部品を機械的に言い換えたもの。File なら symbols / imports、Component / Layer / Concern なら束ねた File 群の列挙。「何が入っているか」。
 - **意味** = なぜ在るか / 何のため / どの関心・責務を担うか。「何のためか」。
 - **書くのは必ず意味。** 構成要素の列挙・言い換えで埋めない(= サボり)。薄い結節点でも、それ自体の意味(なぜ束ねたか)を書く。
-- **description は任意。** 書くなら意味(その集合・横断が何を意味するか)を書く。意味として書くことが無いなら**空にする**(構成要素の羅列で埋めない)。summary と内容が近くても、意味が書いてあれば問題ない ── **等価判定はしない**。
+- **description は原則書く**(SKILL.md §Mutation Plan / carving-check #14 と同基準)。書く内容は意味(その集合・横断が何を意味するか)。**summary の丸写しにしかならない時だけ省く**(構成要素の羅列で埋めるくらいなら省く)。summary と内容が近くても、意味が書いてあれば問題ない ── **等価判定はしない**。
 - **機械が出した構成要素サマリ**(File summary / Component・Layer candidate summary)は `summary_provisional: true` が立つ。意味に書き換えて `summary_provisional` を外す。残すと carving-check が `summary-provisional` ERROR で止める。
 - 書いた内容が意味か構成要素サマリかの判定は、**書くのと同じ LLM の責務**(別の機械チェックは置かない ── 同じ LLM による事後判定は循環で無意味だから)。よってこの規則を**書く時点で**守る。
 
@@ -30,11 +30,7 @@ carving-rules.md の該当節を必ず満たすこと。手順だけ追って ca
 ## 1. Component / Layer 命名(グラフ距離が単位、LLM は命名)
 
 - 既存候補ノードの `title`/`summary` を**意味**(その機能境界 / アーキ層が何を担うか。§0)に更新、`summary_provisional` を外す、`candidate:false`、`judgment_input` 削除。candidate summary は構成要素サマリ(束ねた File 群の機械テンプレ)なので、列挙の言い換えで埋め直さない。
-- **機械プレースホルダ命名を引き継がない。** indexer は候補に `title="Layer band 0/3 (41 files)"` /
-  `"Component candidate c1"`、`id` に `band0` / `c1` を付ける。これは依存深さ帯・連番・ファイル数=構成要素で
-  あって意味ではない。**必ず**「その層/塊が何を担うか」の意味 title + 意味 kebab slug に置き換える
-  (例 `基盤層 — 設定・データの土台` / `layer:<sys>:foundation`)。band 番号・`(N files)`・`cN` を
-  title や slug に残したまま確定しない(= 「カスみたいな命名」。`carving-rules.md`「意味ある命名 必須」)。
+- **機械プレースホルダ命名 (`band0` / `c1` / `(N files)` 入り title) を引き継がない** — 必ず「その層/塊が何を担うか」の意味 title + 意味 kebab slug に置き換える(正本: `carving-rules.md`「意味ある命名 必須」)。
 - 無意味クラスタは accept=false で却下(ノードと付随エッジを除去)。
 - 構造は変えない(メンバーは依存グラフが決める)。
 - 命名・粒度・異物検査・意味 slug・Layer 除外規則は `carving-rules.md` の
@@ -120,7 +116,7 @@ roadmap 観点が無効**になる(照合先の Goal が無ければ「目的か
    `add-rejected-option`(出所必須)。
 
 いずれも `--aliases "<日本語一般語>,<英語コード語>"` で別名を積んでおくと後で雑な問いから引きやすい
-(aliasExact が最強の lexical 一致。SKILL.md §retrieval ladder)。
+(aliasExact が最強の lexical 一致。SKILL.md §Stacking aliases)。
 
 ### 5b. harvest-history の candidate を種にする(初回索引時の知識収穫)
 

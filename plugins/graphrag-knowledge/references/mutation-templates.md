@@ -8,7 +8,7 @@
 typed-add (`add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` /
 `add-goal` / `add-constraint`) でカバーされる頻出ケースは CLI 引数だけで済むので本テンプレートは不要。
 **Goal / Constraint も `add-goal` / `add-constraint` で足りる**ようになった (エッジは `--refines` /
-`--constrains` 等のフラグで張る。SKILL.md §典型 Recipe)。以下の Goal / Constraint テンプレは
+`--constrains` 等のフラグで張る。SKILL.md §Recipe)。以下の Goal / Constraint テンプレは
 複数ノード/エッジを一括で組む複雑ケース用に残置する。残る **Concern (横断関心)** と
 **Update / Delete / 方針転換** 系は typed-add に無いので本テンプレートを使う。
 
@@ -165,7 +165,13 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 - 同じ id の重複 create を拒否
 - state は型ごとの語彙 (`STATE_VOCABULARY`) に限定: Investigation = active/closed、Decision/OperationalKnowledge = superseded のみ、Goal = planned/active/achieved/abandoned。他の型に state があれば拒否、語彙外の値も拒否 (state 無しは常に合法)
 
-加えて vault writer の検証段に**書き込み時重複ゲート** (`duplicate_check`) がある: op:create の知識/横断ノード (File と ConversationChunk 以外) を `title+" "+summary` の embedding で同型既存ノードと照合 (cosine 0.92)。ヒット時は `duplicate_ack` が全 suspect を覆っていなければ all-or-nothing で reject (`failures` に `duplicate-suspect: <new-id> ~ <existing-id> (similarity 0.94)` 形式)。embedding endpoint 不達 / vector index 不在は非致命スキップ。typed-add からは `--dup-ack <id[,id...]>` で注入する。ゲートは最後の網 — `ask` での事前重複確認は依然必須。
+加えて vault writer の検証段に**書き込み時重複ゲート** (`duplicate_check`) がある: op:create の知識/横断ノード (File と ConversationChunk 以外 = schema の duplicateCheck 対象) を同型既存ノードと照合する。照合は 2 経路 — embedding cosine ≥ 0.92 (**document 空間**で埋め込む。索引行と同じテキスト構成・同じ接頭辞で較正が正直になる) と、lexical (正規化 title / alias 完全一致、similarity 1.0)。suspect は `{new_id, existing_id, similarity, basis: "embedding"|"lexical", existing: {type,title,summary,state}, next_step}` の形で判断材料ごと返る。ヒット時は `duplicate_ack` が全 suspect を覆っていなければ all-or-nothing で reject。typed-add からは `--dup-ack <id[,id...]>` で注入する。embedding endpoint 不達 / vector index 不在は非致命スキップ (lexical pre-pass は embedding 不達でも走る)。ゲートは最後の網 — `ask` での事前重複確認は依然必須。
+
+出力には advisory (決して reject しない) の同梱情報が付く:
+
+- `cross_type_suspects`: 型を跨いだ重複疑い (Decision↔OperationalKnowledge / Risk↔Constraint — 境界が設計上ファジーな型グループのみ)。同型フィルタの構造的取りこぼしを提案として可視化する。
+- `index_stale` + `index_stale_reason`: vector index が vault HEAD より古い時の正直な申告 (ゲート判定の網が古い可能性)。
+- `precheck: {recent_ask_hits, note}`: 知識ノード作成時に ask-trail が空 (= `ask` 事前確認をしていない疑い) の観測。
 
 エラー時は `commit-mutation` (vault writer) が `failures` 配列付き Error を投げ、vault は変更されない (all-or-nothing)。
 
@@ -175,7 +181,7 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 
 `add-*` / `commit-mutation` は書き込み後、出力に `suggestions` オブジェクトを添える (全て **suggest-only・非致命**。index / endpoint 不在時は各提案を空+reason 付きで skip し、書き込みは決して止めない)。**提案は判断して確定するか、理由を持って見送る。自動では張られない** — これが境界 (エッジの自動付与はしない・確定は LLM/人間)。
 
-- `suggestions.binding`: 作成した Decision/OK/Risk/Constraint について、vector index の File と embedding 照合した紐付け候補 (型ごと固定: Decision→sets_policy_for / Risk→risks_in / OK→documented_by / Constraint→constrains)。各候補に similarity と「そのまま実行できる確定手段」(typed-add フラグ or plan 断片) が付く → 妥当なら **その手段で確定**する。
+- `suggestions.binding`: 作成した Decision/OK/Risk/Constraint について、vector index の File と embedding 照合した紐付け候補 (型ごと固定: Decision→sets_policy_for / Risk→risks_in / OK→documented_by / Constraint→constrains)。各候補は `path` / `title` / `summary` (判断材料) と `similarity`、そして `apply.plan_fragment` (エッジの commit-mutation 断片) を持つ → 妥当なら **plan_fragment を commit-mutation plan の `edges` にそのまま貼って 1 手で確定**する。
 - `suggestions.relations`: 同型ノードの cosine が [0.80, 0.92) 帯にある関係候補 (refines / has_premise / supersede のどれかは **LLM が判断** と note 付き)。中身を見て該当する関係を張るか見送る。
 - `suggestions.led_to`: Decision 作成時に graph 内の `state:"active"` な Investigation を列挙 → その調査から導かれた Decision なら led_to を張る。
 - `suggestions.premise_candidates`: ask-trail の直近ヒットのうち Decision/Constraint/Goal/OK 型 → 前提なら has_premise を張る。

@@ -3,7 +3,10 @@
 このスキーマの価値は型の列挙ではなく、切り分けの判断とそれを支える不変条件にある。
 書き起こさないと暗黙喪失するため、ここに残す。出自は gestalty の確定 Decision 群。
 
-## ノード型(12)とそれぞれの存在理由
+## ノード型(13)とそれぞれの存在理由
+
+> 執筆時点では 12 型。v3.4 で **Deliverable** (リリース成果物。project vault からの
+> cross-vault 参照の宛先) が加わり現在 13 型。Deliverable の詳細は `schema-quickref-system.md`。
 
 `graphrag/schema.ts` の `NODE_TYPES`。軸2(横断構造)は Layer/Concern/Component で命名する。
 地質メタファー名 (Stratum/Vein/Pocket) は alias として残し `canonicalType` が Layer/Concern/Component に正規化する。

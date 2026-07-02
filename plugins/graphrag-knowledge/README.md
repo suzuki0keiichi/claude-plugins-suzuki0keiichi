@@ -30,16 +30,11 @@
    ```
    GRAPHRAG_VAULT_DIR=/path/to/vault
    ```
-4. **`.gitignore`**: `.graphrag/` には「知識（コミットするもの）」と「機械ローカル／再生成可能（コミットしないもの）」が同居する。後者だけを無視する:
+4. **`.gitignore`**: `.graphrag/` には「知識（コミットするもの）」と「機械ローカル／再生成可能（コミットしないもの）」が同居する。後者は `cache/` 配下にまとまっているので、無視するのは 2 行だけ:
    ```gitignore
    # graphrag-knowledge — 機械ローカル / 再生成可能（コミットしない）
-   .graphrag/.env                # vault パス・mode・embedding endpoint（マシン/worktree ごと）
-   .graphrag/vault.lock          # 書き込みロック（一時）
-   .graphrag/vault.seq           # seqlock（一時）
-   .graphrag/ask-state.json      # ask の呼び出し回数・履歴（セッションローカル）
-   .graphrag/vector.json         # ベクトル索引（vault から再生成可能）
-   .graphrag/vector-index.json   # carve のベクトル索引（再生成可能）
-   .graphrag/indexed-graph.json  # carve の索引出力（再生成可能）
+   .graphrag/.env      # vault パス・mode・embedding endpoint（マシン/worktree ごと）
+   .graphrag/cache/    # ベクトル索引・索引出力・ask 履歴・ロック（すべて再生成可能）
    ```
    逆に **`.graphrag/vault/`（知識本体）・`.graphrag/VAULT.md`・`.graphrag/carving.json`（意図的な除外設定）は追跡したまま**にする。`.graphrag/` を丸ごと無視しないこと。
 

@@ -22,10 +22,10 @@ node graphrag/cli.ts brief --mode <resume|query> [--query "<text>"] [--limit N] 
 - `--limit`: matches 上限 (default 5)
 - `--call-number`: 連打抑止検出用 (普段は `ask` 経由で auto)
 
-R5/R6 のクエリ拡張は `brief` (ひいては `ask` の段上げ) が担う:
+クエリ拡張は `brief` (ひいては `ask` の段上げ) が担う:
 
-- `--graph-rerank on|off` (R5、**既定 off**): 初期スコア後、上位 K=24 候補について他の上位候補と graph エッジ (向き不問・全エッジ型) で隣接する数 votes を数え、`score *= (1 + 0.06 * min(votes, 5))` で近傍が効く match を押し上げる (reason に `graph:+N`)。実 vault 実測 (2026-06-12) で votes がノード次数 (hub 度) に比例し Investigation/会話ハブが正解 leaf を押し下げる net-negative を確認したため既定 off。島構造が均衡したグラフでのみ on を検討。
-- `--gist "<想定答えの一行>"` (R6、任意): 質問と gist を別々に埋め込み複数 query vector として渡す (semantic は各 vector との cosine の max)。想定する答えの一行を添えると multi-query になり、質問文だけでは引きにくい言い換えを拾える。両ベクトルとも index の `prefix_policy` に従って query 接頭辞が付く。
+- `--graph-rerank on|off` (**既定 off**): 上位候補どうしの graph 隣接数でスコアを押し上げる (reason に `graph:+N`)。votes が hub 度に比例して正解 leaf を押し下げるため既定 off — 島構造が均衡したグラフでのみ on を検討。
+- `--gist "<想定答えの一行>"` (任意): 質問と gist を別々に埋め込み複数 query vector として渡す (semantic は各 vector との cosine の max)。質問文だけでは引きにくい言い換えを拾える。
 - これらは通常 `ask "<質問>" [--graph-rerank on|off] [--gist "<一行>"]` から使う (`ask` が `brief` に配線する)。
 
 出力: `{ generated_by, mode, graph: {...}, active|query: {...}, usage: [...] }`
@@ -36,7 +36,7 @@ R5/R6 のクエリ拡張は `brief` (ひいては `ask` の段上げ) が担う:
 node graphrag/cli.ts search --query "<text>" [--limit N] [--neighbors N] [--types T1,T2]
 ```
 
-ranked match list + 近傍 (N hops 展開) edges。`ask` は通常 evidence で代替するが、neighbors を 2-3 にしたい / `--types` で絞りたい時に直叩き。
+ranked match list + 近傍 (N hops 展開) edges。`ask` は通常 evidence で代替するが、neighbors を 2-3 にしたい / `--types` で絞りたい時に直叩き。近傍展開の graph_context はノードあたり最大 ~10 本 (edge 型優先度順)・全体 ~40 本で打ち切られる (`evidence` と同じ上限)。
 
 ## evidence — 出所付き answer packet
 
@@ -73,7 +73,7 @@ node graphrag/cli.ts vector-index [--graph <path>] [--out <path>] [--prefix-poli
 
 embedding endpoint (`GRAPHRAG_EMBEDDING_ENDPOINT` 自動検出 or 明示) で File / Decision 等の text を embedding 化し JSON 出力。`commit-mutation` が vault 書込後に索引更新 (非致命) を内部で行うので、mutation 後に手で叩く必要は無い。vault 全体を初回索引したい時に直叩き。
 
-- `--prefix-policy auto|off` (R1、既定 auto): モデルが接頭辞ポリシーを持つ時 (例 `nomic-embed-text` → document `"search_document: "` / query `"search_query: "`)、各ノードの埋め込みテキスト先頭に document 接頭辞を付け、index メタに `prefix_policy: { document, query }` を記録する。`off` で接頭辞ポリシーを無効化 (従来挙動)。未登録モデルは auto でも接頭辞なし。クエリ側は **index メタを読んで** `prefix_policy` が在る index にだけ query 接頭辞を付ける (メタ無しの旧 index には付けない = 混在防止)。`ask` / 重複ゲート / 提案器は共通ヘルパ `embedForIndex` 経由でこのポリシーに従う。
+- `--prefix-policy auto|off` (既定 auto): モデルが接頭辞ポリシーを持つ時 (例 `nomic-embed-text` の document/query 接頭辞)、document 接頭辞で埋め込み index メタに `prefix_policy` を記録する。クエリ側は **index メタを読んで** `prefix_policy` が在る index にだけ query 接頭辞を付ける (メタ無しの旧 index には付けない = 混在防止)。`off` で無効化。`ask` / 重複ゲート / 提案器も同じポリシーに従う。
 
 ## vault-build — graph.json → Obsidian vault
 
@@ -160,6 +160,14 @@ node graphrag/cli.ts world-join --world <dir> --vault <dir>  # explicit
 
 Deterministic two-step: ① add this vault's path and `vault_slug` to world.json (no-op if already present), ② write `GRAPHRAG_WORLD_DIR=<dir>` to `.graphrag/.env` (overwrites existing value). Creates the world directory and world.json if absent. Warns when VAULT.md is missing; warns when `vault_slug` is not set (cross-vault refs will not resolve to this vault).
 
+## xref-check — cross-vault 参照 / parent 整合の診断 (read-only)
+
+```sh
+node graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>]
+```
+
+vault 内の全エッジから `vault:` プレフィックス付き `to` を走査し、world.json (slug 引き) で解決を試みて各参照を `resolved` (vault も node も在る) / `broken` (vault は在るが node 欠落) / `orphan` (slug の vault が無い) / `unresolvable` (`GRAPHRAG_WORLD_DIR` 未設定) に分類する。あわせて VAULT.md の `parent` (vault 包含) を検査し、`parent_status` (`none` / `resolved` / `orphan` / `self` / `schema-mismatch` / `cycle` / `unresolvable`) を summary に出す。読み取り専用 — どの vault も変更しない。`--vault` 省略時は解決済み `GRAPHRAG_VAULT_DIR` (自動発見含む)、`--world` 省略時は `GRAPHRAG_WORLD_DIR`。
+
 ## world-refresh — cross-vault 用 world-cache 再構築
 
 ```sh
@@ -172,4 +180,4 @@ cross-vault retrieval の三層 (`正本: vault 隣の VAULT.md` / `住所録: w
 - **VAULT.md** (vault dir の**隣**、`.graphrag`/vector.json と同じ配置): frontmatter `name:` / `schema:` (system/project; 省略時 system) / `vault_slug:` / `parent:` + 本文に「何の知識があるか」数行。vault フォルダの中には置かない (ノード扱いされ、mutation で孤児削除される)。
 - **world-cache.json** (world.json の隣): 各 vault の自己紹介の写し + embedding + 内容ハッシュ + 取得時刻。機械生成・手編集禁止。原子書き (tmp+rename)。
 
-`ask` は `GRAPHRAG_WORLD_DIR` (または `ask --world <dir>`) が設定されている時だけ、結果に `world_hints` (「vault X にも知識がありそう」のヒント) を添える。ヒントの確度は絶対値 (confidence) に加え相対判定 (`standout`: clear/crowd/single) を持つ — 自己紹介テキスト同士の embedding は類似度レンジが狭く絶対値だけだと正解が low に落ちるため、候補内で突出した top1 は high に格上げする (実測 2026-06-11: 分離の主源泉は lexical で、ノード本体由来の重心指紋は理論上限でも効かないことを確認済み → 自己紹介の本文を具体語彙で濃く書くのが最も効く)。cache が無ければ ask 中に自動構築、ローカル vault の VAULT.md 変更はハッシュで検知してその vault だけ再 embedding するので、world-refresh を日常的に手で叩く必要はない (vault を world.json に足した直後などにまとめて作り直したい時用)。実際に別 vault へ掛けるのは呼び手が `ask "<質問>" --vault <path>` (ヒント内の `ask_command`) を実行した時だけ — 自動では掛けない。
+`ask` は `GRAPHRAG_WORLD_DIR` (または `ask --world <dir>`) が設定されている時だけ、結果に `world_hints` (「vault X にも知識がありそう」のヒント) を添える。ヒントの確度は絶対値 (confidence) に加え相対判定 (`standout`: clear/crowd/single) を持ち、候補内で突出した top1 は high に格上げされる。ヒットの主源泉は VAULT.md 本文の lexical 一致 — 自己紹介の本文を具体語彙で濃く書くのが最も効く。cache が無ければ ask 中に自動構築、ローカル vault の VAULT.md 変更はハッシュで検知してその vault だけ再 embedding するので、world-refresh を日常的に手で叩く必要はない (vault を world.json に足した直後などにまとめて作り直したい時用)。実際に別 vault へ掛けるのは呼び手が `ask "<質問>" --vault <path>` (ヒント内の `ask_command`) を実行した時だけ — 自動では掛けない。

@@ -12,7 +12,7 @@ mutation する全ての conceptual-pass で本ルールを満たすこと。違
 
 ## なぜ品質ルールが要るか(設計判断の背景)
 
-`indexer-redesign-notes.md` の最終結論: retrieval 品質の天井はモデル能力ではなく
+`docs/history/indexer-redesign-notes.md` (historical) の最終結論: retrieval 品質の天井はモデル能力ではなく
 「解釈ガイダンス + グラフ信号 (role) の活用」だった。同じことが carving にも当てはまる。
 indexer が出す候補(依存コミュニティ・トポロジ深さ・命名)は決定論的足場で、最終的に
 何を Component / Concern / Layer と命名するかは LLM の判断。判断軸が無いと、
@@ -170,14 +170,8 @@ carve とは、この機械名を**「そのノードが何を担うか」の意
   で `title` / `summary` のみ patch する(slug 含む id は immutable のため、命名変更が
   本当に必要なら新規作成 + 旧削除になるが、その場合は履歴を summary に残す)。
 
-**知識ノード(Decision / OperationalKnowledge)の廃止は削除でなく state**。方針転換した
-Decision は消さず、方針転換レシピに従う: 新 Decision を作成 → `refines`(新→旧)を張る →
-旧 Decision を `op:"update"` で `state:"superseded"`。反転で捨てたアプローチが再誘惑され
-うる場合のみ RejectedOption を新設し 新Decision -`supersedes`-> それ を併設する
-(supersedes の宛先は RejectedOption 専用のまま変えない)。旧ノードへの `has_premise`
-流入エッジはそのまま生かす(系譜保存)。retrieval は superseded を除外せずスコアを
-0.6 倍に減点して出す(hard reject しない)。手順の詳細は SKILL.md のスキーマ早見 /
-`mutation-templates.md`。
+**知識ノード(Decision / OperationalKnowledge)の廃止は削除でなく state**(`state:"superseded"`)。
+方針転換レシピ(新 Decision 作成 → `refines` 新→旧 → 旧を superseded)の正本は `mutation-templates.md`「方針転換」。
 
 ## Concern carving
 
@@ -290,20 +284,8 @@ Windows installer 側 (`packaging/windows-installer/workflow/install-messages.ps
 
 ### 命名(依存ピラミッドの縦位置を「意味」で名付ける)
 
-indexer は Layer 候補に `title="Layer band N/M (X files)"` / `id=layer:<sys>:bandN` という
-**機械プレースホルダ**を付ける(依存深さ帯のインデックスとメンバー数)。これは構成要素であって
-意味ではない。carve では **その深さ帯が担うアーキ上の役割**を読み取り、意味で名付ける:
-
-- band は「最も依存される土台 (0)」→「入口・最上位 (大)」の順。各帯が実際に何の集まりかを
-  メンバー File の役割(`role`/summary)から読み、層の**役割**を title/slug にする。
-- 良い: `基盤層 — 設定・データ・共有型の土台` (`foundation`) / `ドメインロジック層 — 認証・通知・集計`
-  (`domain-logic`) / `外部接点・画面層` (`interface`) / `入口・合成層 — 起動とルーティング合成`
-  (`composition`)。
-- **禁止**: `Layer band 0/3 (41 files)` をそのまま確定 / slug `band0` のまま / title に
-  ファイル数や band 番号を残す。これは「カスみたいな命名」= サボり(§0 / 「意味ある命名 必須」節)。
-- サーバ系と web 系が同じ深さ帯に同居するのは正常(Layer は depth 軸。モジュール境界は Component
-  の役割)。title はその帯を貫く**共通の縦位置の意味**を表す(「土台として積まれる」「起動・合成する」等)。
-- 詳細な命名規則(slug・プレースホルダ禁止・ゲート強制)は「意味ある命名 必須」節を参照。
+band は「最も依存される土台 (0)」→「入口・最上位 (大)」の順。各帯が実際に何の集まりかをメンバー File の役割(`role`/summary)から読み、その帯を貫く**共通の縦位置の意味**を title/slug にする(例 `基盤層 — 設定・データ・共有型の土台` / `foundation`。サーバ系と web 系の同居は正常 — Layer は depth 軸)。
+命名規則(意味 slug・プレースホルダ禁止・ゲート強制)は「意味ある命名 必須」節が正本。
 
 ### 対象範囲(実行依存があるものだけ)
 
@@ -374,21 +356,6 @@ conceptual-pass のマージ前に必ず通す品質ゲート。`validateGraph` 
 ゲートを通った後、未所属 File を残す場合は **mutation plan の `reason` フィールドに
 allowed-orphan 一覧を残す**(レビュアー / 後任 LLM が意図的な除外と判別できるように)。
 
-### 検査クエリ例
-
-allow-orphan を控えた上で、正本である vault から読み込んだ graph オブジェクトに対し
-下記で確認できる(`graph.json` は索引器出力・往復検証用の中間表現であって正本ではない)。
-LLM が直接クエリを書く必要はない、人間 / スクリプト経路:
-
-```js
-// 全 File ノードのうち Component に属さないものを抽出
-const inComp = new Set();
-for (const e of graph.edges) {
-  if (e.type === 'evidenced_by' && e.from.startsWith('component:')) inComp.add(e.to);
-}
-const orphans = graph.nodes.filter(n => n.type === 'File' && !inComp.has(n.id) && n.path?.startsWith('src/'));
-```
-
 ## 増分追従(changed / new File)
 
 `node graphrag/cli.ts index` の `change_status: new|changed|unchanged` を尊重する:
@@ -445,9 +412,10 @@ ERROR は必ず解消、WARN は意図ある場合は justification 必須。下
    (宛先不問) が 1 本も無ければ WARN。既存 D/OK/R の判定は不変。`add-constraint --constrains <id,...>`
    は必須 ≥1 なので typed-add 経由なら自然に満たされる (commit-mutation で constrains 無しの
    Constraint を作った時に引っかかる)。
-10. **node-duplicate-suspect**: 同型ノード間 (Decision×Decision / OK×OK / Risk×Risk /
-    Concern×Concern / Component×Component) の embedding cosine similarity が threshold
-    (default 0.92) 以上のペアを警告。worktree マージで「同概念別命名」(例: `auto-update`
+10. **node-duplicate-suspect**: 同型ノード間の embedding cosine similarity が threshold
+    (default 0.92) 以上のペアを警告。対象型は書き込み時重複ゲートと同じ単一正本
+    (schema の duplicateCheck 対象 = File / ConversationChunk 以外の知識・横断ノード全型) —
+    監査とゲートの基準が割れないようにする。worktree マージで「同概念別命名」(例: `auto-update`
     と `auto-updater`) が発生した時の表記揺れ重複を機械検出。`--vector-index` 指定時のみ
     実行 (省略すると INFO で skip)。LLM 確認の上、片方削除 + edge 張り替えで統合。
 11. **免除会計**: allowed-orphan 免除の内訳を text / JSON 出力に常時印字する。各免除の
@@ -468,6 +436,14 @@ ERROR は必ず解消、WARN は意図ある場合は justification 必須。下
     retrieval で引かれにくくなるため、原則どのノードにも意味の description を書く
     (`conceptual-pass.md` §0 大原則 / SKILL.md Mutation Plan の summary vs description 書き分け)。
     typed-add からは `--description "..."` で指定する。
+15. **superseded-no-successor**: `state: superseded` なのに後継からの `refines` が 1 本も
+    無いノードを WARN (方針転換レシピの張り忘れ検出。「superseded — 後継を確認」の
+    state_note が行き止まりになる)。後継 Decision から `refines` を張るか、supersede が
+    誤りなら state を取り下げる。
+
+なお **summary-provisional** ERROR (要約が機械テンプレのまま。conceptual-pass.md §0) は
+packaging / generated / lockfile 類の File を免除する (embedding から除外済みで意味要約の
+強制対象外 — ERROR でなく INFO 件数として報告。書き換えは任意)。
 
 ### 閾値の根拠
 

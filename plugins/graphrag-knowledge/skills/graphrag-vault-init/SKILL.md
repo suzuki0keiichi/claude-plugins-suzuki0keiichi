@@ -10,7 +10,9 @@ Creates a new vault and populates initial nodes. Routes to the appropriate flow 
 ## Prerequisites
 
 - Embedding endpoint must be reachable (Ollama / LM Studio with `nomic-embed-text`).
-- CLI launcher: `node --experimental-strip-types <plugin-path>/graphrag/cli.ts <verb> [args]`
+- CLI launcher: `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts <verb> [args]`
+
+Hereafter `$CLI` = the launcher above, `$REF` = `${CLAUDE_PLUGIN_ROOT}/references`.
 
 ## Vault Types — Choose First
 
@@ -160,24 +162,7 @@ Use `commit-mutation` for batch creation. All distilled nodes (Decision/Rejected
 $CLI commit-mutation <plan.json>
 ```
 
-Mutation plan structure:
-```json
-{
-  "reason": "Initial setup for <project name>",
-  "nodes": [
-    { "op": "create", "id": "goal:<sys>:<slug>", "type": "Goal", "title": "...", "summary": "...", "state": "active" },
-    { "op": "create", "id": "stakeholder:<sys>:<slug>", "type": "Stakeholder", "title": "...", "summary": "..." },
-    { "op": "create", "id": "milestone:<sys>:<slug>", "type": "Milestone", "title": "...", "summary": "...", "state": "planned" },
-    { "op": "create", "id": "assumption:<sys>:<slug>", "type": "Assumption", "title": "...", "summary": "...", "certainty": "Expected", "description": "Why this certainty level: ..." },
-    { "op": "create", "id": "agreement:<sys>:<slug>", "type": "Agreement", "title": "...", "summary": "...", "state": "active" },
-    { "op": "create", "id": "source:<sys>:<slug>", "type": "Source", "title": "...", "summary": "...", "description": "url: https://...\nfetched_at: 2026-06-18\nsource_kind: document" }
-  ],
-  "edges": [
-    { "op": "create", "id": "edge:...", "type": "achieves", "from": "task:<sys>:<slug>", "to": "goal:<sys>:<slug>" },
-    { "op": "create", "id": "edge:...", "type": "requires", "from": "task:<sys>:<slug>", "to": "vault:platform-x/deliverable:platform-x:product-v2.0" }
-  ]
-}
-```
+For the full initial-population plan template (Goal / Stakeholder / Milestone / Assumption with required `certainty` / Agreement / Source nodes + achieves / cross-vault `requires` edges), use `$REF/mutation-templates.md` §Initial population.
 
 ### Step 5: Verify
 

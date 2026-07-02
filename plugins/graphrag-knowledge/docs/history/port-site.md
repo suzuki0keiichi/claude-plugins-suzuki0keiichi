@@ -1,5 +1,7 @@
 # Port Site Notes
 
+> **historical** — env 解決の記述は home-fallback 層 (`~/.graphrag/.env`) 導入前のもの。現行の正は SKILL.md §Setup。
+
 利用先プロジェクトに graphrag-skill を組み込む時に必要な設定の一覧。
 **初回移植時のみ参照**、日常運用では読まない。
 
