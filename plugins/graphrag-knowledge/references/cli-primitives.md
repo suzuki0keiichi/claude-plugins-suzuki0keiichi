@@ -168,6 +168,24 @@ node graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>]
 
 vault 内の全エッジから `vault:` プレフィックス付き `to` を走査し、world.json (slug 引き) で解決を試みて各参照を `resolved` (vault も node も在る) / `broken` (vault は在るが node 欠落) / `orphan` (slug の vault が無い) / `unresolvable` (`GRAPHRAG_WORLD_DIR` 未設定) に分類する。あわせて VAULT.md の `parent` (vault 包含) を検査し、`parent_status` (`none` / `resolved` / `orphan` / `self` / `schema-mismatch` / `cycle` / `unresolvable`) を summary に出す。読み取り専用 — どの vault も変更しない。`--vault` 省略時は解決済み `GRAPHRAG_VAULT_DIR` (自動発見含む)、`--world` 省略時は `GRAPHRAG_WORLD_DIR`。
 
+## fsck — vault integrity check (read-only)
+
+```sh
+node graphrag/cli.ts fsck [--vault <dir>]    # exit 0 = ok/warn, 1 = error
+```
+
+Fast read-only integrity sweep over the resolved vault (the detection instrument against silent knowledge corruption). Emits a single JSON `{status: ok|warn|error, checks: [...], counts: {files, nodes, edges, errors, warnings}}`. Checks, by stable id:
+
+- `import-parse` — every `.md` parses through the real read path (importVaultFile); failure count + file list.
+- `duplicate-node-ids` — no node id is held by more than one file.
+- `id-path-consistency` — node id/type ↔ type-dir/filename mapping. Type-dir mismatch = error (folder contradicts frontmatter `type`); basename-only mismatch = warn (drift the next write renames away).
+- `edge-endpoints` — every edge endpoint resolves to an existing node; `vault:` cross-vault refs are validated shape-only (`vault:<slug>/<nodeId>` — actual resolution is `xref-check`'s job).
+- `schema-validate` — validateGraph (schema-level) passes.
+- `round-trip` — import → rebuild in memory → byte-compare against disk (EOL-insensitive, same as the write path). Any differing file = non-canonical serialization, WARN only: drift (hand edits / legacy formatting the next write rewrites), not corruption.
+- `git-uncommitted` — uncommitted changes under the vault = ERROR with a recovery hint: this is the signature of a torn write (a mutation wrote its delta but died before its git commit). Non-git vaults get a WARN (torn-write detection unavailable).
+
+Distinguishes corruption (error) from drift (warn): `error` means the vault needs repair before the next mutation can be trusted; `warn` is self-healing on the next write. Vault via `--vault` or `GRAPHRAG_VAULT_DIR`.
+
 ## world-refresh — cross-vault 用 world-cache 再構築
 
 ```sh

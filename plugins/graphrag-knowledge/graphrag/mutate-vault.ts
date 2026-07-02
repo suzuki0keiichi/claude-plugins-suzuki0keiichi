@@ -32,7 +32,8 @@ import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
-function writeFileAtomic(abs: string, content: string): void {
+// export はフォールト注入テスト用 (writeVaultDelta の deps.writeFile 既定実装)。
+export function writeFileAtomic(abs: string, content: string): void {
   mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = `${abs}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, content);
@@ -97,8 +98,12 @@ function pruneEmptyDirs(root: string): string[] {
 export function writeVaultDelta(
   vaultDir: string,
   nextGraph: any,
-  sink?: { written: string[]; removed: string[]; created: string[] }
+  sink?: { written: string[]; removed: string[]; created: string[] },
+  // テスト用 DI seam: k 番目のファイル書き込みで throw させる等、実 writeVaultDelta の
+  // ループ (partial sink 積み上げ含む) を踏んだまま FS 障害を注入できるようにする。
+  deps?: { writeFile?: (abs: string, content: string) => void }
 ): { written: string[]; removed: string[]; created: string[] } {
+  const writeFile = deps?.writeFile ?? writeFileAtomic;
   const files = buildVaultFiles(nextGraph);
   const wantAbs = new Set(files.map((f) => path.join(vaultDir, f.relPath)));
   // sink を渡すと途中まで書いた written/created がそこに積まれる。多ファイル適用が
@@ -115,7 +120,7 @@ export function writeVaultDelta(
     // これをしないと CRLF チェックアウトの vault で 1 mutation 毎に全ファイルが
     // churn (LF へ全書き直し) してしまう。
     if (cur === undefined || normalizeEol(cur) !== normalizeEol(f.content)) {
-      writeFileAtomic(abs, f.content);
+      writeFile(abs, f.content);
       written.push(f.relPath);
       if (!existed) created.push(f.relPath);
     }
@@ -154,6 +159,46 @@ function rollbackVaultWorktree(vaultDir: string, created: string[]): void {
       /* noop */
     }
   }
+}
+
+/**
+ * 書き込み後セルフチェック (check id: "unexplained-removal")。
+ * writeVaultDelta が REMOVED したファイルは必ず「plan の node delete」か「rename
+ * (ノードは nextGraph に生存していて canonical パスだけが移動した)」で説明できなければ
+ * ならない。説明できない削除 = mutation ロジックが plan に無いノードを黙って落とした
+ * (知識を破壊する) コードバグの兆候なので、git commit 前に throw して既存の
+ * all-or-nothing rollback に乗せる。書き直し (serialization refresh / cascaded_edge_ids /
+ * orphan-body cleanup はファイルの rewrite であって node ファイルの削除ではない) は
+ * 対象外。削除ゼロの mutation (大多数) は id 集合の構築ごと skip する — 走るのは削除が
+ * あった時だけで、ディスク IO はゼロ (in-memory の id 集合比較のみ)。
+ */
+export function assertRemovalsExplained(args: {
+  currentGraph: { nodes?: any[] };
+  nextGraph: { nodes?: any[] };
+  plan: { nodes?: any[] };
+  removed: string[];
+}): void {
+  if (args.removed.length === 0) return;
+  const nextIds = new Set((args.nextGraph.nodes ?? []).map((n: any) => n.id));
+  const plannedDeletes = new Set(
+    (args.plan.nodes ?? [])
+      .filter((n: any) => (n.op ?? "create") === "delete")
+      .map((n: any) => n.id)
+  );
+  const lost = (args.currentGraph.nodes ?? [])
+    .map((n: any) => n.id)
+    .filter((id: any) => !nextIds.has(id) && !plannedDeletes.has(id));
+  if (lost.length === 0) return;
+  const err: any = new Error(
+    `post-write self-check failed (unexplained-removal): file(s) [${args.removed.join(", ")}] were removed ` +
+      `and node(s) [${lost.join(", ")}] vanished from the graph without a plan delete. This indicates a code ` +
+      `bug that would silently destroy knowledge; the write is rolled back to HEAD (nothing was committed).`
+  );
+  err.code = "UNEXPLAINED_REMOVAL";
+  err.check_id = "unexplained-removal";
+  err.removed_files = [...args.removed];
+  err.lost_node_ids = lost;
+  throw err;
 }
 
 export function vaultHead(vaultDir: string): string {
@@ -523,6 +568,9 @@ export async function applyMutationToVault(args: {
       // commit を確定境界にするので、確定先 branch が無い(detached HEAD)なら適用前に止める。
       if (args.git !== false) assertOnBranch(vaultDir);
       writeDelta(vaultDir, v.nextGraph, delta);
+      // 書き込み後セルフチェック: 説明できないファイル削除 (= plan に無い知識の消滅) を
+      // commit 前に検知して throw する (下の catch で HEAD へ巻き戻る)。
+      assertRemovalsExplained({ currentGraph: current, nextGraph: v.nextGraph, plan, removed: delta.removed });
       let head: string | null = null;
       if (args.git !== false) {
         head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation");
@@ -540,6 +588,12 @@ export async function applyMutationToVault(args: {
           deleted: plan.nodes.filter((n: any) => n.op === "delete").map((n: any) => n.id),
         },
         cascaded_edge_ids: v.cascadedEdgeIds,
+        // 書き込み後セルフチェックの結果 (ここに到達した = 全削除が説明済み)。
+        post_write_check: {
+          id: "unexplained-removal",
+          status: "ok",
+          removed_files: delta.removed.length,
+        },
         // lock 外の suggestions 組み立てに渡す内部フィールド (出力直前に除去する)。
         __suggestionsInput: { nextGraph: v.nextGraph, plan, relations: relationCandidates },
       };

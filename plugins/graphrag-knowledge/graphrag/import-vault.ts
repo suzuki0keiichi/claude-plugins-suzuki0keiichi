@@ -9,6 +9,10 @@ import path from "node:path";
 //   - body: <!-- graphrag:description:begin/end --> -> node.description
 //           <!-- graphrag:raw_content:begin/end --> -> node.raw_content
 //           (legacy <!-- gestalty:... --> markers are also accepted)
+//           description / raw_content values the body cannot carry verbatim
+//           (empty/whitespace-only, CR-bearing, marker-like, non-string) are
+//           emitted as ordinary frontmatter keys instead and come back through
+//           the generic frontmatter path — body markers, when present, win.
 // Everything else in the body (banner, H1, `## 関係`, `links:` wikilinks) is
 // human-facing decoration and is ignored on import.
 
@@ -30,6 +34,7 @@ function unescapeInline(s: string): string {
     else if (n === '"') out += '"';
     else if (n === "t") out += "\t";
     else if (n === "r") out += "\r";
+    else if (n === "n") out += "\n";
     else out += n ?? "";
   }
   return out;
@@ -69,10 +74,14 @@ interface Line {
 function toLines(block: string): Line[] {
   return block.split("\n").map((raw) => {
     const noCr = raw.replace(/\r$/, "");
-    const m = noCr.match(/^( *)(.*)$/);
-    const indent = m ? m[1].length : 0;
-    const text = m ? m[2] : noCr;
-    return { indent, text, raw: noCr };
+    // Count leading spaces manually. A regex like /^( *)(.*)$/ breaks here:
+    // JS `.` (and `$` without /m) exclude U+2028/U+2029, so a line whose VALUE
+    // contains a line/paragraph separator fails the match entirely and used to
+    // be treated as indent 0 — which broke out of the surrounding structure
+    // and leaked edge-record fields into the node as bogus keys.
+    let indent = 0;
+    while (indent < noCr.length && noCr[indent] === " ") indent += 1;
+    return { indent, text: noCr.slice(indent), raw: noCr };
   });
 }
 
@@ -159,6 +168,15 @@ class BlockParser {
         arr.push({});
         continue;
       }
+      // Multi-line scalar array item (`- |-` + indented lines). Current builds
+      // emit these for newline-bearing strings in arrays (e.g. aliases); older
+      // parsers dropped the item as the literal string "|-" and then leaked the
+      // content lines into the enclosing mapping, so this also repairs vaults
+      // written before the fix.
+      if (after === "|-") {
+        arr.push(this.parseBlockScalar(itemIndent));
+        continue;
+      }
       // Discriminate the two shapes build-vault emits:
       //   scalar item:        `- "quoted"` / `- 42` / `- null`
       //   block-mapping item: `- key: value` then `key: value` siblings
@@ -168,7 +186,14 @@ class BlockParser {
       if (mapHead) {
         const kv = this.splitKey(after)!;
         const obj: Record<string, Json> = {};
-        obj[kv.key] = parseInlineScalar(kv.rest);
+        // `key: |-` inside a block-mapping item: current builds emit edge
+        // fields inline-only, but vaults written by older builds carried
+        // multi-line edge values as block scalars — accept them (the key
+        // starts at itemIndent + 2, so content sits at itemIndent + 4).
+        obj[kv.key] =
+          kv.rest === "|-"
+            ? this.parseBlockScalar(itemIndent + 2)
+            : parseInlineScalar(kv.rest);
         const fieldIndent = itemIndent + 2;
         for (;;) {
           const l = this.peek();
@@ -178,7 +203,10 @@ class BlockParser {
           if (!fhead) break;
           const fkv = this.splitKey(l.text)!;
           this.pos += 1;
-          obj[fkv.key] = parseInlineScalar(fkv.rest);
+          obj[fkv.key] =
+            fkv.rest === "|-"
+              ? this.parseBlockScalar(fieldIndent)
+              : parseInlineScalar(fkv.rest);
         }
         arr.push(obj);
         continue;

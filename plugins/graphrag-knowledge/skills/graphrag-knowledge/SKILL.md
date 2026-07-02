@@ -150,6 +150,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `carving-allow` | manage `.graphrag/carving.json` (carving exemptions): `add` / `remove` / `list` / `migrate` |
 | `harvest-history` | deterministic extraction from git history (no writes): reverts → RejectedOption candidates, HACK/FIXME markers → OK/Risk candidates |
 | `staleness-check` | count commits since `generated_at` for files linked via documented_by/sets_policy_for/constrains, list candidates above threshold (read-only) |
+| `fsck` | vault integrity check (read-only): parse / duplicate-id / id↔path / edge-endpoint / schema / round-trip / uncommitted-delta (torn-write) checks as single JSON `{status, checks, counts}`; exit 1 only on error |
 
 ## Parallel work and semantic merge (vault branch)
 

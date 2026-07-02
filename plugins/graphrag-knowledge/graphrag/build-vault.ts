@@ -14,18 +14,52 @@ function escapeInline(value: string): string {
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
     .replace(/\t/g, "\\t")
-    .replace(/\r/g, "\\r");
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n");
+}
+
+// A `|-` block scalar carries its lines verbatim (no escaping), so it can only
+// represent strings the chomping round-trips exactly:
+//   - no \r anywhere (the importer's normalizeEol rewrites CRLF→LF on read, and
+//     toLines strips a trailing \r per line, so CR would be silently lost), and
+//   - no trailing newline (`|-` strips ALL trailing newlines on both sides).
+// Anything else goes through the inline double-quoted form with \n/\r escaped.
+function blockScalarSafe(str: string): boolean {
+  return !str.includes("\r") && !str.endsWith("\n");
 }
 
 function emitScalar(value: unknown, indent: string): string {
   if (value === null || value === undefined) return "null";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   const str = String(value);
-  if (str.includes("\n")) {
-    const lines = str.replace(/\n+$/, "").split("\n");
-    return ["|-", ...lines.map((line) => `${indent}  ${line}`)].join("\n");
+  if (str.includes("\n") && blockScalarSafe(str)) {
+    return ["|-", ...str.split("\n").map((line) => `${indent}  ${line}`)].join("\n");
   }
   return `"${escapeInline(str)}"`;
+}
+
+// graph_edges records are flat scalar maps parsed line-by-line on import
+// (`- key: scalar` + indented `key: scalar` siblings); a block scalar inside a
+// `- ` item is not part of that grammar, so edge values are ALWAYS emitted as
+// single-line (escaped) scalars regardless of embedded newlines.
+function emitInlineScalar(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return `"${escapeInline(String(value))}"`;
+}
+
+// Human-facing decoration (body H1, wikilink display text, the raw_content
+// italics line) must stay single-line — a raw newline inside a `links:` item
+// breaks the frontmatter line grammar and can leak text fragments back in as
+// bogus node fields — and must never contain a round-trip marker: the importer
+// matches `<!-- graphrag:...:begin/end -->` by indexOf over the WHOLE body, so
+// a title carrying a literal marker would hijack extractMarked() and corrupt
+// description/raw_content. Only marker-forming `<!--` prefixes are rewritten
+// (plain HTML comments in titles stay byte-identical — no churn).
+function sanitizeDecoration(value: unknown): string {
+  return String(value)
+    .replace(/\r\n?|\n/g, " ")
+    .replace(/<!--(\s*(?:graphrag|gestalty):)/g, "<! --$1");
 }
 
 function emitValue(key: string, value: unknown, indent: string): string {
@@ -47,7 +81,11 @@ function emitValue(key: string, value: unknown, indent: string): string {
 }
 
 export function slugifyTitle(title: string, fallback: string): string {
-  const illegal = /[\/\\:*?"<>|]/g;
+  // Beyond the classic path-hostile punctuation, strip C0/C1 control chars:
+  // NUL is an outright invalid path byte (writeFileSync throws), and the rest
+  // (BEL, ESC, …) make filenames that shells/editors mishandle. `\s+` below
+  // only covers the whitespace-class controls (\t \n \r \f \v), not these.
+  const illegal = /[\/\\:*?"<>|\u0000-\u001f\u007f-\u009f]/g;
   const cleaned = String(title ?? "")
     .replace(illegal, "-")
     .replace(/\s+/g, "-")
@@ -71,6 +109,12 @@ export function buildVaultFiles(graph: any) {
   // node's wikilink churned, and a partial multi-file write could leave two files
   // holding the same node id. Sorting by id makes buildVaultFiles a pure function
   // of identity, so import→build is idempotent regardless of input ordering.
+  // Collision detection must be case- AND Unicode-normalization-insensitive:
+  // APFS (macOS default) and NTFS treat `ABC.md` / `abc.md` — and NFC/NFD
+  // spellings of the same accented name — as the SAME file, so a case-only or
+  // normalization-only distinction would make the second write silently
+  // overwrite the first node on disk (one node lost per collision pair).
+  const collisionKey = (s: string) => s.normalize("NFC").toLowerCase();
   const usedByFolder = new Map<string, Set<string>>();
   const fileById = new Map<string, { folder: string; base: string }>();
   const orderedForNaming = [...nodes].sort((a: any, b: any) =>
@@ -83,11 +127,11 @@ export function buildVaultFiles(graph: any) {
     const baseSlug = slugifyTitle(deriveShortLabel(node), node.id);
     let candidate = baseSlug;
     let n = 2;
-    while (used.has(candidate)) {
+    while (used.has(collisionKey(candidate))) {
       candidate = `${baseSlug}-${n}`;
       n += 1;
     }
-    used.add(candidate);
+    used.add(collisionKey(candidate));
     fileById.set(node.id, { folder, base: candidate });
   }
 
@@ -104,8 +148,8 @@ export function buildVaultFiles(graph: any) {
   );
   const linkFor = (id: string) => {
     const f = fileById.get(id);
-    if (!f) return `"${id} (missing node)"`;
-    const title = (titleById.get(id) ?? id).replace(/[\[\]"|]/g, " ");
+    if (!f) return `"${sanitizeDecoration(id).replace(/[\[\]"|]/g, " ")} (missing node)"`;
+    const title = sanitizeDecoration(titleById.get(id) ?? id).replace(/[\[\]"|]/g, " ");
     return `"[[${f.folder}/${f.base}|${title}]]"`;
   };
 
@@ -138,10 +182,28 @@ export function buildVaultFiles(graph: any) {
     // body markers, everything else from here.
     // `generated_at` is excluded from frontmatter: it drives ONLY the banner
     // timestamp (round-tripped from the banner on import), never a fm line.
-    const BODY_FIELDS = new Set(["description", "raw_content", "generated_at"]);
+    //
+    // description / raw_content ride in the body ONLY when the body can carry
+    // them verbatim: a non-empty string without \r (the importer's normalizeEol
+    // rewrites CRLF→LF before the markers are read back) and without
+    // marker-forming text (a value containing `<!-- graphrag:`/`<!-- gestalty:`
+    // would shift the begin/end markers extractMarked matches by indexOf).
+    // Everything else — empty / whitespace-only strings, CR-bearing text,
+    // marker-like text, or non-string values — round-trips through frontmatter
+    // (where the escaped inline form is exact) instead of being dropped.
+    const bodyCarriable = (v: unknown): v is string =>
+      typeof v === "string" &&
+      v.trim() !== "" &&
+      !v.includes("\r") &&
+      !v.includes("<!-- graphrag:") &&
+      !v.includes("<!-- gestalty:");
+    const descriptionInBody = bodyCarriable(node.description);
+    const rawContentInBody = bodyCarriable(node.raw_content);
     const fmLines: string[] = [];
     for (const [k, v] of Object.entries(node)) {
-      if (BODY_FIELDS.has(k)) continue;
+      if (k === "generated_at") continue;
+      if (k === "description" && descriptionInBody) continue;
+      if (k === "raw_content" && rawContentInBody) continue;
       // 値が undefined のフィールドは「無い」と同じ。書き出すと null として
       // 復活し round-trip が崩れる (undefined→null) ため skip する。
       if (v === undefined) continue;
@@ -154,7 +216,9 @@ export function buildVaultFiles(graph: any) {
     if (outgoing.length > 0) {
       fmLines.push("graph_edges:");
       for (const e of outgoing) {
-        const entries = Object.entries(e);
+        // undefined-valued edge fields are "absent", exactly like node fields
+        // above — emitting them would resurrect as null and break round-trip.
+        const entries = Object.entries(e).filter(([, v]) => v !== undefined);
         if (entries.length === 0) {
           fmLines.push("  - {}");
           continue;
@@ -162,9 +226,11 @@ export function buildVaultFiles(graph: any) {
         // Edge records are flat scalar maps (id/type/from/to + optional
         // scalar fields). Emit as a block-mapping list item; the importer
         // pairs the `-` line with the following indented `key: scalar` lines.
+        // Values are inline-only (emitInlineScalar): a `|-` block scalar is
+        // not part of the importer's edge-record grammar.
         entries.forEach(([k, v], i) => {
           const prefix = i === 0 ? "  - " : "    ";
-          fmLines.push(`${prefix}${k}: ${emitScalar(v, "    ")}`);
+          fmLines.push(`${prefix}${k}: ${emitInlineScalar(v)}`);
         });
       }
     } else {
@@ -188,18 +254,14 @@ export function buildVaultFiles(graph: any) {
     // human-readable section may fall back to `summary` for display, but that
     // fallback text stays outside the markers so the importer never resurrects
     // a `description` the source node did not have.
-    const hasDescription =
-      typeof node.description === "string" && node.description.trim() !== "";
-    const rawText =
-      typeof node.raw_content === "string" && node.raw_content.trim()
-        ? node.raw_content
-        : "";
+    const hasDescription = descriptionInBody;
+    const rawText = rawContentInBody ? node.raw_content : "";
     const bodyLines: string[] = [];
     bodyLines.push(
       `> 生成物 — 直接編集しない。正本は vault (この markdown 自身)。source snapshot: ${generatedAt}`
     );
     bodyLines.push("");
-    bodyLines.push(`# ${deriveShortLabel(node)}`);
+    bodyLines.push(`# ${sanitizeDecoration(deriveShortLabel(node))}`);
     bodyLines.push("");
     // `## 説明` は description (蒸留散文) がある時だけ出す。description が無い時に
     // summary を body へ流用すると、frontmatter の summary と一字一句同じ本文が
@@ -228,7 +290,7 @@ export function buildVaultFiles(graph: any) {
       bodyLines.push("## 一次情報");
       bodyLines.push("");
       bodyLines.push(
-        `_逐語の一次情報。${node.raw_content_status ? `raw_content_status: ${node.raw_content_status}。` : ""}説明で足りない時のみ読む。_`
+        `_逐語の一次情報。${node.raw_content_status ? `raw_content_status: ${sanitizeDecoration(node.raw_content_status)}。` : ""}説明で足りない時のみ読む。_`
       );
       bodyLines.push("");
       bodyLines.push("<!-- graphrag:raw_content:begin -->");
