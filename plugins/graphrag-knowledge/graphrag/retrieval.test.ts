@@ -198,11 +198,11 @@ import { beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
 // 版印 (seqlock) を読み手が尊重することの証明:
 //   - 奇数 (書込中) の間は consistent read がタイムアウトして torn snapshot を返さない
 //   - 偶数 (安定) なら loadGraph が通常どおりノードを返す
-// stateDir は vault dir の隣 (.graphrag) という writer と同じ規約。
+// seq の置き場所は vault dir の隣 .graphrag の cache/ (E1) という writer と同じ規約。
 test("loadGraph honors the seqlock stamp (odd→consistent read times out, even→reads data)", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "rg-seqlock-"));
   const vaultDir = path.join(root, "vault");
-  const stateDir = path.join(path.dirname(path.resolve(vaultDir)), ".graphrag");
+  const stateDir = path.join(path.dirname(path.resolve(vaultDir)), ".graphrag", "cache");
   mkdirSync(vaultDir, { recursive: true });
   mkdirSync(stateDir, { recursive: true });
   for (const f of buildVaultFiles({
@@ -254,9 +254,9 @@ import { writeFile, mkdir, utimes } from "node:fs/promises";
 import os from "node:os";
 import fs from "node:fs";
 
-test("defaultVectorIndexPath resolves next to the vault (in retrieval)", () => {
+test("defaultVectorIndexPath resolves to the vault's .graphrag/cache (in retrieval)", () => {
   // 索引は実 FS の絶対パスなので OS ネイティブ区切りが正しい。POSIX 直書きせず再導出して比較。
-  const expected = path.join(path.dirname(path.resolve("/a/b/v")), ".graphrag", "vector.json");
+  const expected = path.join(path.dirname(path.resolve("/a/b/v")), ".graphrag", "cache", "vector.json");
   assert.equal(defaultVectorIndexPath("/a/b/v"), expected);
 });
 
@@ -265,6 +265,67 @@ test("loadRequiredVectorIndex throws when the index file is absent (semantic req
     () => loadRequiredVectorIndex("/no/such/vault", undefined),
     /vector index not found/
   );
+});
+
+// ── E1: legacy (.graphrag 直下) からの読み取り fallback ──
+
+test("loadRequiredVectorIndex: cache/ に索引が無ければ legacy (.graphrag 直下) を読む", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vec-legacy-"));
+  try {
+    const vaultDir = path.join(tmp, "vault");
+    await mkdir(path.join(vaultDir, "Decision"), { recursive: true });
+    await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
+    // vault ファイルを過去に (索引の方が新しい = 再構築不要 = endpoint 非依存)
+    const past = new Date(Date.now() - 60_000);
+    await utimes(path.join(vaultDir, "Decision", "d1.md"), past, past);
+    // legacy 位置 (.graphrag/vector.json) にだけ索引がある (移行前の状態)
+    const graphragDir = path.join(tmp, ".graphrag");
+    await mkdir(graphragDir, { recursive: true });
+    await writeFile(
+      path.join(graphragDir, "vector.json"),
+      JSON.stringify({ version: 1, provider: "legacy-marker", semantic: false, rows: [] })
+    );
+    const idx = await loadRequiredVectorIndex(vaultDir);
+    assert.equal(idx.provider, "legacy-marker", "legacy 索引が読まれる");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── E3: readonly mode では消費側 cache の索引を読む (外部 vault 側に書かない) ──
+
+import { consumerCacheDirForVault } from "./cli-env.ts";
+
+test("loadRequiredVectorIndex: readonly では消費側 cache/external/<hash> の索引を使う", async () => {
+  const consumer = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vec-ro-consumer-")));
+  const ext = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vec-ro-ext-")));
+  const prevCwd = process.cwd();
+  try {
+    // 外部 vault (索引は持っていない = git pull したての想定)
+    const vaultDir = path.join(ext, "vault");
+    await mkdir(path.join(vaultDir, "Decision"), { recursive: true });
+    await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
+    const past = new Date(Date.now() - 60_000);
+    await utimes(path.join(vaultDir, "Decision", "d1.md"), past, past);
+    // 消費側: readonly のローカル mode + 消費側 cache に構築済み索引
+    await mkdir(path.join(consumer, ".graphrag"), { recursive: true });
+    await writeFile(path.join(consumer, ".graphrag", ".env"), "GRAPHRAG_VAULT_MODE=readonly\n");
+    const consumerDir = consumerCacheDirForVault(vaultDir, consumer)!;
+    await mkdir(consumerDir, { recursive: true });
+    await writeFile(
+      path.join(consumerDir, "vector.json"),
+      JSON.stringify({ version: 1, provider: "consumer-marker", semantic: false, rows: [] })
+    );
+    process.chdir(consumer);
+    const idx = await loadRequiredVectorIndex(vaultDir);
+    assert.equal(idx.provider, "consumer-marker", "消費側 cache の索引が読まれる");
+    // 外部 vault の隣には何も生成されない (readonly の本義)
+    assert.ok(!fs.existsSync(path.join(ext, ".graphrag")), "外部側に .graphrag を作らない");
+  } finally {
+    process.chdir(prevCwd);
+    fs.rmSync(consumer, { recursive: true, force: true });
+    fs.rmSync(ext, { recursive: true, force: true });
+  }
 });
 
 test("searchGraph does not match on node id (identifier excluded from search)", () => {
@@ -378,4 +439,171 @@ test("shouldRebuildVectorIndex returns true when a vault file is newer than inde
   await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
   assert.equal(await shouldRebuildVectorIndex(vaultDir, indexPath), true);
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// --- lexical scoring fixes (per-token ngram / weighted coverage / script partition) ---
+
+test("makeNgrams (via searchGraph): Latin bigrams no longer match unrelated English", () => {
+  // 旧実装は空白除去した連結文字列に 2-gram を作り、"chocolate cake" が日本語 vault の
+  // 英字断片に ngram 0.58 を出していた。トークン毎 3-gram 化で偶然一致が消えることを確認。
+  const graph = {
+    nodes: [{ id: "d:1", type: "Decision", title: "vault path policy", summary: "cache layout decision" }],
+    edges: []
+  };
+  const matches = searchGraph(graph, "chocolate cake recipe", { limit: 10 });
+  const ngram = matches[0]?.reasons.find((r) => r.startsWith("ngram:"));
+  const ratio = ngram ? Number(ngram.slice("ngram:".length)) : 0;
+  assert.ok(ratio < 0.2, `無関係な英語クエリの ngram は ~0 であるべき (got ${ngram ?? "none"})`);
+});
+
+test("searchGraph: term coverage is char-weighted and emitted as coverage:<n>", () => {
+  const graph = {
+    nodes: [
+      // 短い機能語しか当たらないノード vs 長い内容語が当たるノード
+      { id: "d:short", type: "Decision", title: "それは何か" },
+      { id: "d:content", type: "Decision", title: "認証基盤アーキテクチャ" }
+    ],
+    edges: []
+  };
+  // クエリ: 内容語 "認証基盤アーキテクチャ" (11字) + latin "x" (1字)
+  const matches = searchGraph(graph, "認証基盤アーキテクチャ x", { limit: 10 });
+  const content = matches.find((m) => m.node.id === "d:content");
+  assert.ok(content, "内容語ノードはヒットする");
+  const coverage = content.reasons.find((r) => r.startsWith("coverage:"));
+  assert.ok(coverage, "coverage:<n> reason を出す (confidence.ts が拾う)");
+  assert.ok(Number(coverage.slice("coverage:".length)) >= 0.9,
+    `文字数重み付きで 11/12 ≈ 0.92 相当 (got ${coverage})`);
+});
+
+test("searchGraph: ≤2-char hiragana function words are dropped from coverage", () => {
+  const graph = {
+    nodes: [
+      { id: "d:stop", type: "Decision", title: "なぜ した のか" },       // 機能語のみ一致
+      { id: "d:real", type: "Decision", title: "vault 単一正本" }        // 内容語一致
+    ],
+    edges: []
+  };
+  const matches = searchGraph(graph, "なぜ vault を 単一正本 に した", { limit: 10 });
+  const byId = new Map(matches.map((m) => [m.node.id, m]));
+  const stop = byId.get("d:stop");
+  const real = byId.get("d:real");
+  assert.ok(real, "内容語ノードはヒット");
+  const stopCoverage = stop?.reasons.find((r) => r.startsWith("coverage:"));
+  assert.ok(!stopCoverage || Number(stopCoverage.slice(9)) === 0,
+    "機能語だけの一致は coverage を得ない");
+  assert.ok(real.score > (stop?.score ?? 0), "内容語一致が機能語一致より上位");
+});
+
+test("searchGraph: dual-language (JA+EN) query takes per-script max coverage", () => {
+  const graph = {
+    nodes: [
+      { id: "d:ja", type: "Decision", title: "重複チェックの仕組み" },   // 日本語のみのノード
+      { id: "d:en", type: "Decision", title: "duplicate check mechanism" } // 英語のみのノード
+    ],
+    edges: []
+  };
+  // JA+EN 併記クエリ (SKILL.md 推奨形)。単言語ノードが半分を取りこぼしても
+  // スクリプト別 max で救済される (双方 coverage ~1.0 相当)。
+  const matches = searchGraph(graph, "重複チェック duplicate check", { limit: 10 });
+  const byId = new Map(matches.map((m) => [m.node.id, m]));
+  for (const id of ["d:ja", "d:en"]) {
+    const m = byId.get(id);
+    assert.ok(m, `${id} はヒットする`);
+    const coverage = m.reasons.find((r) => r.startsWith("coverage:"));
+    assert.ok(coverage && Number(coverage.slice(9)) >= 0.9,
+      `${id} の coverage はスクリプト別 max で ~1.0 (got ${coverage})`);
+  }
+});
+
+test("searchGraph: a tiny Latin token cannot claim per-script coverage 1.0", () => {
+  // 日本語主体クエリの中の短い英単語 1 個 (全体の 1/3 未満) は「クエリの言い換え」
+  // ではないので、それだけ当たっても coverage 1.0 を僭称しない。
+  const graph = {
+    nodes: [{ id: "d:1", type: "Decision", title: "vault の話" }],
+    edges: []
+  };
+  const matches = searchGraph(graph, "全然関係ない長い日本語の質問文で vault", { limit: 10 });
+  const coverage = matches[0]?.reasons.find((r) => r.startsWith("coverage:"));
+  assert.ok(!coverage || Number(coverage.slice(9)) < 0.5,
+    `latin 部分単独の coverage 1.0 は禁止 (got ${coverage})`);
+});
+
+// --- type boost (Decision/Constraint/OperationalKnowledge ×1.05) ---
+
+test("searchGraph: distilled-knowledge types get a small multiplier that can reorder near-ties", () => {
+  const graph = {
+    nodes: [
+      { id: "c:chunk", type: "ConversationChunk", title: "認証" },
+      { id: "d:dec", type: "Decision", title: "認証" },
+      { id: "k:ok", type: "OperationalKnowledge", title: "認証" },
+      { id: "s:con", type: "Constraint", title: "認証" }
+    ],
+    edges: []
+  };
+  const matches = searchGraph(graph, "認証", { limit: 10 });
+  const byId = new Map(matches.map((m) => [m.node.id, m]));
+  const chunk = byId.get("c:chunk");
+  for (const id of ["d:dec", "k:ok", "s:con"]) {
+    const boosted = byId.get(id);
+    assert.ok(Math.abs(boosted.score - chunk.score * 1.05) < 0.01,
+      `${id} は ×1.05 (chunk=${chunk.score}, got ${boosted.score})`);
+    assert.ok(boosted.reasons.some((r) => r.startsWith("type:")), "type boost reason を出す");
+  }
+  assert.equal(matches[matches.length - 1].node.id, "c:chunk", "同点なら蒸留ノードが上");
+});
+
+// --- expandNeighbors caps + priority ---
+
+import { expandNeighbors, edgePriority } from "./retrieval.ts";
+
+test("expandNeighbors: does not emit duplicate edges at depth 2", () => {
+  const graph = {
+    nodes: [
+      { id: "a", type: "Decision", title: "a" },
+      { id: "b", type: "Decision", title: "b" }
+    ],
+    edges: [{ id: "e1", type: "refines", from: "a", to: "b" }]
+  };
+  const expansions = expandNeighbors(graph, ["a"], 2);
+  assert.equal(expansions.length, 1, "同じ edge を深さ 2 で再掲しない");
+});
+
+test("expandNeighbors: caps per-node edges by priority (backbone edges first)", () => {
+  const nodes = [{ id: "hub", type: "File", title: "hub" }];
+  const edges = [];
+  // 出所系 12 本 + 背骨系 2 本 (グラフ上は後ろに置く → 優先度で先頭に来ることを確認)
+  for (let i = 0; i < 12; i += 1) {
+    nodes.push({ id: `d${i}`, type: "File", title: `d${i}` });
+    edges.push({ id: `ed${i}`, type: "documented_by", from: "hub", to: `d${i}` });
+  }
+  nodes.push({ id: "succ", type: "Decision", title: "succ" });
+  nodes.push({ id: "pol", type: "Decision", title: "pol" });
+  edges.push({ id: "es", type: "supersedes", from: "succ", to: "hub" });
+  edges.push({ id: "ep", type: "sets_policy_for", from: "pol", to: "hub" });
+  const expansions = expandNeighbors({ nodes, edges }, ["hub"], 1);
+  assert.equal(expansions.length, 10, "per-node cap は 10");
+  const types = expansions.map((e) => e.edge.type);
+  assert.equal(types[0], "supersedes", "supersedes が最優先");
+  assert.equal(types[1], "sets_policy_for");
+  assert.ok(types.slice(2).every((t) => t === "documented_by"), "残りは出所系で埋まる");
+});
+
+test("expandNeighbors: global cap stops the flood", () => {
+  const nodes = [];
+  const edges = [];
+  for (let s = 0; s < 5; s += 1) {
+    nodes.push({ id: `seed${s}`, type: "Decision", title: `s${s}` });
+    for (let i = 0; i < 10; i += 1) {
+      nodes.push({ id: `n${s}-${i}`, type: "Decision", title: `n` });
+      edges.push({ id: `e${s}-${i}`, type: "refines", from: `seed${s}`, to: `n${s}-${i}` });
+    }
+  }
+  const expansions = expandNeighbors({ nodes, edges }, nodes.filter((n) => n.id.startsWith("seed")).map((n) => n.id), 1);
+  assert.equal(expansions.length, 40, "global cap は 40");
+});
+
+test("edgePriority: backbone < default < provenance", () => {
+  assert.ok(edgePriority("supersedes") < edgePriority("led_to"));
+  assert.ok(edgePriority("led_to") < edgePriority("documented_by"));
+  assert.ok(edgePriority("refines") < edgePriority("discussed_in"));
 });

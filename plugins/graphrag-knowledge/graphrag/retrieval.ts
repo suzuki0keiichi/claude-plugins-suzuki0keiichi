@@ -1,4 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   cosineSimilarity,
@@ -6,7 +7,12 @@ import {
 } from "./vector.ts";
 import { importVault } from "./import-vault.ts";
 import { readVaultConsistent } from "./vault-lock.ts";
-import { stateDirForVault } from "./cli-env.ts";
+import {
+  stateDirForVault,
+  cacheDirForVault,
+  consumerCacheDirForVault,
+  detectVaultIsolation,
+} from "./cli-env.ts";
 
 // v3: vault が単一正本。検索系の読み込みは vault からのみ行う。
 // 旧 FalkorDB / graph.json の読み込み経路は撤廃した (両方から読めると移行が
@@ -28,11 +34,12 @@ export async function loadGraph(
       "(v3: vault is the single source of truth; FalkorDB/graph.json read paths were removed.)"
     );
   }
-  // writer が打刻する場所と同じ規約: vault を保持する単一の .graphrag。
+  // writer が打刻する場所と同じ規約: vault を保持する単一の .graphrag の cache/。
+  // (E1: vault.seq / vault.lock は機械ローカルなので .graphrag/cache/ に集約。)
   // 既定レイアウト <root>/.graphrag/vault でも <root>/.graphrag/.graphrag に
-  // ずれないよう、冪等な stateDirForVault に集約する。
-  const stateDir = stateDirForVault(vaultDir);
-  return readVaultConsistent(stateDir, () => importVault(vaultDir), seqOpts);
+  // ずれないよう、冪等な cacheDirForVault に集約する。
+  const seqDir = cacheDirForVault(vaultDir);
+  return readVaultConsistent(seqDir, () => importVault(vaultDir), seqOpts);
 }
 
 export async function loadVectorIndex(vectorPath: string, deltaPath?: string) {
@@ -45,10 +52,27 @@ export async function loadVectorIndex(vectorPath: string, deltaPath?: string) {
   }
 }
 
-// ベクトル索引の既定の置き場所: vault のすぐ隣 (vault 親フォルダ) の
-// .graphrag/vector.json。同じ vault を参照する全エージェントが同じ場所を見る。
+// ベクトル索引の既定の置き場所: vault を保持する .graphrag の cache/vector.json
+// (E1: 再生成可能な機械ローカル成果物は cache/ に集約)。同じ vault を参照する
+// 全エージェントが同じ場所を見る。
 export function defaultVectorIndexPath(vaultDir: string): string {
+  return path.join(cacheDirForVault(vaultDir), "vector.json");
+}
+
+// E1 移行前の legacy 置き場所 (.graphrag 直下)。読み取り fallback 専用 —
+// 書き込み (再構築) は常に新パス (cache/) へ行く。
+export function legacyVectorIndexPath(vaultDir: string): string {
   return path.join(stateDirForVault(vaultDir), "vector.json");
+}
+
+// 読み取り時の実効パス: 新レイアウト (cache/vector.json) が在ればそれ、無ければ
+// legacy (.graphrag 直下) が在ればそれ、どちらも無ければ新パス (これから作る場所)。
+export function vaultVectorIndexReadPath(vaultDir: string): string {
+  const next = defaultVectorIndexPath(vaultDir);
+  if (existsSync(next)) return next;
+  const legacy = legacyVectorIndexPath(vaultDir);
+  if (existsSync(legacy)) return legacy;
+  return next;
 }
 
 // vault 内のファイルが vector index より新しいかを mtime で判定する。
@@ -87,29 +111,52 @@ export async function loadRequiredVectorIndex(
   explicitPath?: string,
   deltaPath?: string
 ) {
-  const resolved = explicitPath ?? (vaultDir ? defaultVectorIndexPath(vaultDir) : undefined);
-  if (!resolved) {
+  // writePath = 自動再構築の書き出し先 / readPath = 実際に読む場所 (legacy fallback あり)。
+  let writePath = explicitPath ?? (vaultDir ? defaultVectorIndexPath(vaultDir) : undefined);
+  if (!writePath) {
     throw new Error(
       "cannot resolve vector index path: pass --vector <path> or --vault <dir> (index is read next to the vault)."
     );
   }
+  let readPath = explicitPath ?? vaultVectorIndexReadPath(vaultDir!);
 
-  if (vaultDir && await shouldRebuildVectorIndex(vaultDir, resolved)) {
+  // E3: GRAPHRAG_VAULT_MODE=readonly では外部 vault の隣に書かない。自動再構築の
+  // 書き出し先は消費側 (ローカル .graphrag) の cache/external/<hash>/ へ。読みは
+  // 消費側索引 > vault 側の既存索引 (読むだけなら許される) > 消費側 (これから構築)。
+  // mode 設定が一切無ければ判定 (git 呼び出し) 自体を skip する。
+  if (!explicitPath && vaultDir) {
+    const modeConfigured =
+      (process.env.GRAPHRAG_VAULT_MODE ?? "") !== "" ||
+      existsSync(path.join(process.cwd(), ".graphrag", ".env"));
+    if (modeConfigured && detectVaultIsolation(process.cwd(), vaultDir).mode === "readonly") {
+      const consumerDir = consumerCacheDirForVault(vaultDir);
+      if (consumerDir) {
+        const consumerPath = path.join(consumerDir, "vector.json");
+        writePath = consumerPath;
+        readPath = existsSync(consumerPath)
+          ? consumerPath
+          : existsSync(readPath) ? readPath : consumerPath;
+      }
+    }
+  }
+
+  if (vaultDir && await shouldRebuildVectorIndex(vaultDir, readPath)) {
     try {
       const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
-      process.stderr.write(`[auto] vector index が無いか古い → 自動構築: ${resolved}\n`);
-      await buildAndWriteVectorIndex({ out: resolved, vault: vaultDir });
+      process.stderr.write(`[auto] vector index が無いか古い → 自動構築: ${writePath}\n`);
+      await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir });
       process.stderr.write(`[auto]   → 構築完了\n`);
+      readPath = writePath;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       process.stderr.write(`[auto]   → 自動構築失敗 (embedding endpoint 不達等): ${msg}\n`);
     }
   }
 
-  const index = await loadVectorIndex(resolved, deltaPath);
+  const index = await loadVectorIndex(readPath, deltaPath);
   if (!index) {
     throw new Error(
-      `vector index not found: ${resolved}. Build it first: build-vector-index --vault <dir>. ` +
+      `vector index not found: ${readPath}. Build it first: build-vector-index --vault <dir>. ` +
       "(semantic retrieval is required; lexical-only fallback is not designed.)"
     );
   }
@@ -161,6 +208,11 @@ export const DEFAULT_ROLE_WEIGHTS: Record<string, number> = {
 // 終端 state のノードは順位を下げるが除外しない (hard reject しない原則 —
 // 「過去にこう判断して覆した」という系譜自体が答えになるクエリがあるため)。
 // 注記は後継/現況へ読み手を誘導する。
+// 蒸留済み知識ノードの補助ブースト (×1.05)。lexical/semantic の主軸を崩さず、
+// ほぼ同点の時だけ出所系 (ConversationChunk / Investigation 等) より上に出す。
+const TYPE_BOOST = 1.05;
+const TYPE_BOOST_TYPES = new Set(["Decision", "Constraint", "OperationalKnowledge"]);
+
 const TERMINAL_STATE_PENALTY = 0.6;
 export const TERMINAL_STATE_NOTES: Record<string, string> = {
   superseded: "superseded — refines 逆引きで後継を確認",
@@ -171,8 +223,19 @@ export const TERMINAL_STATE_NOTES: Record<string, string> = {
 
 export function searchGraph(graph, query, options: any = {}) {
   const normalizedQuery = normalizeText(query);
-  const queryTerms = splitTerms(normalizedQuery);
-  const queryNgrams = makeNgrams(normalizedQuery);
+  // coverage は内容語だけで測る (≤2 文字のひらがな単独トークン = 機能語を除外)。
+  // 機能語 ("なぜ" 等) が内容語と同じ重みでカバー率を膨らませ、stopword だけ
+  // 一致するノードが両チャネル最良のノードを追い抜く誤順位を実測したため。
+  const queryTerms = splitTerms(normalizedQuery).filter(isContentTerm);
+  // JA+EN 併記クエリ (SKILL.md §Query discipline が推奨) を単言語ノードが取り
+  // こぼさないよう、スクリプト別 (latin / それ以外) の部分クエリも用意し、
+  // coverage / ngram はスクリプト別の max も候補にする。ただし部分クエリが
+  // 全体の 1/3 未満の文字数しか無い時は「クエリの言い換え」とみなさない
+  // (短い英単語 1 個が coverage 1.0 を僭称するのを防ぐ)。
+  const scriptTermSets = scriptPartitions(queryTerms);
+  const queryTokens = splitTerms(normalizedQuery);
+  const queryGramSets = [makeNgrams(normalizedQuery), ...scriptPartitions(queryTokens).map((tokens) => makeNgrams(tokens.join(" ")))]
+    .filter((grams) => grams.size > 0);
   const vectorRowsById: Map<string, any> = new Map((options.vectorIndex?.rows ?? []).map((row) => [row.node_id, row]));
   // R6 multi-query: queryVectors (複数) を受け、semantic = 各 vector との cosine の max。
   // 後方互換: 従来の単一 queryVector も受ける (queryVector が在れば配列へ畳む)。
@@ -194,18 +257,28 @@ export function searchGraph(graph, query, options: any = {}) {
     // --- 文字一致系を 0〜1 に統合 (lexical) ---
     // 完全一致 (別名一致=1) / 単語カバー率 / ngram 比率 の最大値。
     // ngram 比率は confidence 判定 (judgeMatchConfidence) の reason も兼ねるため
-    // 別名一致の有無に関わらず常に算出する。
+    // 別名一致の有無に関わらず常に算出する。全体クエリとスクリプト別部分クエリの max。
     const fieldNgrams = makeNgrams(haystack);
-    let ngramHits = 0;
-    for (const ngram of queryNgrams) {
-      if (fieldNgrams.has(ngram)) ngramHits += 1;
+    let ngramRatio = 0;
+    for (const grams of queryGramSets) {
+      let hits = 0;
+      for (const ngram of grams) {
+        if (fieldNgrams.has(ngram)) hits += 1;
+      }
+      ngramRatio = Math.max(ngramRatio, hits / grams.size);
     }
-    const ngramRatio = queryNgrams.size > 0 ? ngramHits / queryNgrams.size : 0;
     if (ngramRatio > 0) reasons.push(`ngram:${ngramRatio.toFixed(2)}`);
 
     const hitTerms = queryTerms.filter((term) => term && haystack.includes(term));
     for (const term of hitTerms) reasons.push(`term:${term}`);
-    const termCoverage = queryTerms.length > 0 ? hitTerms.length / queryTerms.length : 0;
+    // 文字数重み付きカバー率 (hit 文字数 / クエリ文字数)。件数比だと 1 文字の
+    // 機能語ヒットが長い内容語ミスと同価値になるため。スクリプト別 max 込み。
+    const hitSet = new Set(hitTerms);
+    let termCoverage = coverageRatio(queryTerms, hitSet);
+    for (const scriptTerms of scriptTermSets) {
+      termCoverage = Math.max(termCoverage, coverageRatio(scriptTerms, hitSet));
+    }
+    if (termCoverage > 0) reasons.push(`coverage:${termCoverage.toFixed(2)}`);
 
     const aliasExact = aliases.includes(normalizedQuery);
     if (aliasExact) reasons.push("alias-exact");
@@ -241,8 +314,12 @@ export function searchGraph(graph, query, options: any = {}) {
     let score = PARITY_WEIGHT * lexical + PARITY_WEIGHT * semantic;
 
     // --- 補助調整 (順位の主軸 lexical↔semantic は崩さない小さな下駄/重み) ---
-    if (node.type === "Decision" || node.type === "OperationalKnowledge") {
-      score += 2;
+    // 蒸留済み知識 (Decision/Constraint/OperationalKnowledge) をほぼ同点の時だけ
+    // 出所系ノード (ConversationChunk 等) より優先する。旧実装の +2 加点は
+    // ~200 点スケールで順位を一度も動かせない死荷重だったため、小さな乗算に変更。
+    if (score > 0 && TYPE_BOOST_TYPES.has(node.type)) {
+      score *= TYPE_BOOST;
+      reasons.push(`type:${node.type}×${TYPE_BOOST}`);
     }
 
     // Role-aware weighting (general GraphRAG signal, not query-specific).
@@ -337,50 +414,95 @@ function collectQueryVectors(options): number[][] {
   return Array.isArray(single) && single.length > 0 ? [single] : [];
 }
 
-export function expandNeighbors(graph, nodeIds, depth = 1) {
+// 近傍展開の edge 型優先度: 知識構造の背骨 (置き換え/具体化/前提/方針/制約) を先に、
+// 出所系 (discussed_in/documented_by) を最後に採る。cap で切る時に「supersedes の
+// 後継が落ちて discussed_in が残る」を防ぐ。未登録型は中間 (50)。日本語ラベルは
+// edge-labels.ts (EDGE_LABELS_JA) 参照。brief.ts の relations cap も同じ優先度を使う。
+export const EDGE_TYPE_PRIORITY: Record<string, number> = {
+  supersedes: 0,
+  refines: 1,
+  has_premise: 2,
+  sets_policy_for: 3,
+  constrains: 4,
+  discussed_in: 90,
+  documented_by: 91
+};
+
+export function edgePriority(edgeType: string): number {
+  return EDGE_TYPE_PRIORITY[edgeType] ?? 50;
+}
+
+function edgeKey(edge): string {
+  return typeof edge.id === "string" && edge.id.length > 0
+    ? edge.id
+    : `${edge.from}|${edge.type}|${edge.to}`;
+}
+
+// 近傍展開。深さ≥2 で同じ edge を重複して出さない (seenEdges)。ハブ (次数の高い
+// File 等) が graph_context を洪水させないよう、ノードあたり perNodeCap 本を
+// edge 型優先度順に選び、全体 globalCap 本で打ち切る。
+export function expandNeighbors(graph, nodeIds, depth = 1, options: any = {}) {
+  const perNodeCap = options.perNodeCap ?? 10;
+  const globalCap = options.globalCap ?? 40;
   const nodesById = new Map((graph.nodes ?? []).map((node) => [node.id, node]));
-  const frontier = new Set(nodeIds);
+  const incident = new Map<string, any[]>();
+  for (const edge of graph.edges ?? []) {
+    for (const endpoint of edge.from === edge.to ? [edge.from] : [edge.from, edge.to]) {
+      const list = incident.get(endpoint);
+      if (list) list.push(edge);
+      else incident.set(endpoint, [edge]);
+    }
+  }
+
+  let frontier = new Set(nodeIds);
   const seen = new Set(nodeIds);
+  const seenEdges = new Set<string>();
   const expansions = [];
 
   for (let currentDepth = 0; currentDepth < depth; currentDepth += 1) {
     const next = new Set();
-    for (const edge of graph.edges ?? []) {
-      const touchesFrom = frontier.has(edge.from);
-      const touchesTo = frontier.has(edge.to);
-      if (!touchesFrom && !touchesTo) continue;
+    for (const id of frontier) {
+      const candidates = (incident.get(id) ?? [])
+        .filter((edge) => !seenEdges.has(edgeKey(edge)))
+        .sort((a, b) => edgePriority(a.type) - edgePriority(b.type) || edgeKey(a).localeCompare(edgeKey(b)));
+      let taken = 0;
+      for (const edge of candidates) {
+        if (taken >= perNodeCap || expansions.length >= globalCap) break;
+        seenEdges.add(edgeKey(edge));
+        taken += 1;
 
-      const otherId = touchesFrom ? edge.to : edge.from;
-      if (!seen.has(otherId)) next.add(otherId);
-      seen.add(otherId);
+        const otherId = edge.from === id ? edge.to : edge.from;
+        if (!seen.has(otherId)) next.add(otherId);
+        seen.add(otherId);
 
-      expansions.push({
-        depth: currentDepth + 1,
-        edge,
-        from: nodesById.get(edge.from),
-        to: nodesById.get(edge.to)
-      });
+        expansions.push({
+          depth: currentDepth + 1,
+          edge,
+          from: nodesById.get(edge.from),
+          to: nodesById.get(edge.to)
+        });
+      }
+      if (expansions.length >= globalCap) break;
     }
-    frontier.clear();
-    for (const id of next) frontier.add(id);
+    if (expansions.length >= globalCap) break;
+    frontier = next;
   }
 
   return expansions;
 }
 
+// LLM 向け出力のノード全文表現。null/欠損フィールドは出力しない (以前は
+// provenance: null / display: null 等を全ノードに撒いていた — 純粋な無駄)。
 export function nodeForOutput(node) {
-  return {
-    id: node.id,
-    type: node.type,
-    title: node.title ?? null,
-    summary: node.summary ?? null,
-    path: node.path ?? null,
-    state: node.state ?? null,
-    provenance: node.provenance ?? null,
-    short_label: node.short_label ?? null,
-    display: node.display ?? null,
-    aliases: node.aliases ?? null
-  };
+  const fields = [
+    "title", "summary", "path", "state",
+    "provenance", "short_label", "display", "aliases"
+  ];
+  const out: any = { id: node.id, type: node.type };
+  for (const field of fields) {
+    if (node[field] != null) out[field] = node[field];
+  }
+  return out;
 }
 
 function buildSearchFields(node) {
@@ -431,12 +553,70 @@ function splitTerms(value) {
   return value.split(" ").filter((term) => term.length > 0);
 }
 
+// coverage の対象にする内容語か。≤2 文字のひらがな単独トークン ("なぜ" "した" 等の
+// 機能語) を落とす。漢字/カタカナ/latin の短語は内容語でありうるので残す。
+function isContentTerm(term: string): boolean {
+  return !(term.length <= 2 && /^[ぁ-ゖ]+$/.test(term));
+}
+
+// ASCII のみのトークンか (normalizeText 済み前提: 記号は除去済み)。
+function isLatinToken(term: string): boolean {
+  return /^[\x21-\x7e]+$/.test(term);
+}
+
+// coverage 用の重み付き文字数。CJK 等の非 ASCII 文字は 1 字あたりの情報量が
+// latin の音節相当 (~2 字) なので 2 と数える。素の文字数だと "重複チェック" (6字)
+// と "duplicate check" (14字) の併記でスクリプト間の比重が歪む。
+function charCount(terms: string[]): number {
+  let total = 0;
+  for (const term of terms) {
+    for (const char of term) total += char.charCodeAt(0) <= 0x7e ? 1 : 2;
+  }
+  return total;
+}
+
+// スクリプト別 (latin / それ以外) の部分クエリ。全体の 1/3 未満の文字数しか無い
+// 部分は「クエリの言い換え」とみなさず返さない (JA クエリ中の英単語 1 個が
+// 単独でカバー率 1.0 を僭称するのを防ぐ)。片方が空 = 単一スクリプトなら空を返す
+// (全体と同じ集合を重複計算しない)。
+function scriptPartitions(terms: string[]): string[][] {
+  const latin = terms.filter(isLatinToken);
+  const other = terms.filter((term) => !isLatinToken(term));
+  if (latin.length === 0 || other.length === 0) return [];
+  const total = charCount(terms);
+  return [latin, other].filter((subset) => charCount(subset) * 3 >= total);
+}
+
+// 文字数重み付きカバー率: hit した term の文字数 / 対象 term 群の総文字数。
+function coverageRatio(terms: string[], hitSet: Set<string>): number {
+  const total = charCount(terms);
+  if (total === 0) return 0;
+  return charCount(terms.filter((term) => hitSet.has(term))) / total;
+}
+
+// トークン単位の ngram (単語/フィールド境界を跨ぐ gram を作らない — 連結後の
+// 跨ぎ gram は無関係な語同士の偶然一致を量産していた)。latin トークンは 3-gram
+// のみ (2-gram は英字 26^2 の衝突率が高く "chocolate cake" が日本語 vault に
+// ngram 0.58 を出す実測誤爆の原因)。3 文字未満の latin トークンは語そのものを
+// gram にする。CJK トークンは情報密度が高いので従来どおり 2+3-gram。
 function makeNgrams(value) {
-  const compact = value.replace(/\s+/g, "");
   const grams = new Set();
-  for (const size of [2, 3]) {
-    for (let index = 0; index <= compact.length - size; index += 1) {
-      grams.add(compact.slice(index, index + size));
+  for (const token of value.split(/\s+/)) {
+    if (token.length === 0) continue;
+    if (isLatinToken(token)) {
+      if (token.length < 3) {
+        grams.add(token);
+        continue;
+      }
+      for (let index = 0; index <= token.length - 3; index += 1) {
+        grams.add(token.slice(index, index + 3));
+      }
+      continue;
+    }
+    for (const size of [2, 3]) {
+      for (let index = 0; index <= token.length - size; index += 1) {
+        grams.add(token.slice(index, index + size));
+      }
     }
   }
   return grams;

@@ -501,12 +501,14 @@ test("augmentMatchesWithXRefResolutions: adds cross_vault_resolved to matches wi
       node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
     });
 
+    // brief.ts compactRelations の実形: 未解決 cross-vault 参照は
+    // {relation, direction, to} stub、ローカル参照は {relation, direction, node}。
     const matches = [
       {
         node: { id: "goal:proj:a", type: "Goal" },
         relations: [
-          { type: "has_premise", to: "vault:billing/deliverable:billing:v2" },
-          { type: "reduces_risk", to: "risk:proj:r1" }  // local ref, should be ignored
+          { relation: "has_premise", direction: "out", to: "vault:billing/deliverable:billing:v2" },
+          { relation: "reduces_risk", direction: "out", node: { id: "risk:proj:r1", type: "Risk" } }  // local ref, should be ignored
         ]
       },
       {
@@ -966,6 +968,50 @@ test("checkVaultParent: 'unresolvable' when no world dir is available", () => {
     assert.equal(res.status, "unresolvable");
   } finally {
     if (savedWorld !== undefined) process.env.GRAPHRAG_WORLD_DIR = savedWorld;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// brief → augment integration (compactRelations stub → cross_vault_resolved)
+// ---------------------------------------------------------------------------
+
+import { buildQueryBrief } from "./brief.ts";
+
+test("brief matches with unresolved cross-vault edges get cross_vault_resolved via augment", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-brief-aug-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
+    });
+
+    // ローカル graph: match ノードが vault:billing/... への edge を持つ
+    // (宛先はローカルに実体なし → compactRelations は stub を出すはず)。
+    const graph = {
+      nodes: [{ id: "goal:proj:a", type: "Goal", title: "認証基盤", summary: "x" }],
+      edges: [
+        { id: "e:x", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" }
+      ]
+    };
+    const out = await buildQueryBrief(graph, new Map(graph.nodes.map((n) => [n.id, n])), {
+      query: "認証基盤",
+      vectorIndex: { provider: "fake", rows: [] },
+      queryVectors: [[0]],
+      limit: 5
+    });
+    assert.equal(out.matches.length, 1);
+    const augmented = augmentMatchesWithXRefResolutions(out.matches, worldDir);
+    const xrefs = augmented[0].cross_vault_resolved as any[];
+    assert.ok(Array.isArray(xrefs) && xrefs.length === 1,
+      "brief 出力の stub を xref-resolver が拾って cross_vault_resolved を付ける");
+    assert.equal(xrefs[0].ref, "vault:billing/deliverable:billing:v2");
+    assert.equal(xrefs[0].edge_type, "has_premise");
+    assert.equal(xrefs[0].resolved?.title, "Billing API v2");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

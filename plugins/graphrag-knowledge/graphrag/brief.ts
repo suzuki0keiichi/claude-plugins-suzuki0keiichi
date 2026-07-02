@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
-import { confidenceMessage, judgeMatchConfidence } from "./confidence.ts";
-import { loadGraph, loadRequiredVectorIndex, prepareVectorSearch, searchGraph } from "./retrieval.ts";
+import { confidenceMessage, gradeConfidence, judgeMatchConfidence } from "./confidence.ts";
+import { edgePriority, loadGraph, loadRequiredVectorIndex, prepareVectorSearch, searchGraph } from "./retrieval.ts";
 import { validateGraph } from "./schema.ts";
 import { describeVectorIndex } from "./vector.ts";
 
@@ -134,10 +134,14 @@ export async function buildQueryBrief(graph, nodesById, options: any = {}) {
   }
   const matches = searchGraph(graph, options.query, {
     limit: options.limit,
-    // R5 graph rerank: 既定 on。--graph-rerank off で false を渡すと無効化。
+    // R5 graph rerank: 既定 off (実 vault で hub 偏重の net-negative を実測。
+    // retrieval.ts の R5 コメント参照)。--graph-rerank on で opt-in。
     ...(options.graphRerank !== undefined ? { graphRerank: options.graphRerank } : {}),
     ...vectorSearch
   });
+  // relations のノード詳細は brief 全体で 1 回だけ出す (2 回目以降は id 参照)。
+  // match ノード自体は matches[].node に全文が出るので最初から「出現済み」扱い。
+  const seenRelationNodeIds = new Set<string>(matches.map((match) => match.node.id));
   const compactMatches = matches.map((match, index) => ({
     rank: index + 1,
     score: match.score,
@@ -147,16 +151,22 @@ export async function buildQueryBrief(graph, nodesById, options: any = {}) {
     node: compactNode(match.node, options),
     relations: compactRelations(graph, nodesById, match.node.id, {
       limit: options.relationLimit,
-      summaryChars: options.summaryChars
+      summaryChars: options.summaryChars,
+      seenNodeIds: seenRelationNodeIds
     })
   }));
-  const matchConfidence = judgeMatchConfidence(compactMatches[0]);
+  // R4 standout: 上位 2 件の相対 gap で「この問いの領域に固有」なら 1 段格上げ。
+  // vector は索引メタの noise_baseline (在れば) でコーパス相対に判定する。
+  const graded = gradeConfidence(compactMatches, {
+    noiseBaseline: vectorIndex?.noise_baseline ?? null
+  });
 
   return {
     text: options.query,
     vector: describeVectorIndex(vectorIndex),
-    match_confidence: matchConfidence,
-    confidence_message: confidenceMessage(matchConfidence),
+    match_confidence: graded.confidence,
+    confidence_message: confidenceMessage(graded.confidence),
+    standout: graded.standout,
     repeat: buildRepeatGuidance(options.callNumber),
     matches: compactMatches
   };
@@ -188,14 +198,17 @@ export function graphHealth(graph, graphSource) {
   };
 }
 
+// null/欠損フィールドは出力しない (旧実装は path: null / state: null を全ノードに
+// 撒いていた — LLM 向け出力では純粋な無駄)。
 function compactNode(node, options: any = {}) {
+  const summary = truncate(node.summary, options.summaryChars ?? DEFAULT_SUMMARY_CHARS);
   return {
     id: node.id,
     type: node.type,
-    title: node.title ?? null,
-    summary: truncate(node.summary, options.summaryChars ?? DEFAULT_SUMMARY_CHARS),
-    path: node.path ?? null,
-    state: node.state ?? null
+    ...(node.title != null ? { title: node.title } : {}),
+    ...(summary != null ? { summary } : {}),
+    ...(node.path != null ? { path: node.path } : {}),
+    ...(node.state != null ? { state: node.state } : {})
   };
 }
 
@@ -226,26 +239,62 @@ function minimalNode(node) {
   };
 }
 
+// relations のノード要約は文脈確認用なので match 本体より短く切る。
+const RELATION_SUMMARY_CHARS = 120;
+
 function compactRelations(graph, nodesById, nodeId, options: any = {}) {
-  const relations = [];
+  const incident = [];
   for (const edge of graph.edges ?? []) {
     if (edge.from !== nodeId && edge.to !== nodeId) continue;
     const otherId = edge.from === nodeId ? edge.to : edge.from;
+    const direction = edge.from === nodeId ? "out" : "in";
     const other = nodesById.get(otherId);
-    if (!other) continue;
+    if (!other) {
+      // 未解決の cross-vault 参照 (vault:<slug>/<nodeId>) はローカルに実体が無い。
+      // 黙って落とすと ask の cross_vault_resolved 拡張 (xref-resolver) が一生
+      // 発火しないので、参照文字列を to に載せた stub として出す。
+      if (typeof otherId === "string" && otherId.startsWith("vault:")) {
+        incident.push({ edge, stub: { relation: edge.type, direction, to: otherId } });
+      }
+      continue;
+    }
+    incident.push({ edge, direction, other });
+  }
+  // cap で切る前に edge 型優先度で並べる (expandNeighbors と同じ優先度)。
+  // superseded な match の後継 (supersedes/refines) が cap から溢れて
+  // state_note の「refines 逆引きで後継を確認」が空振りするのを防ぐ。
+  incident.sort((a, b) => edgePriority(a.edge.type) - edgePriority(b.edge.type));
+
+  const seen: Set<string> = options.seenNodeIds ?? new Set();
+  const relations = [];
+  for (const item of incident.slice(0, options.limit ?? 8)) {
+    if (item.stub) {
+      relations.push(item.stub);
+      continue;
+    }
+    const { edge, direction, other } = item;
+    if (seen.has(other.id)) {
+      // 2 回目以降の出現は id 参照のみ (詳細は初出箇所 / matches[].node を見る)。
+      relations.push({ relation: edge.type, direction, id: other.id });
+      continue;
+    }
+    seen.add(other.id);
     relations.push({
       relation: edge.type,
-      direction: edge.from === nodeId ? "out" : "in",
-      node: compactNode(other, options)
+      direction,
+      node: compactNode(other, {
+        ...options,
+        summaryChars: Math.min(options.summaryChars ?? DEFAULT_SUMMARY_CHARS, RELATION_SUMMARY_CHARS)
+      })
     });
   }
-  return relations.slice(0, options.limit ?? 8);
+  return relations;
 }
 
 function compactReasons(reasons = []) {
   return reasons.filter((reason) =>
     reason.startsWith("alias") || reason.startsWith("vector:") || reason.startsWith("ngram:") ||
-    reason.startsWith("state:")
+    reason.startsWith("coverage:") || reason.startsWith("state:")
   );
 }
 

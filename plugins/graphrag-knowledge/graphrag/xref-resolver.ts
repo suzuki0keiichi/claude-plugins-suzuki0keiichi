@@ -493,7 +493,9 @@ export function augmentMatchesWithXRefResolutions(
       const to = rel?.to ?? rel?.target;
       if (typeof to === "string" && to.startsWith("vault:")) {
         const node = resolveCrossVaultRef(to, resolvedWorldDir);
-        xrefs.push({ ref: to, edge_type: rel?.type ?? null, resolved: node ?? null });
+        // brief の relations は edge 型を `relation` に載せる (stub 形:
+        // {relation, direction, to})。素の edge 形 ({type, to}) も受ける。
+        xrefs.push({ ref: to, edge_type: rel?.relation ?? rel?.type ?? null, resolved: node ?? null });
       }
     }
     if (xrefs.length === 0) return match;

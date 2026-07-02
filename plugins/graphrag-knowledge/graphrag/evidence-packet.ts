@@ -1,17 +1,28 @@
-import { confidenceMessage, judgeMatchConfidence } from "./confidence.ts";
+import { confidenceMessage, gradeConfidence } from "./confidence.ts";
 import { expandNeighbors, loadGraph, loadRequiredVectorIndex, nodeForOutput, prepareVectorSearch, searchGraph } from "./retrieval.ts";
 import { describeVectorIndex } from "./vector.ts";
 import { pathToFileURL } from "node:url";
+
+// graph_context のノード要約は文脈確認用なので短く切る (全文は direct_evidence /
+// 該当ノードの直読みで得る)。
+const CONTEXT_SUMMARY_CHARS = 140;
 
 export async function buildEvidencePacket(args) {
   if (!args.request) {
     throw new Error("Missing --request <text>");
   }
 
-  const graph = await loadGraph(args.vault);
-  const vectorIndex = await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
+  // ask の段上げ (runAsk) は brief で読み込んだ graph / 索引 / query embedding を
+  // args 経由で渡してくる (同じ問いを 2 回 embedding せず、vault も 2 回読まない)。
+  // 単体実行 (primitive の evidence verb) では従来どおりここで読み込む。
+  const graph = args.graphData ?? await loadGraph(args.vault);
+  const vectorIndex = args.vectorIndex
+    ?? await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
   const vectorDescription = describeVectorIndex(vectorIndex);
-  const vectorSearch = await prepareVectorSearch(args.request, { vectorIndex });
+  // R6 multi-query: 呼び出し側が --gist 込みの queryVectors を渡していればそれを使う。
+  const vectorSearch = Array.isArray(args.queryVectors) && args.queryVectors.length > 0
+    ? { vectorIndex, queryVectors: args.queryVectors }
+    : await prepareVectorSearch(args.request, { vectorIndex });
   const matches = searchGraph(graph, args.request, {
     types: args.types,
     limit: args.limit,
@@ -19,7 +30,7 @@ export async function buildEvidencePacket(args) {
   });
   const matchIds = matches.map((match) => match.node.id);
   const neighborEdges = expandNeighbors(graph, matchIds, args.neighbors);
-  const matchConfidence = judgeMatchConfidence(matches[0]);
+  const graded = gradeConfidence(matches, { noiseBaseline: vectorIndex?.noise_baseline ?? null });
 
   return {
     request: args.request,
@@ -27,49 +38,72 @@ export async function buildEvidencePacket(args) {
     retrieval_policy: {
       search: "alias + normalized text + character ngram + vector",
       vector: vectorDescription,
-      vector_provider: vectorDescription.provider,
-      vector_provider_capability: vectorDescription.provider_capability,
       types: args.types,
       neighbor_depth: args.neighbors,
       limit: args.limit
     },
-    match_confidence: matchConfidence,
-    confidence_message: confidenceMessage(matchConfidence),
-    referenced_ids: collectReferencedIds(matches, neighborEdges),
+    match_confidence: graded.confidence,
+    confidence_message: confidenceMessage(graded.confidence),
+    standout: graded.standout,
+    // 旧 referenced_ids (packet 内の全ノード id カタログ) は廃止: graph_context.nodes
+    // が id キーの表になったので同じ情報の重複だった (id → type/title は表を引く)。
     direct_evidence: matches.map((match) => ({
       score: match.score,
       reasons: match.reasons,
+      ...(match.state_note ? { state_note: match.state_note } : {}),
       node: nodeForOutput(match.node)
     })),
-    graph_context: neighborEdges.map((entry) => ({
-      depth: entry.depth,
-      relation: entry.edge.type,
-      from: nodeForOutput(entry.from),
-      to: nodeForOutput(entry.to)
-    })),
-    answer_instructions: [
-      "Use direct_evidence first.",
-      "Use graph_context only as supporting context.",
-      "referenced_ids lists every node id in this packet — use it as a quick catalog before re-querying.",
-      "If match_confidence is 'low' or 'none', try one alternative keyword once; if still no hit, switch to direct code/doc reading instead of repeating graph queries.",
-      "Separate confirmed graph facts from inferred work.",
-      "If a needed area is absent from the graph, mark it as a temporary investigation gap instead of inventing a persistent node."
-    ]
+    graph_context: buildGraphContext(neighborEdges, new Set(matchIds)),
+    answer_instructions:
+      "Use direct_evidence first; graph_context (nodes table + edges) is supporting context only. Full field guide: $REF/ask-output-guide.md."
   };
 }
 
-// referenced_ids: every node id appearing in this packet (match nodes + neighbor
-// endpoints), deduped. Lets a model confirm "what type is this id" without a
-// re-query; full description / provenance still comes from reading the node by id.
-export function collectReferencedIds(matches: any[], neighborEdges: any[]): string[] {
-  const ids = new Set<string>();
-  for (const match of matches) ids.add(match.node.id);
+// graph_context: 旧形式は edge ごとに from/to の全ノード詳細を再掲していて、同じ
+// ノードが最大 3 回ダンプされていた。id をキーにした nodes 表 (1 回だけ・短縮要約・
+// null フィールド無し) と、id 参照の細い edges 配列に分ける。excludeIds
+// (= direct_evidence の match ノード) は上で全文が出ているので表にも載せない。
+export function buildGraphContext(
+  neighborEdges: any[],
+  excludeIds: Set<string> = new Set()
+): { nodes: Record<string, any>; edges: any[] } {
+  const nodes: Record<string, any> = {};
+  const edges = [];
   for (const entry of neighborEdges) {
-    ids.add(entry.from.id);
-    ids.add(entry.to.id);
+    for (const node of [entry.from, entry.to]) {
+      if (!node || nodes[node.id] || excludeIds.has(node.id)) continue;
+      nodes[node.id] = contextNode(node);
+    }
+    edges.push({
+      depth: entry.depth,
+      relation: entry.edge.type,
+      from: entry.edge.from,
+      to: entry.edge.to
+    });
   }
-  return [...ids];
+  return { nodes, edges };
 }
+
+// 文脈ノードの最小表現: id は表のキー側に出るので値には持たせない。null/欠損
+// フィールドは省略し、display / aliases / provenance は文脈用途では出さない。
+function contextNode(node: any) {
+  const summary = typeof node.summary === "string" && node.summary.length > 0
+    ? truncate(node.summary, CONTEXT_SUMMARY_CHARS)
+    : null;
+  return {
+    type: node.type,
+    ...(node.title ? { title: node.title } : {}),
+    ...(summary ? { summary } : {}),
+    ...(node.path ? { path: node.path } : {}),
+    ...(node.state ? { state: node.state } : {})
+  };
+}
+
+function truncate(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
 
 export function parseArgs(argv) {
   const parsed: any = {};
