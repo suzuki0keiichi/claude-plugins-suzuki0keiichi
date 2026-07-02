@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fingerprintQuestion, bumpCallCount, loadAskState, saveAskState, gcAskState, recordAskHits, readRecentHitIds } from "./cli-ask-state.ts";
@@ -131,5 +131,31 @@ test("gcAskState removes entries older than TTL", () => {
     assert.equal(loaded.stale, undefined);
   } finally {
     rmSync(dir, { recursive: true });
+  }
+});
+
+// ── E1: cache/ 移行の legacy 読み取り fallback ──
+
+test("loadAskState: cache/ に無ければ legacy (.graphrag 直下) を読み、保存は新パスへ", () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "askstate-legacy-"));
+  try {
+    const now = Date.now();
+    // 移行前の ask-state.json が state dir 直下に残っている状態
+    writeFileSync(
+      path.join(stateDir, "ask-state.json"),
+      JSON.stringify({ legacyfp: { count: 2, last_at: now } })
+    );
+    const cacheDir = path.join(stateDir, "cache");
+    // 読み: legacy が読まれる
+    const st = loadAskState(cacheDir);
+    assert.equal(st["legacyfp"]?.count, 2, "legacy の状態が読まれる");
+    // 書き: bump は legacy を引き継ぎつつ新パス (cache/) へ書く
+    const n = bumpCallCount("brand new question", cacheDir, now);
+    assert.equal(n, 1);
+    assert.ok(existsSync(path.join(cacheDir, "ask-state.json")), "以後は新パスに書かれる");
+    const migrated = JSON.parse(readFileSync(path.join(cacheDir, "ask-state.json"), "utf8"));
+    assert.equal(migrated["legacyfp"]?.count, 2, "legacy のエントリも新パスに引き継がれる");
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true });
   }
 });

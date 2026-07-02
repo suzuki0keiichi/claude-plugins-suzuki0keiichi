@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { worldJoin, upsertDotEnvKey } from "./world-join.ts";
+import { worldJoin, upsertDotEnvKey, discoverGraphragDir } from "./world-join.ts";
 
 function makeVault(root: string, name: string, profile?: string): string {
   const vaultDir = path.join(root, name, ".graphrag", "vault");
@@ -250,6 +250,42 @@ test("worldJoin uses custom graphragDir for .env placement", async () => {
     const result = await worldJoin({ vaultDir, worldDir, graphragDir: customDir });
     assert.equal(result.env_path, path.join(customDir, ".env"));
     assert.ok(existsSync(path.join(customDir, ".env")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── discoverGraphragDir: 正当な root だけに latch する ──
+
+test("discoverGraphragDir: 空/ゴミの .graphrag には latch せず cwd 直下 (新規作成用) を返す", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grag-disc-"));
+  try {
+    // 親にゴミの空 .graphrag (vault も .env も無い)
+    mkdirSync(path.join(root, ".graphrag"), { recursive: true });
+    const sub = path.join(root, "sub");
+    mkdirSync(sub, { recursive: true });
+    assert.equal(discoverGraphragDir(sub), path.join(sub, ".graphrag"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discoverGraphragDir: vault/ か .env を持つ .graphrag は正当な root として walk-up で採用", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grag-disc-"));
+  try {
+    mkdirSync(path.join(root, ".graphrag", "vault"), { recursive: true });
+    const sub = path.join(root, "a", "b");
+    mkdirSync(sub, { recursive: true });
+    assert.equal(discoverGraphragDir(sub), path.join(root, ".graphrag"));
+
+    // .env だけでも正当
+    const root2 = mkdtempSync(path.join(tmpdir(), "grag-disc-"));
+    mkdirSync(path.join(root2, ".graphrag"), { recursive: true });
+    writeFileSync(path.join(root2, ".graphrag", ".env"), "GRAPHRAG_VAULT_DIR=/x\n");
+    const sub2 = path.join(root2, "c");
+    mkdirSync(sub2, { recursive: true });
+    assert.equal(discoverGraphragDir(sub2), path.join(root2, ".graphrag"));
+    rmSync(root2, { recursive: true, force: true });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

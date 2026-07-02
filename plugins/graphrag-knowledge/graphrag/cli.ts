@@ -1,5 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
-import { discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir, loadHomeGraphragEnv } from "./cli-env.ts";
+import {
+  discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir, loadHomeGraphragEnv,
+  bindClosestVaultDir, noteVaultDirSource
+} from "./cli-env.ts";
 import { pathToFileURL } from "node:url";
 
 const PRIMITIVE_VERBS = [
@@ -81,13 +84,24 @@ export async function runCli(argv: string[]) {
   //   > .graphrag/vault auto-discovery > ~/.graphrag/.env (環境ごとのグローバル fallback)。
   // applyDotEnv は first-wins なので、ローカル→グローバルの順で読むとローカルが勝つ。
   // .graphrag/.env は worktree・サブディレクトリからでも親を拾えるよう walk-up する。
+  // 各段の直後に noteVaultDirSource で「どの層が GRAPHRAG_VAULT_DIR を決めたか」を記録する
+  // (書き込み verb が毎回 `[graphrag] vault: <path> (source: <layer>)` を可視化するため)。
+  noteVaultDirSource("shell-env");
   discoverAndLoadGraphragEnv();
+  noteVaultDirSource("graphrag-env");
+  // E2 closest-wins: 最も近い `.graphrag` root が vault/ を持ち .env が GRAPHRAG_VAULT_DIR を
+  // 書いていないなら、cwd `.env` の stale な値に負ける前にその vault を確定する。
+  bindClosestVaultDir();
+  noteVaultDirSource("auto-discovered");
   loadDotEnvFromCwd();
+  noteVaultDirSource("cwd-env");
   // GRAPHRAG_VAULT_DIR がまだ未設定なら、cwd 上方向の `.graphrag/vault` を発見して焼く。
   discoverVaultDir();
+  noteVaultDirSource("auto-discovered");
   // 最後に ~/.graphrag/.env を読む。embedding API サーバ位置など、vault ごとではなく
   // 環境ごとに決まる値を 1 箇所に集約するためのグローバル fallback (最下位優先度)。
   loadHomeGraphragEnv();
+  noteVaultDirSource("home-env");
 
   const [verb, ...rest] = argv;
   if (!verb || verb === "--help" || verb === "-h" || verb === "help") {

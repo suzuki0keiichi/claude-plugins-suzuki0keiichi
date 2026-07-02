@@ -24,7 +24,14 @@ function stateFilePath(baseDir: string): string {
 }
 
 export function loadAskState(baseDir: string): AskState {
-  const fp = stateFilePath(baseDir);
+  let fp = stateFilePath(baseDir);
+  // E1 legacy fallback: 置き場所が cache/ へ移った後も、移行前の ask-state.json が
+  // state dir (.graphrag) 直下に残っていれば読む。書き込み (saveAskState) は常に
+  // 新パス (baseDir 直下) へ行くので、一度書けば以後は新パスが読まれる。
+  if (!existsSync(fp) && path.basename(path.resolve(baseDir)) === "cache") {
+    const legacy = stateFilePath(path.dirname(path.resolve(baseDir)));
+    if (existsSync(legacy)) fp = legacy;
+  }
   if (!existsSync(fp)) return {};
   try {
     const text = readFileSync(fp, "utf8");

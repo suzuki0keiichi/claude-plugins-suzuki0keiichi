@@ -108,4 +108,9 @@ test("resolveCarvingConfigPath: graph が .graphrag 配下ならその隣、そ�
     resolveCarvingConfigPath(path.join(dir, "graph.json")),
     path.join(stateDir, "carving.json")
   );
+  // E1: graph が .graphrag/cache 配下 (carve の新規約) でも carving.json は .graphrag 直下
+  assert.equal(
+    resolveCarvingConfigPath(path.join(stateDir, "cache", "indexed-graph.json")),
+    path.join(stateDir, "carving.json")
+  );
 });

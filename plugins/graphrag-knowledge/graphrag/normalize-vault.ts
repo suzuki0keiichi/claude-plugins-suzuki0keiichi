@@ -114,11 +114,13 @@ export function normalizeVault(
   if (opts.git !== false && (delta.written.length > 0 || delta.removed.length > 0)) {
     try {
       execFileSync("git", ["add", "--", "."], { cwd: vaultAbs });
-      const staged = execFileSync("git", ["diff", "--cached", "--name-only"], {
+      // pathspec を vault(.) に限定する (mutate-vault.gitCommitVault と同じ理由):
+      // pathspec 無しの commit は利用者が repo の別所で stage していた変更を巻き込む。
+      const staged = execFileSync("git", ["diff", "--cached", "--name-only", "--", "."], {
         cwd: vaultAbs, encoding: "utf8"
       }).trim();
       if (staged) {
-        execFileSync("git", ["commit", "-q", "-m", "graphrag: normalize vault types/ids to canonical"], {
+        execFileSync("git", ["commit", "-q", "-m", "graphrag: normalize vault types/ids to canonical", "--", "."], {
           cwd: vaultAbs
         });
       }

@@ -20,7 +20,7 @@ import {
   type CarvingConfig,
 } from "./carving-config.ts";
 import { REMOVED_BUILTIN_ORPHAN_PATTERNS } from "./check-carving.ts";
-import { discoverStateDir } from "./cli-env.ts";
+import { discoverStateDir, cacheDirUnder, reportVaultResolution } from "./cli-env.ts";
 
 function parseArgs(argv: string[]): { verb: string | undefined; flags: Record<string, string | true> } {
   const flags: Record<string, string | true> = {};
@@ -52,7 +52,14 @@ function defaultConfigPath(flags: Record<string, string | true>): string {
   if (typeof flags.config === "string") return path.resolve(flags.config);
   // vault ディレクトリ内から実行しても walk-up で既存 <root>/.graphrag を辿り当てる
   // (素朴な cwd/.graphrag だと <root>/.graphrag/vault/.graphrag を量産していた)。
+  // どこにも .graphrag が無ければ cwd に勝手に掘らず明確にエラー (ゴミ生成防止)。
   const stateDir = process.env.GRAPHRAG_STATE_DIR ?? discoverStateDir();
+  if (!stateDir) {
+    throw new Error(
+      "carving.json の置き場所を解決できない: cwd から上位に .graphrag が無い。" +
+      "--config <path> を渡すか、プロジェクト root (.graphrag のある場所) で実行する。"
+    );
+  }
   return path.join(stateDir, CARVING_CONFIG_BASENAME);
 }
 
@@ -100,9 +107,11 @@ async function runAdd(flags: Record<string, string | true>): Promise<any> {
   const p = requireString(flags, "path");
   const reason = requireString(flags, "reason");
   if (hasGlobChars(p)) throw new Error(`--path に glob/regex 文字 (* ? [) は不可。literal path のみ: ${p}`);
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
   const entry = { path: p, reason, added: todayISO() };
-  await withVaultLock(path.dirname(configPath), () => {
+  // carving.json は追跡設定なので stateDir 直下のまま、lock (機械ローカル) は cache/ に置く (E1)。
+  const lockDir = cacheDirUnder(path.dirname(configPath));
+  fs.mkdirSync(lockDir, { recursive: true });
+  await withVaultLock(lockDir, () => {
     const config = loadForWrite(configPath);
     if (config.allowed_orphans.some((e) => e.path === p)) {
       throw new Error(`既に免除済み: ${p} (更新は carving-allow remove → add)`);
@@ -118,7 +127,9 @@ async function runRemove(flags: Record<string, string | true>): Promise<any> {
   const configPath = defaultConfigPath(flags);
   const p = requireString(flags, "path");
   let removed: any = null;
-  await withVaultLock(path.dirname(configPath), () => {
+  const lockDir = cacheDirUnder(path.dirname(configPath));
+  fs.mkdirSync(lockDir, { recursive: true });
+  await withVaultLock(lockDir, () => {
     const config = loadForWrite(configPath);
     removed = config.allowed_orphans.find((e) => e.path === p) ?? null;
     if (!removed) throw new Error(`免除エントリが見つからない: ${p}`);
@@ -168,6 +179,13 @@ function runMigrate(flags: Record<string, string | true>): any {
 
 export async function runCarvingAllow(argv: string[]): Promise<any> {
   const { verb, flags } = parseArgs(argv);
+  // 書き込み系 (add/remove) は vault 解決の可視化 1 行を出す (typed-add 等と同じ運用)。
+  // carving-allow 自体は vault でなく carving.json を書くので、vault が解決できて
+  // いる時だけ同梱する。
+  const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
+  const vaultResolution = (verb === "add" || verb === "remove") && vaultDir
+    ? reportVaultResolution(vaultDir)
+    : null;
   let result: any;
   switch (verb) {
     case "add": result = await runAdd(flags); break;
@@ -177,6 +195,7 @@ export async function runCarvingAllow(argv: string[]): Promise<any> {
     default:
       throw new Error(`usage: carving-allow <add|remove|list|migrate> (got: ${verb ?? "(none)"})`);
   }
+  if (vaultResolution) result = { ...vaultResolution, ...result };
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return result;
 }

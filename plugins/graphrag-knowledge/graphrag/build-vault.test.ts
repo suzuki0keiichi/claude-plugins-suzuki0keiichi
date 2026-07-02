@@ -304,6 +304,28 @@ test("main --force overwrites even when knowledge nodes would be lost", () => {
   }
 });
 
+test("main は GRAPHRAG_VAULT_MODE=readonly の下では (--force でも) vault を消さず拒否する", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "graphrag-build-ro-"));
+  const prevCwd = process.cwd();
+  try {
+    const graphPath = writeGraphJson(tmp, {
+      nodes: [{ id: "file:proj:src/a.ts", type: "File", title: "a.ts", path: "src/a.ts" }],
+    });
+    const vaultDir = path.join(tmp, "vault");
+    main([graphPath, vaultDir]); // 先に vault を作っておく (readonly 前)
+    // cwd ローカルの readonly mode を敷く。vault-build も typed-add と同じゲートを通る。
+    mkdirSync(path.join(tmp, ".graphrag"), { recursive: true });
+    writeFileSync(path.join(tmp, ".graphrag", ".env"), "GRAPHRAG_VAULT_MODE=readonly\n");
+    process.chdir(tmp);
+    // --force はゲートを迂回しない (rmSync まで到達させない)。
+    assert.throws(() => main([graphPath, vaultDir, "--force"]), /readonly/);
+    assert.ok(existsSync(path.join(vaultDir, "File")), "readonly 下では vault が消えない");
+  } finally {
+    process.chdir(prevCwd);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("main allows initial build on an empty/absent vault directory", () => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "graphrag-build-"));
   try {

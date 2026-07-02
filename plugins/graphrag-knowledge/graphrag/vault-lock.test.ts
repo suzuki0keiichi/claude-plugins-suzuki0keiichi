@@ -32,6 +32,45 @@ test("stale ロック（死んだ PID）は奪える", async () => {
   assert.equal(ran, true);
 });
 
+test("生きた PID のロックは年齢だけでは奪わない (旧 30s 閾値相当でも待って timeout)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
+  const { writeFileSync } = await import("node:fs");
+  // 生きた保持者 (このプロセス自身) が 60s 前に取得したロック。旧実装は 30s 超で
+  // 奪ってしまい、git commit が遅いだけの生きた writer と二重書きになった。
+  writeFileSync(
+    path.join(stateDir, "vault.lock"),
+    JSON.stringify({ pid: process.pid, ts: Date.now() - 60_000 })
+  );
+  await assert.rejects(
+    () => withVaultLock(stateDir, () => {}, { timeoutMs: 150, pollMs: 20 }),
+    /timeout/i
+  );
+});
+
+test("生きた PID でも絶対上限 (staleMs) 超過なら奪える (PID 再利用への保険)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(
+    path.join(stateDir, "vault.lock"),
+    JSON.stringify({ pid: process.pid, ts: Date.now() - 5_000 })
+  );
+  let ran = false;
+  await withVaultLock(stateDir, () => { ran = true; }, { staleMs: 1_000 });
+  assert.equal(ran, true);
+});
+
+test("finally は自分の PID のロックだけを消す (奪われた後に他者のロックを消さない)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
+  const { writeFileSync, readFileSync, existsSync } = await import("node:fs");
+  const lockPath = path.join(stateDir, "vault.lock");
+  await withVaultLock(stateDir, () => {
+    // 実行中に (絶対上限超過等で) 別プロセスがロックを奪った想定: 中身が他者の PID になる。
+    writeFileSync(lockPath, JSON.stringify({ pid: 999999999, ts: Date.now() }));
+  });
+  assert.ok(existsSync(lockPath), "他者のロックを finally で unlink しない");
+  assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).pid, 999999999);
+});
+
 test("新しい空ロック（生成途中）は奪わず待つ→timeout する", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
   const { writeFileSync } = await import("node:fs");

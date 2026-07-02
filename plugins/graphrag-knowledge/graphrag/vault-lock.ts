@@ -1,4 +1,4 @@
-import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, existsSync, statSync, renameSync } from "node:fs";
+import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, statSync, renameSync } from "node:fs";
 import path from "node:path";
 
 type LockInfo = { pid: number; ts: number };
@@ -17,7 +17,10 @@ function isStale(lockPath: string, staleMs: number, graceMs: number): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // metadata が正常に読めた場合: PID 死亡 or staleMs 超過なら stale。
+    // metadata が正常に読めた場合: PID 死亡なら stale。生きた PID のロックは
+    // 年齢だけでは奪わない (git commit や FS が遅いだけの生きた writer から
+    // ロックを横取りすると二重書きになる)。staleMs は PID 再利用への保険としての
+    // 大きな絶対上限 (既定 10 分) にのみ使う。
     if (!pidAlive(info.pid)) return true;
     if (Date.now() - info.ts > staleMs) return true;
     return false;
@@ -121,7 +124,8 @@ export async function withVaultLock<T>(
   fn: () => Promise<T> | T,
   opts: { staleMs?: number; timeoutMs?: number; pollMs?: number; graceMs?: number } = {}
 ): Promise<T> {
-  const staleMs = opts.staleMs ?? 30_000;
+  // stale 判定の主軸は「PID 死亡」。staleMs は PID 再利用への保険の絶対上限。
+  const staleMs = opts.staleMs ?? 600_000;
   const timeoutMs = opts.timeoutMs ?? 60_000;
   const pollMs = opts.pollMs ?? 25;
   const graceMs = opts.graceMs ?? 2_000;
@@ -146,6 +150,11 @@ export async function withVaultLock<T>(
     return await fn();
   } finally {
     try { closeSync(fd); } catch { /* noop */ }
-    try { if (existsSync(lockPath)) unlinkSync(lockPath); } catch { /* noop */ }
+    // 自分の PID が入ったロックだけを消す。絶対上限超過等で誰かに奪われていた場合、
+    // 無条件 unlink は「奪った側のロック」を消してしまい三重目の writer を招く。
+    try {
+      const cur = JSON.parse(readFileSync(lockPath, "utf8")) as LockInfo;
+      if (cur.pid === process.pid) unlinkSync(lockPath);
+    } catch { /* 消えている/壊れている → 触らない (残骸は stale 判定が回収する) */ }
   }
 }

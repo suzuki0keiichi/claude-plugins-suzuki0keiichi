@@ -3,7 +3,14 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv, loadHomeGraphragEnv, stateDirUnder, stateDirForVault, discoverStateDir } from "./cli-env.ts";
+import {
+  parseDotEnv, applyDotEnv, discoverVaultDir, discoverAndLoadGraphragEnv, loadHomeGraphragEnv,
+  loadDotEnvFromCwd, bindClosestVaultDir,
+  stateDirUnder, stateDirForVault, discoverStateDir,
+  cacheDirUnder, cacheDirForVault, consumerCacheDirForVault,
+  detectVaultIsolation, assertVaultWriteAllowed
+} from "./cli-env.ts";
+import { execFileSync } from "node:child_process";
 
 // 回帰: state dir (.graphrag) の解決は冪等であること。
 // 既定レイアウト <root>/.graphrag/vault に対して <root>/.graphrag/.graphrag や
@@ -40,6 +47,109 @@ test("discoverStateDir: walks up to an existing .graphrag even from inside the v
     assert.equal(discoverStateDir(stateDir), stateDir);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discoverStateDir: どこにも .graphrag が無ければ null (cwd に勝手に掘る候補を返さない)", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "statedir-none-")));
+  try {
+    assert.equal(discoverStateDir(root), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── E1: 機械ローカル成果物の cache dir ──
+
+test("cacheDirUnder / cacheDirForVault: <stateDir>/cache を冪等に解決する", () => {
+  const g = path.join("/repo", ".graphrag");
+  assert.equal(cacheDirUnder(g), path.join(g, "cache"));
+  // 冪等: 既に cache を渡しても掘り増やさない
+  assert.equal(cacheDirUnder(path.join(g, "cache")), path.join(g, "cache"));
+  // 既定レイアウト <root>/.graphrag/vault → <root>/.graphrag/cache
+  assert.equal(cacheDirForVault(path.join(g, "vault")), path.join(g, "cache"));
+  // legacy レイアウト <root>/vault → <root>/.graphrag/cache
+  assert.equal(cacheDirForVault(path.join("/repo", "vault")), path.join(g, "cache"));
+});
+
+test("consumerCacheDirForVault: ローカル root の cache/external/<hash> を返す (root 不在は null)", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "consumer-")));
+  try {
+    mkdirSync(path.join(root, ".graphrag"), { recursive: true });
+    const dir = consumerCacheDirForVault("/ext/repo/.graphrag/vault", root);
+    assert.ok(dir !== null);
+    assert.ok(dir!.startsWith(path.join(root, ".graphrag", "cache", "external") + path.sep));
+    // 同じ vault パスなら安定 (hash キー)
+    assert.equal(dir, consumerCacheDirForVault("/ext/repo/.graphrag/vault", root));
+    // 別 vault なら別サブディレクトリ
+    assert.notEqual(dir, consumerCacheDirForVault("/other/vault", root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("consumerCacheDirForVault: ローカルに .graphrag が無ければ null", () => {
+  const bare = realpathSync(mkdtempSync(path.join(tmpdir(), "consumer-bare-")));
+  try {
+    assert.equal(consumerCacheDirForVault("/ext/vault", bare), null);
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+// ── vault mode / 書き込みゲート ──
+
+test("GRAPHRAG_VAULT_MODE=worktree は未実装として明確に拒否する", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "mode-wt-")));
+  try {
+    mkdirSync(path.join(root, ".graphrag"), { recursive: true });
+    writeFileSync(path.join(root, ".graphrag", ".env"), "GRAPHRAG_VAULT_MODE=worktree\n");
+    assert.throws(() => detectVaultIsolation(root), /not implemented.*readonly or direct/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("assertVaultWriteAllowed: readonly は書き込みを拒否、direct は通す", () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "mode-gate-")));
+  try {
+    mkdirSync(path.join(root, ".graphrag"), { recursive: true });
+    writeFileSync(path.join(root, ".graphrag", ".env"), "GRAPHRAG_VAULT_MODE=readonly\n");
+    assert.throws(
+      () => assertVaultWriteAllowed({ cwd: root, vaultDir: path.join(root, ".graphrag", "vault") }),
+      /readonly/
+    );
+    writeFileSync(path.join(root, ".graphrag", ".env"), "GRAPHRAG_VAULT_MODE=direct\n");
+    const isolation = assertVaultWriteAllowed({ cwd: root, vaultDir: path.join(root, ".graphrag", "vault") });
+    assert.equal(isolation.mode, "direct");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("assertVaultWriteAllowed: 外部 vault + ローカル mode 無しは拒否 (存在しない vault-worktree verb を案内しない)", () => {
+  const cwdRepo = realpathSync(mkdtempSync(path.join(tmpdir(), "gate-cwd-")));
+  const vaultRepo = realpathSync(mkdtempSync(path.join(tmpdir(), "gate-vault-")));
+  try {
+    for (const repo of [cwdRepo, vaultRepo]) {
+      execFileSync("git", ["-C", repo, "init", "-q"]);
+    }
+    const vaultDir = path.join(vaultRepo, "vault");
+    mkdirSync(vaultDir, { recursive: true });
+    assert.throws(
+      () => assertVaultWriteAllowed({ cwd: cwdRepo, vaultDir }),
+      (e: any) => {
+        assert.match(e.message, /external/);
+        assert.match(e.message, /GRAPHRAG_VAULT_MODE=readonly/);
+        assert.match(e.message, /GRAPHRAG_VAULT_MODE=direct/);
+        assert.ok(!/vault-worktree/.test(e.message), "存在しない verb を案内しない");
+        assert.ok(!/GRAPHRAG_VAULT_MODE=worktree/.test(e.message), "未実装 mode を案内しない");
+        return true;
+      }
+    );
+  } finally {
+    rmSync(cwdRepo, { recursive: true, force: true });
+    rmSync(vaultRepo, { recursive: true, force: true });
   }
 });
 
@@ -181,6 +291,44 @@ test("parent .graphrag/.env is inherited when the subdir has no local .graphrag/
     discoverAndLoadGraphragEnv(sub);
     discoverVaultDir(sub);
     assert.equal(process.env.GRAPHRAG_VAULT_DIR, parentVault);
+  });
+});
+
+// ── E2: 最近傍 .graphrag/vault は cwd .env の stale な値に勝つ ──
+
+test("E2: closest .graphrag/vault が cwd .env の stale な GRAPHRAG_VAULT_DIR に勝つ", () => {
+  withCleanVaultEnv((root) => {
+    const localVault = path.join(root, ".graphrag", "vault");
+    mkdirSync(localVault, { recursive: true });
+    // プロジェクト直下の素朴な .env に stale なパスが残っている状況
+    writeFileSync(path.join(root, ".env"), `GRAPHRAG_VAULT_DIR=${path.join(root, "no-longer-here", "vault")}\n`);
+    // runCli の env 読み込み順を再現
+    discoverAndLoadGraphragEnv(root);
+    bindClosestVaultDir(root);
+    loadDotEnvFromCwd(root);
+    discoverVaultDir(root);
+    assert.equal(process.env.GRAPHRAG_VAULT_DIR, localVault, "closest-wins は cwd .env より強い");
+  });
+});
+
+test("E2: シェル env は bindClosestVaultDir より常に強い (first-wins)", () => {
+  withCleanVaultEnv((root) => {
+    mkdirSync(path.join(root, ".graphrag", "vault"), { recursive: true });
+    process.env.GRAPHRAG_VAULT_DIR = "/from/shell/vault";
+    bindClosestVaultDir(root);
+    assert.equal(process.env.GRAPHRAG_VAULT_DIR, "/from/shell/vault");
+  });
+});
+
+test("E2: root の .graphrag/.env が GRAPHRAG_VAULT_DIR を明示していればそれを尊重する", () => {
+  withCleanVaultEnv((root) => {
+    const explicitVault = path.join(root, "elsewhere", "vault");
+    mkdirSync(explicitVault, { recursive: true });
+    mkdirSync(path.join(root, ".graphrag", "vault"), { recursive: true });
+    writeFileSync(path.join(root, ".graphrag", ".env"), `GRAPHRAG_VAULT_DIR=${explicitVault}\n`);
+    discoverAndLoadGraphragEnv(root);
+    bindClosestVaultDir(root);
+    assert.equal(process.env.GRAPHRAG_VAULT_DIR, explicitVault);
   });
 });
 

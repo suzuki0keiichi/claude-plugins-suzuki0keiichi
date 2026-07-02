@@ -31,11 +31,16 @@ export function hasGlobChars(p: string): boolean {
 
 /**
  * graph パスからの規約解決。
- * graph が .graphrag/ 配下 (規約: <root>/.graphrag/indexed-graph.json) ならその隣、
+ * graph が .graphrag/cache/ 配下 (E1 規約: <root>/.graphrag/cache/indexed-graph.json)
+ * なら .graphrag 直下 (carving.json は追跡設定なので cache には置かない)、
+ * .graphrag/ 直下 (legacy 規約) ならその隣、
  * そうでなければ graph と同階層の .graphrag/ 配下を見る。
  */
 export function resolveCarvingConfigPath(graphPath: string): string {
-  const dir = path.dirname(path.resolve(graphPath));
+  let dir = path.dirname(path.resolve(graphPath));
+  if (path.basename(dir) === "cache" && path.basename(path.dirname(dir)) === ".graphrag") {
+    dir = path.dirname(dir);
+  }
   if (path.basename(dir) === ".graphrag") return path.join(dir, CARVING_CONFIG_BASENAME);
   return path.join(dir, ".graphrag", CARVING_CONFIG_BASENAME);
 }

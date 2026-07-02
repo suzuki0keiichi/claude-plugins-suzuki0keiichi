@@ -27,15 +27,24 @@ function normalizeVaultPaths(config: { vaults: { path: string }[] }): string[] {
 }
 
 /**
- * cwd から上方向に `.graphrag` ディレクトリを探す。
- * discoverAndLoadGraphragEnv と同じ探索方式。
- * 見つからなければ cwd 直下に `.graphrag` を返す（新規作成用）。
+ * cwd から上方向に「正当な root」の `.graphrag` を探す。
+ * 正当 = `vault/` か `.env` の少なくとも一方を持つ (cli-env.findGraphragRoot と同じ規約)。
+ * ただの空/ゴミ `.graphrag` (過去の bug が cwd に量産したもの等) には latch しない —
+ * そこへ GRAPHRAG_WORLD_DIR を書くと設定が迷子になる。
+ * どこにも無ければ cwd 直下の `.graphrag` を返す。新規 `.graphrag` を作ってよいのは
+ * 「明示的に world-join を実行した cwd」だけ、という原則。
  */
-function discoverGraphragDir(cwd: string = process.cwd()): string {
+export function discoverGraphragDir(cwd: string = process.cwd()): string {
+  const isDir = (p: string) => {
+    try { return existsSync(p) && statSync(p).isDirectory(); } catch { return false; }
+  };
+  const isFile = (p: string) => {
+    try { return existsSync(p) && !statSync(p).isDirectory(); } catch { return false; }
+  };
   let dir = path.resolve(cwd);
   for (;;) {
     const candidate = path.join(dir, ".graphrag");
-    if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+    if (isDir(candidate) && (isDir(path.join(candidate, "vault")) || isFile(path.join(candidate, ".env")))) {
       return candidate;
     }
     const parent = path.dirname(dir);

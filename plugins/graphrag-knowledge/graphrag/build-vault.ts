@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node
 import path from "node:path";
 import { deriveShortLabel } from "./labels.ts";
 import { importVault } from "./import-vault.ts";
+import { assertVaultWriteAllowed, reportVaultResolution } from "./cli-env.ts";
 
 // Minimal, conservative YAML emitter for the node value shapes we have
 // (string / number / boolean / null / string[] / nested plain object).
@@ -287,6 +288,12 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     console.error("(No default under the skill directory is provided — knowledge belongs to the consuming project, not the skill repository.)");
     process.exit(1);
   }
+  // vault-build は outDir を全消し→再構築する最も破壊的な write verb。typed-add /
+  // commit-mutation と同じ隔離ゲートをここでも通す (readonly / 外部 vault のローカル
+  // mode 未設定は拒否)。--force はこのゲートを迂回しない (--force は「損失を承知で
+  // 上書きする」であって「隔離方針を無視する」ではない)。
+  assertVaultWriteAllowed({ vaultDir: outDir });
+  const vaultResolution = reportVaultResolution(outDir, positionals[1] ? "cli-arg" : undefined);
   const graph = JSON.parse(readFileSync(graphPath, "utf8"));
   const provisionalCount = (graph.nodes ?? []).filter(
     (n: any) => n.summary_provisional === true
@@ -348,7 +355,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     byFolder[folder] = (byFolder[folder] ?? 0) + 1;
   }
   console.log(`vault: ${files.length} files -> ${outDir}/`);
-  console.log(JSON.stringify(byFolder, null, 2));
+  console.log(JSON.stringify({ ...vaultResolution, files_by_folder: byFolder }, null, 2));
 }
 
 // Standalone entry (preserve backward compat for direct invocation)

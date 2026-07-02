@@ -36,6 +36,9 @@ export async function loadGraphFromRef(
 ): Promise<GraphLike> {
   const worktree = await mkdtemp(path.join(tmpdir(), "graphrag-wt-"));
   try {
+    // 過去の crash 等で leak した worktree metadata を先に掃除する (self-heal)。
+    // prune 失敗は非致命 — add が失敗するならそこで正直に落ちる。
+    await git(repoDir, ["worktree", "prune"]).catch(() => {});
     await git(repoDir, ["worktree", "add", "--detach", "--quiet", worktree, ref]);
     return await loadGraph(path.join(worktree, vaultSubpath));
   } finally {
