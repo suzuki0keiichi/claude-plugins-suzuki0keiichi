@@ -401,6 +401,79 @@ test("lexical と embedding が同ペアを見つけても二重計上しない"
   assert.equal(res.suspects[0].basis, "lexical");
 });
 
+// ── lexical pre-pass × 終端 state (#9 回帰) ──────────────────────────────────
+// supersede レシピは後継が同タイトルを引き継ぐのが正規の運用。既存ノードが終端 state
+// (もはや現役の担い手ではない) なら title/alias 衝突があっても suspect にしない。
+test("lexical: state:superseded の既存ノードとの同名衝突は suspect にならない (書き込みは offline でも進める)", async () => {
+  const superseded = { id: "decision:s:a", type: "Decision", title: "A", summary: "a", state: "superseded" };
+  const res = await runDuplicateCheck({
+    plan: {
+      nodes: [{ op: "create", id: "decision:s:a2", type: "Decision", title: "A", summary: "x" }],
+    },
+    currentGraph: graphWith(superseded),
+    vectorIndex: null,
+    embed: embedConst([1, 0, 0]),
+  });
+  assert.equal(res.status, "skipped", "終端 state 衝突は lexical suspect を出さず、index 不在で従来どおり skipped");
+  assert.deepEqual(res.suspects, []);
+});
+
+test("lexical: alias 衝突でも既存ノードが終端 state なら suspect にならない", async () => {
+  const superseded = {
+    id: "decision:s:a",
+    type: "Decision",
+    title: "別名の題",
+    summary: "a",
+    aliases: ["auto update"],
+    state: "superseded",
+  };
+  const res = await runDuplicateCheck({
+    plan: {
+      nodes: [{ op: "create", id: "decision:s:auto", type: "Decision", title: "Auto  Update", summary: "x" }],
+    },
+    currentGraph: graphWith(superseded),
+    vectorIndex: null,
+    embed: embedConst([1, 0, 0]),
+  });
+  assert.equal(res.status, "skipped");
+  assert.deepEqual(res.suspects, []);
+});
+
+test("lexical: 終端 state (closed / achieved / abandoned) も同様に衝突を素通りさせる", async () => {
+  const terminalCases = [
+    { id: "investigation:s:a", type: "Investigation", title: "調査A", summary: "a", state: "closed" },
+    { id: "goal:s:a", type: "Goal", title: "目標A", summary: "a", state: "achieved" },
+    { id: "goal:s:b", type: "Goal", title: "目標B", summary: "b", state: "abandoned" },
+  ];
+  for (const existing of terminalCases) {
+    const res = await runDuplicateCheck({
+      plan: {
+        nodes: [{ op: "create", id: `${existing.type.toLowerCase()}:s:new`, type: existing.type, title: existing.title, summary: "x" }],
+      },
+      currentGraph: graphWith(existing),
+      vectorIndex: null,
+      embed: embedConst([1, 0, 0]),
+    });
+    assert.equal(res.status, "skipped", `state:${existing.state} は終端なので suspect にならない`);
+    assert.deepEqual(res.suspects, []);
+  }
+});
+
+test("lexical: 現役 (state 無し) の既存ノードとの同名衝突は引き続き suspect", async () => {
+  // existingDecision は state 無し = 現役。終端 state スキップの対象外であること (回帰防止)。
+  const res = await runDuplicateCheck({
+    plan: {
+      nodes: [{ op: "create", id: "decision:s:a2", type: "Decision", title: "A", summary: "x" }],
+    },
+    currentGraph: graphWith(existingDecision),
+    vectorIndex: null,
+    embed: embedConst([1, 0, 0]),
+  });
+  assert.equal(res.status, "rejected");
+  assert.equal(res.suspects[0].basis, "lexical");
+  assert.equal(res.suspects[0].existing_id, "decision:s:a");
+});
+
 // ── cross-type suspects (suggest-only。reject に使わない) ────────────────────
 test("cross-type: Decision↔OperationalKnowledge の閾値以上は cross_type_suspects (status ok)", async () => {
   const existingOk = { id: "ok:s:same", type: "OperationalKnowledge", title: "既存の運用知識", summary: "y" };

@@ -21,11 +21,15 @@ export type MatchConfidence = "high" | "low" | "none";
 const VECTOR_MARGIN_HIGH = 0;
 const VECTOR_MARGIN_LOW = -1;
 const SPREAD_FLOOR = 0.01;
-// baseline 無し (旧 index) 用の暫定の絶対値フォールバック。ローカル既定モデル系の
-// 実測ノイズ床 (off-topic top1 ~0.79-0.83) に合わせる。索引を再構築すれば
-// noise_baseline 判定に切り替わる。
-const VECTOR_ABS_HIGH = 0.83;
-const VECTOR_ABS_LOW = 0.78;
+// baseline 無し (noise_baseline を打刻していない旧 index) 用の絶対値フォールバック。
+// 契約は「旧 index → 旧挙動」: 相対判定登場前の VECTOR_HIGH/LOW 定数をそのまま使う。
+// これをモデル依存の実測値 (例: multilingual-e5 系の off-topic top1 ~0.79-0.83) に
+// 合わせて引き上げると、その実測に乗らない index やモデル (OpenAI 系など on-topic
+// cosine が 0.50-0.78 に収まる) の正解ヒットまで none に落ちてしまう (要修正の実測
+// 済み regression)。索引を "vector-index" で再構築し vector.json に noise_baseline が
+// 打刻されれば、上の margin 判定 (コーパス相対) に自動で切り替わる。
+const VECTOR_ABS_HIGH = 0.65;
+const VECTOR_ABS_LOW = 0.50;
 const NGRAM_HIGH = 0.65;
 const NGRAM_LOW = 0.45;
 const COVERAGE_HIGH = 0.65;

@@ -430,18 +430,18 @@ test("buildWorldHints upgrades a clearly standing-out top1 from low to high", as
   const { worldDir, root, vaultDirs } = makeWorld({ pay: PAYMENT_PROFILE, auth: AUTH_PROFILE, dev: `---\nname: dev-vault\n---\n開発プロセス。\n` });
   try {
     await refreshWorldCache(worldDir, { embedder: fakeEmbedder() });
-    // クエリベクトルを pay と cos=0.8 (絶対値では low: 0.78≤v<0.83) になるよう作る。
+    // クエリベクトルを pay と cos=0.6 (絶対値では low) になるよう作る。
     // lexical も pay にだけ部分一致する語を含め、合算で top1 が突出する状況。
     const result = await buildWorldHints("決済 引き落とし 再実行", {
       worldDir,
       currentVaultDir: vaultDirs.dev,
-      queryVector: [0.8, 0, 0],
+      queryVector: [0.6, 0, 0],
       queryModel: "fake-model",
       embedder: fakeEmbedder()
     });
     assert.equal(result.standout, "clear");
     assert.equal(result.hints[0].vault.name, "payment-vault");
-    assert.equal(result.hints[0].confidence, "high"); // vector 0.80 単体なら low → 突出で格上げ
+    assert.equal(result.hints[0].confidence, "high"); // vector 0.60 単体なら low → 突出で格上げ
     assert.ok((result.hints[0].gap_above_next ?? 0) >= 15);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -460,7 +460,7 @@ test("buildWorldHints reports crowd (no upgrade) when candidates are neck and ne
     const result = await buildWorldHints("決済 周辺の設計", {
       worldDir,
       currentVaultDir: vaultDirs.dev,
-      queryVector: [0.8, 0.6, 0],
+      queryVector: [0.6, 0.8, 0],
       queryModel: "fake-model",
       embedder: fakeEmbedder()
     });

@@ -6,13 +6,13 @@ test("judgeMatchConfidence returns 'none' when match is missing", () => {
   assert.equal(judgeMatchConfidence(undefined), "none");
 });
 
-// baseline 無し (旧 index) の絶対値フォールバック: high ≥ 0.83 / low ≥ 0.78。
-// 旧閾値 0.65/0.50 は実測ノイズ床 (off-topic でも top1 ~0.79) の下に居て
-// 何でも high になっていた。
+// baseline 無し (旧 index) の絶対値フォールバック: pre-1.10 の定数 high ≥ 0.65 /
+// low ≥ 0.50 に復元 (契約は「旧 index → 旧挙動」)。索引を再構築して noise_baseline
+// が打刻されれば下のコーパス相対判定に切り替わる。
 test("judgeMatchConfidence: vector absolute stopgap bands (no baseline)", () => {
-  assert.equal(judgeMatchConfidence({ reasons: ["vector:0.85", "ngram:0.10"] }), "high");
-  // vector low + ngram low 未満 → low (強い方=low)
-  assert.equal(judgeMatchConfidence({ reasons: ["vector:0.79", "ngram:0.20"] }), "low");
+  assert.equal(judgeMatchConfidence({ reasons: ["vector:0.72", "ngram:0.10"] }), "high");
+  // vector low + ngram low → どちらも弱い → low (強い方=low)
+  assert.equal(judgeMatchConfidence({ reasons: ["vector:0.55", "ngram:0.20"] }), "low");
   // vector none + ngram low → low
   assert.equal(judgeMatchConfidence({ reasons: ["vector:0.30", "ngram:0.50"] }), "low");
   // vector none + ngram none → none
@@ -20,8 +20,8 @@ test("judgeMatchConfidence: vector absolute stopgap bands (no baseline)", () => 
 });
 
 test("judgeMatchConfidence: R4 lexical is judged independently and the stronger wins", () => {
-  // vector low (0.79) だが ngram high (0.80) → 独立判定で強い方=high
-  assert.equal(judgeMatchConfidence({ reasons: ["vector:0.79", "ngram:0.80"] }), "high");
+  // vector low (0.55) だが ngram high (0.80) → 独立判定で強い方=high
+  assert.equal(judgeMatchConfidence({ reasons: ["vector:0.55", "ngram:0.80"] }), "high");
   // vector none (0.30) でも ngram high なら high
   assert.equal(judgeMatchConfidence({ reasons: ["vector:0.30", "ngram:0.80"] }), "high");
 });
@@ -94,12 +94,13 @@ test("gradeConfidence: single top → state 'single', no upgrade", () => {
 
 test("gradeConfidence: passes noise baseline through to the vector grade", () => {
   const noiseBaseline = { median_cosine: 0.85, p90_cosine: 0.88 };
-  // baseline 相対では 0.86 は high (絶対フォールバックでも high だが、こちらは
-  // baseline 経路を通ることを 0.80 (絶対なら low / 相対なら none 側) で確認する)
-  const low = gradeConfidence([{ score: 100, reasons: ["vector:0.80"] }, { score: 99, reasons: [] }], { noiseBaseline });
+  // 同じ vector:0.60 が、baseline 有無で判定が変わることを確認する:
+  // baseline 相対では median (0.85) からかけ離れており none、
+  // baseline 無しの絶対フォールバック (pre-1.10 復元: 0.50≤v<0.65) では low。
+  const low = gradeConfidence([{ score: 100, reasons: ["vector:0.60"] }, { score: 99, reasons: [] }], { noiseBaseline });
   assert.equal(low.confidence, "none", "相対判定で median−spread 未満は none");
-  const abs = gradeConfidence([{ score: 100, reasons: ["vector:0.80"] }, { score: 99, reasons: [] }]);
-  assert.equal(abs.confidence, "low", "baseline 無しなら絶対フォールバック (0.78≤v<0.83 = low)");
+  const abs = gradeConfidence([{ score: 100, reasons: ["vector:0.60"] }, { score: 99, reasons: [] }]);
+  assert.equal(abs.confidence, "low", "baseline 無しなら絶対フォールバック (0.50≤v<0.65 = low)");
 });
 
 test("gradeConfidence: already-high top1 is not further upgraded", () => {

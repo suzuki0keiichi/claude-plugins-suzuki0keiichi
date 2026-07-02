@@ -124,11 +124,18 @@ export async function loadRequiredVectorIndex(
   // 書き出し先は消費側 (ローカル .graphrag) の cache/external/<hash>/ へ。読みは
   // 消費側索引 > vault 側の既存索引 (読むだけなら許される) > 消費側 (これから構築)。
   // mode 設定が一切無ければ判定 (git 呼び出し) 自体を skip する。
+  //
+  // raw_mode (demote 前) を見る: readonly は制限的な設定なので、親 .graphrag/.env
+  // からの inherited でも尊重してよい (#3)。demote 済み `mode` を見ると、親で
+  // readonly と宣言していても worktree では「未決定」に見えてしまい、外部 vault の
+  // cache/ へ自動再構築が書き込んでしまう。書き込みゲート (assertVaultWriteAllowed)
+  // は inherited を安全側に倒す必要があるため demote 済み `mode` のまま — ここは
+  // 消費側 cache のルーティングだけなので raw_mode で問題ない。
   if (!explicitPath && vaultDir) {
     const modeConfigured =
       (process.env.GRAPHRAG_VAULT_MODE ?? "") !== "" ||
       existsSync(path.join(process.cwd(), ".graphrag", ".env"));
-    if (modeConfigured && detectVaultIsolation(process.cwd(), vaultDir).mode === "readonly") {
+    if (modeConfigured && detectVaultIsolation(process.cwd(), vaultDir).raw_mode === "readonly") {
       const consumerDir = consumerCacheDirForVault(vaultDir);
       if (consumerDir) {
         const consumerPath = path.join(consumerDir, "vector.json");

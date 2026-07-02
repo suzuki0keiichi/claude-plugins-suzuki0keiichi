@@ -161,6 +161,15 @@ function lexicalNames(node: any): Set<string> {
   return names;
 }
 
+// schema.ts の STATE_VOCABULARY のうち「もはやこの名前の現役の担い手ではない」ことを
+// 意味する終端 state。Investigation: closed / Decision・OperationalKnowledge: superseded /
+// Goal: achieved・abandoned (active/planned は現役・現役予定なので含めない)。
+// supersede レシピ (state:superseded + 後継が同タイトルを refines で引き継ぐ) が正規の
+// 運用である以上、終端 state の既存ノードとの名前衝突は重複ではなく正当な再利用。
+// check-carving.ts の TERMINAL_STATES は「前提として生きているか」用の別集合 (achieved
+// を意図的に除く) なので、名前の現役性を問うここでは流用せずこちらに定義する。
+const TERMINAL_NAME_STATES = new Set(["superseded", "closed", "achieved", "abandoned"]);
+
 function lexicalExactSuspects(
   candidates: any[],
   currentNodes: any[],
@@ -176,6 +185,7 @@ function lexicalExactSuspects(
       if (!existing || existing.id === candidate.id) continue;
       if (canonicalType(existing.type) !== candidateType) continue;
       if (systemSegment(existing.id) !== candidateSystem) continue;
+      if (TERMINAL_NAME_STATES.has(String(existing.state))) continue;
       const existingNames = lexicalNames(existing);
       let collides = false;
       for (const name of candidateNames) {

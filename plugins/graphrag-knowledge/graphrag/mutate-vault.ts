@@ -29,7 +29,7 @@ import {
 import { embedForIndex } from "./vector.ts";
 import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { countBindingDebt } from "./binding-debt.ts";
-import { readRecentHitIds } from "./cli-ask-state.ts";
+import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
 function writeFileAtomic(abs: string, content: string): void {
@@ -185,21 +185,62 @@ function assertOnBranch(vaultDir: string): void {
   }
 }
 
-function gitCommitVault(vaultDir: string, message: string): string {
+/**
+ * vault へ staged 変更を commit する。pathspec (vault 配下だけに限定した commit) は
+ * merge/cherry-pick/revert 進行中は git 側の制約で一律拒否される
+ * ("cannot do a partial commit during a merge" 等。pathspec が staged 全体と一致していても
+ * 中身は見ずに拒否される)。vault は通常プロジェクト repo 内に同居するので、利用者が
+ * mid-merge のときに typed-add/commit-mutation を叩くと毎回ここで死んでいた。
+ *
+ * 判定: repo 全体の staged 一覧 (pathspec 無し) と vault 配下限定の staged 一覧
+ * (pathspec "." だが cwd=vaultDir で git 自身が解決するので、macOS の /var →
+ * /private/var のような symlink 起因の toplevel ズレを自前の path 計算で踏まない) を
+ * 比較するだけで「vault 外に staged 済みの変更が無い」ことを検証できる。
+ *   - 一致 (vault-only) → pathspec 無しで commit (mid-merge でも通る。安全性は
+ *     「staged 全体が vault 配下だけ」と検証済みであることが担保する)。
+ *   - 不一致 (foreign 混在) → 従来どおり pathspec 付きで commit (`--only` 相当、
+ *     利用者が別所で事前 stage していた変更を巻き込まない)。mid-merge 等で git に
+ *     拒否されたら、この mutation の vault 側 delta は呼び出し元が HEAD へ巻き戻す
+ *     (all-or-nothing) ので、原因と取るべき行動を明示したエラーに変換して投げる。
+ */
+export function gitCommitVault(vaultDir: string, message: string): string {
   // git add は vaultDir を cwd にして "." で stage する。git の toplevel を
   // path.relative で求める方式は、macOS の /var → /private/var シンボリックリンク
   // 解決で root と vaultDir の prefix がずれ、"outside repository" になるため使わない。
   execFileSync("git", ["add", "--", "."], { cwd: vaultDir });
-  // pathspec を vault(.) に限定する。vault はプロジェクト repo 内に置かれるのが通常
-  // 形なので、pathspec 無しの commit は利用者が repo の別所で事前に stage していた
-  // 変更まで巻き込んで確定してしまう。`git commit -- <path>` は --only 相当で、
-  // vault 外の staged 変更を index に残したまま vault 配下だけを commit する
-  // (unborn branch の初回コミットでも動く)。
-  const staged = execFileSync("git", ["diff", "--cached", "--name-only", "--", "."], {
+
+  const allStaged = execFileSync("git", ["diff", "--cached", "--name-only"], {
     cwd: vaultDir,
     encoding: "utf8",
   }).trim();
-  if (staged) execFileSync("git", ["commit", "-q", "-m", message, "--", "."], { cwd: vaultDir });
+  if (!allStaged) return vaultHead(vaultDir); // staged 差分ゼロ (no-op)
+
+  const vaultStaged = execFileSync("git", ["diff", "--cached", "--name-only", "--", "."], {
+    cwd: vaultDir,
+    encoding: "utf8",
+  }).trim();
+
+  if (allStaged === vaultStaged) {
+    // staged 全体が vault 配下だけと検証済みなので pathspec を外して commit する
+    // (mid-merge でも動く形にする)。
+    execFileSync("git", ["commit", "-q", "-m", message], { cwd: vaultDir });
+  } else {
+    try {
+      execFileSync("git", ["commit", "-q", "-m", message, "--", "."], { cwd: vaultDir });
+    } catch (e: any) {
+      const err: any = new Error(
+        `git commit failed because unrelated (non-vault) files are also staged in this repo, which ` +
+          `requires a pathspec-limited commit — but git refuses pathspec-limited commits during an ` +
+          `in-progress merge/cherry-pick/revert. The vault change was rolled back (all-or-nothing). ` +
+          `Finish or abort the in-progress operation (e.g. \`git merge --continue\` / \`git merge --abort\`), ` +
+          `or unstage/commit the unrelated files outside the vault, then retry. ` +
+          `Underlying error: ${String(e?.message ?? e)}`
+      );
+      err.code = "PATHSPEC_COMMIT_BLOCKED";
+      err.cause = e;
+      throw err;
+    }
+  }
   return vaultHead(vaultDir);
 }
 
@@ -545,7 +586,11 @@ export async function applyMutationToVault(args: {
   // ask-trail 直近ヒット: premise_candidates と ask-precheck 観測 (下記) の両方が使う。
   let recentHitIds: string[] = [];
   try {
-    recentHitIds = sd.recentHitIds ? sd.recentHitIds() : readRecentHitIds(cacheDir);
+    // ask 側 (runAsk) と同じ解決関数を使う。ここを cacheDir (cacheDirUnder(stateDirForVault))
+    // 決め打ちのまま読むと、GRAPHRAG_STATE_DIR を設定した環境では ask が記録した場所と
+    // 書き込み側が読む場所がずれ、precheck advisory が常に「ヒット無し」の誤情報になる (#10)。
+    const askStateDir = sd.recentHitIds ? null : resolveAskStateDir(vaultDir);
+    recentHitIds = sd.recentHitIds ? sd.recentHitIds() : askStateDir ? readRecentHitIds(askStateDir) : [];
   } catch {
     recentHitIds = []; // ask-state 読めずでも非致命
   }

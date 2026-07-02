@@ -8,7 +8,7 @@ import {
   loadDotEnvFromCwd, bindClosestVaultDir,
   stateDirUnder, stateDirForVault, discoverStateDir,
   cacheDirUnder, cacheDirForVault, consumerCacheDirForVault,
-  detectVaultIsolation, assertVaultWriteAllowed
+  detectVaultIsolation, assertVaultWriteAllowed, resetWorktreeModeWarningForTest
 } from "./cli-env.ts";
 import { execFileSync } from "node:child_process";
 
@@ -99,13 +99,30 @@ test("consumerCacheDirForVault: ローカルに .graphrag が無ければ null",
 
 // ── vault mode / 書き込みゲート ──
 
-test("GRAPHRAG_VAULT_MODE=worktree は未実装として明確に拒否する", () => {
+// #1 回帰: mode は「書き込み」ポリシー。legacy な worktree 値が .env に残っている
+// アップグレード後の環境でも、ask のような read verb は死んではいけない。
+test("GRAPHRAG_VAULT_MODE=worktree はもう read を落とさない (未設定扱い + stderr 警告 1 回)", () => {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), "mode-wt-")));
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  const warnings: string[] = [];
+  process.stderr.write = ((chunk: any) => { warnings.push(String(chunk)); return true; }) as any;
   try {
     mkdirSync(path.join(root, ".graphrag"), { recursive: true });
     writeFileSync(path.join(root, ".graphrag", ".env"), "GRAPHRAG_VAULT_MODE=worktree\n");
-    assert.throws(() => detectVaultIsolation(root), /not implemented.*readonly or direct/);
+    resetWorktreeModeWarningForTest();
+
+    const isolation1 = detectVaultIsolation(root);
+    assert.equal(isolation1.mode, null);
+    assert.equal(isolation1.raw_mode, null);
+
+    // 同一プロセス内で複数回呼んでも警告は 1 回だけ (ask は複数回 detectVaultIsolation を呼びうる)。
+    detectVaultIsolation(root);
+    detectVaultIsolation(root);
+    const wtWarnings = warnings.filter((w) => /GRAPHRAG_VAULT_MODE=worktree is not implemented/.test(w));
+    assert.equal(wtWarnings.length, 1);
   } finally {
+    process.stderr.write = originalWrite;
+    resetWorktreeModeWarningForTest();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -149,6 +166,71 @@ test("assertVaultWriteAllowed: 外部 vault + ローカル mode 無しは拒否 
     );
   } finally {
     rmSync(cwdRepo, { recursive: true, force: true });
+    rmSync(vaultRepo, { recursive: true, force: true });
+  }
+});
+
+// #3 回帰: 制限的な (readonly) 設定は継承してよい。demote 後の `mode` は
+// worktree ごとの再宣言を要求するために null になるが、`raw_mode` は
+// inherited でも parse 結果をそのまま持ち続け、消費側 cache のルーティングに使える。
+test("detectVaultIsolation: 外部 vault + inherited readonly は mode を demote するが raw_mode は保つ", () => {
+  const parentRepo = realpathSync(mkdtempSync(path.join(tmpdir(), "raw-parent-")));
+  const vaultRepo = realpathSync(mkdtempSync(path.join(tmpdir(), "raw-vault-")));
+  const original = process.env.GRAPHRAG_VAULT_MODE;
+  try {
+    for (const repo of [parentRepo, vaultRepo]) {
+      execFileSync("git", ["-C", repo, "init", "-q"]);
+    }
+    const vaultDir = path.join(vaultRepo, "vault");
+    mkdirSync(vaultDir, { recursive: true });
+
+    // 親の .graphrag/.env を worktree (子) が継承した状態を process.env で再現する
+    // (discoverAndLoadGraphragEnv が実際の CLI 起動シーケンスでこれをやる)。
+    process.env.GRAPHRAG_VAULT_MODE = "readonly";
+    const worktreeSub = path.join(parentRepo, ".claude", "worktrees", "child");
+    mkdirSync(worktreeSub, { recursive: true });
+
+    const isolation = detectVaultIsolation(worktreeSub, vaultDir);
+    assert.equal(isolation.mode_source, "inherited");
+    assert.equal(isolation.mode, null, "demote: worktree ごとのローカル決定を要求する");
+    assert.equal(isolation.raw_mode, "readonly", "raw_mode は demote されない");
+  } finally {
+    if (original === undefined) delete process.env.GRAPHRAG_VAULT_MODE;
+    else process.env.GRAPHRAG_VAULT_MODE = original;
+    rmSync(parentRepo, { recursive: true, force: true });
+    rmSync(vaultRepo, { recursive: true, force: true });
+  }
+});
+
+// #3 回帰: raw_mode の追加で書き込みゲートの意味は変わらない。inherited な direct は
+// 依然として外部 vault への書き込みを許可しない (demotion の理由そのもの)。
+test("assertVaultWriteAllowed: inherited な direct は外部 vault への書き込みを許可しない", () => {
+  const parentRepo = realpathSync(mkdtempSync(path.join(tmpdir(), "wg-parent-")));
+  const vaultRepo = realpathSync(mkdtempSync(path.join(tmpdir(), "wg-vault-")));
+  const original = process.env.GRAPHRAG_VAULT_MODE;
+  try {
+    for (const repo of [parentRepo, vaultRepo]) {
+      execFileSync("git", ["-C", repo, "init", "-q"]);
+    }
+    const vaultDir = path.join(vaultRepo, "vault");
+    mkdirSync(vaultDir, { recursive: true });
+
+    process.env.GRAPHRAG_VAULT_MODE = "direct";
+    const worktreeSub = path.join(parentRepo, ".claude", "worktrees", "child");
+    mkdirSync(worktreeSub, { recursive: true });
+
+    assert.throws(
+      () => assertVaultWriteAllowed({ cwd: worktreeSub, vaultDir }),
+      (e: any) => {
+        assert.match(e.message, /external/);
+        assert.match(e.message, /parent directory has a mode setting/);
+        return true;
+      }
+    );
+  } finally {
+    if (original === undefined) delete process.env.GRAPHRAG_VAULT_MODE;
+    else process.env.GRAPHRAG_VAULT_MODE = original;
+    rmSync(parentRepo, { recursive: true, force: true });
     rmSync(vaultRepo, { recursive: true, force: true });
   }
 });

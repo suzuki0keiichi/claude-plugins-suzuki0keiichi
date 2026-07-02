@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMode } from "./cli-env.ts";
 
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 時間
 const STATE_FILENAME = "ask-state.json";
@@ -21,6 +22,24 @@ export function fingerprintQuestion(question: string): string {
 
 function stateFilePath(baseDir: string): string {
   return path.join(baseDir, STATE_FILENAME);
+}
+
+/**
+ * ask-state (呼び出し回数 / ask-trail) の置き場所を解決する単一の関数。
+ * 読み手 (runAsk) と書き手 (mutate-vault の ask-trail 読み) が別ロジックで解決すると、
+ * GRAPHRAG_STATE_DIR を設定した環境では ask が記録した場所と書き込み側が読む場所が
+ * ずれ、write 側の precheck advisory が常に「ヒット無し」の誤情報になる (#10)。
+ * 両側はこの関数を経由すること。
+ *   1. GRAPHRAG_STATE_DIR 明示 → その cache/ (E1)
+ *   2. readonly mode → 消費側ローカルの cache/external/<hash>/ (E3)。ローカル root が
+ *      見つからなければ null = 永続化 skip (勝手にディレクトリを掘らない)
+ *   3. それ以外 → vault を保持する .graphrag の cache/
+ */
+export function resolveAskStateDir(vaultDir: string, mode: VaultMode | null = null): string | null {
+  const explicit = process.env.GRAPHRAG_STATE_DIR;
+  if (explicit) return cacheDirUnder(explicit);
+  if (mode === "readonly") return consumerCacheDirForVault(vaultDir);
+  return cacheDirForVault(vaultDir);
 }
 
 export function loadAskState(baseDir: string): AskState {

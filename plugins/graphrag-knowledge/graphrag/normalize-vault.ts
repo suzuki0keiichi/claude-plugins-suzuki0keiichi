@@ -19,10 +19,9 @@
  */
 
 import { existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { importVault } from "./import-vault.ts";
-import { writeVaultDelta } from "./mutate-vault.ts";
+import { writeVaultDelta, gitCommitVault } from "./mutate-vault.ts";
 import { canonicalType, NODE_TYPE_ALIASES, type SchemaDefinition } from "./schema.ts";
 
 // NODE_TYPE_ALIASES から ID prefix の正規化マップを導出。
@@ -109,26 +108,17 @@ export function normalizeVault(
   // 4. vault に書き出し
   const delta = writeVaultDelta(vaultAbs, graph);
 
-  // 5. git commit (変更があれば)
+  // 5. git commit (変更があれば)。commit ロジックは mutate-vault.gitCommitVault に
+  // 一本化 (vault-only staged なら mid-merge でも通る pathspec 無し commit、foreign
+  // staged が混じる時だけ pathspec 付き commit → mid-merge なら actionable error)。
+  // normalize-vault は git 不在環境でも動く best-effort ツールなので、ここでの失敗
+  // (actionable error 含む) は従来どおり黙って握り潰し、ファイル書き出しの成功だけ返す。
   let head: string | null = null;
   if (opts.git !== false && (delta.written.length > 0 || delta.removed.length > 0)) {
     try {
-      execFileSync("git", ["add", "--", "."], { cwd: vaultAbs });
-      // pathspec を vault(.) に限定する (mutate-vault.gitCommitVault と同じ理由):
-      // pathspec 無しの commit は利用者が repo の別所で stage していた変更を巻き込む。
-      const staged = execFileSync("git", ["diff", "--cached", "--name-only", "--", "."], {
-        cwd: vaultAbs, encoding: "utf8"
-      }).trim();
-      if (staged) {
-        execFileSync("git", ["commit", "-q", "-m", "graphrag: normalize vault types/ids to canonical", "--", "."], {
-          cwd: vaultAbs
-        });
-      }
-      head = execFileSync("git", ["-C", vaultAbs, "rev-parse", "HEAD"], {
-        encoding: "utf8"
-      }).trim();
+      head = gitCommitVault(vaultAbs, "graphrag: normalize vault types/ids to canonical");
     } catch {
-      // git が使えない環境でもファイル書き出しは成功している
+      // git が使えない環境・mid-merge 等でもファイル書き出しは成功している
     }
   }
 

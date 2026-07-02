@@ -42,7 +42,7 @@ import {
 } from "./cli-typed-add-project.ts";
 import { buildGraphBrief } from "./brief.ts";
 import { buildEvidencePacket } from "./evidence-packet.ts";
-import { bumpCallCount } from "./cli-ask-state.ts";
+import { bumpCallCount, resolveAskStateDir } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
 import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph, vaultVectorIndexReadPath } from "./retrieval.ts";
@@ -373,20 +373,6 @@ export function shouldEscalate(stageOutcome: { match_confidence?: string; result
   return true;
 }
 
-/**
- * ask-state (呼び出し回数 / ask-trail) の置き場所を解決する。
- *   1. GRAPHRAG_STATE_DIR 明示 → その cache/ (E1)
- *   2. readonly mode → 消費側ローカルの cache/external/<hash>/ (E3)。ローカル root が
- *      見つからなければ null = 永続化 skip (勝手にディレクトリを掘らない)
- *   3. それ以外 → vault を保持する .graphrag の cache/
- */
-function resolveAskStateDir(vaultDir: string, mode: VaultMode | null): string | null {
-  const explicit = process.env.GRAPHRAG_STATE_DIR;
-  if (explicit) return cacheDirUnder(explicit);
-  if (mode === "readonly") return consumerCacheDirForVault(vaultDir);
-  return cacheDirForVault(vaultDir);
-}
-
 export async function runAsk(argv: string[]) {
   const f = parseFlagsArgv(argv);
   const positional = f._positional as string[];
@@ -419,7 +405,7 @@ export async function runAsk(argv: string[]) {
   // 外部側に書かず、消費側ローカルの cache/external/<hash>/ へ (E3)。
   // 置き場所を解決できない場合は永続化を skip する (ディレクトリを勝手に掘らない)。
   const isolation = detectVaultIsolation(process.cwd(), vaultDir);
-  const askStateDir = resolveAskStateDir(vaultDir, isolation.mode);
+  const askStateDir = resolveAskStateDir(vaultDir, isolation.raw_mode);
   const callNumber = askStateDir ? bumpCallCount(question, askStateDir) : 1;
 
   // Pre-share retrieval inputs across stages: load graph + vector index once and
@@ -636,7 +622,14 @@ async function runCarve(argv: string[]) {
   // E4: GRAPHRAG_VECTOR_INDEX_PATH は「vault 索引」専用の env であり、carve は読まない。
   // 単一値を共用すると carve のコードグラフ索引が vault の embedding を黙って潰す。
   // carve の索引は常に stage-local (対象 root の cache/) に置く。
-  const vectorIndexPath = path.join(cacheDir, "vector-index.json");
+  //
+  // 読みは cache/ (新) → legacy (.graphrag 直下、E1 移行前) の順にフォールバックする
+  // (retrieval.vaultVectorIndexReadPath と同じパターン)。これが無いと、E1 で
+  // cache/ に移る前に作った vector-index.json がアップグレード後に無視され、
+  // コードベース全体の再 embed を強制していた。書き込み (再構築) は常に新パス。
+  const vectorIndexWritePath = path.join(cacheDir, "vector-index.json");
+  const legacyVectorIndexPath = path.join(stateDir, "vector-index.json");
+  let vectorIndexPath = preferExisting(vectorIndexWritePath, legacyVectorIndexPath);
 
   // If no vector index, auto-build from index output and proceed to suggest steps
   // (avoids the manual round-trip of "carve → vector-index → carve again" even on first run).
@@ -646,7 +639,8 @@ async function runCarve(argv: string[]) {
   if (!vectorIndexReady) {
     process.stderr.write(`[carve] vector index not found at ${vectorIndexPath} → 自動構築を試みる\n`);
     try {
-      await buildAndWriteVectorIndex({ out: vectorIndexPath }, { graphObject: indexed });
+      await buildAndWriteVectorIndex({ out: vectorIndexWritePath }, { graphObject: indexed });
+      vectorIndexPath = vectorIndexWritePath;
       vectorIndexReady = true;
       process.stderr.write(`[carve]   → built ${vectorIndexPath}\n`);
     } catch (error) {

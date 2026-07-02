@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import { validateGraph, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
 export async function loadMutationPlan(planPath) {
@@ -115,14 +116,22 @@ export function applyMutationToGraph(graph, plan, audit?: { cascadedEdgeIds: str
     if (mutationOp(node) === "create") {
       nextNodes.push(withOutOp);
     } else if (index !== -1) {
-      const merged = mergeMutationEntity(nextNodes[index], node);
-      // op:update = 「今この時点で再検証された」。generated_at を now に進めないと
-      // staleness-check が作成時点からのコミット数を数え続け、手入れされたノードが
-      // 永遠に stale 扱いになる。plan が generated_at を明示した場合はそれを尊重する。
+      const current = nextNodes[index];
+      const merged = mergeMutationEntity(current, node);
+      // op:update = 「今この時点で再検証された」。ただし generated_at を進めてよいのは
+      // 実際に中身が変わった時だけ。無変更 patch まで進めると re-apply のたびに
+      // 内容が動き、writeVaultDelta の差分検知が誤爆して無用な vault commit と
+      // OCC の stale base 誤判定を生む (update idempotence の破壊)。
+      // plan が generated_at を明示した場合は「他が無変更でも」その値を必ず尊重する
+      // (明示的な再検証スタンプは正当な更新)。
       const patchStampsGeneratedAt = mutationEntityFields(node).generated_at !== undefined;
-      nextNodes[index] = patchStampsGeneratedAt
-        ? merged
-        : { ...merged, generated_at: new Date().toISOString() };
+      if (patchStampsGeneratedAt) {
+        nextNodes[index] = merged;
+      } else if (entityContentChanged(current, merged)) {
+        nextNodes[index] = { ...merged, generated_at: new Date().toISOString() };
+      } else {
+        nextNodes[index] = merged;
+      }
     }
   }
 
@@ -204,6 +213,17 @@ function stripNullFields(entity) {
     if (value === null) delete out[key];
   }
   return out;
+}
+
+// generated_at を進めるべきかの判定材料。generated_at 自体はここでは無視する
+// (それを進めるかどうかを決めるための比較なので、それ自身の差は判定に使えない)。
+function entityContentChanged(current, merged) {
+  const keys = new Set([...Object.keys(current), ...Object.keys(merged)]);
+  keys.delete("generated_at");
+  for (const key of keys) {
+    if (!isDeepStrictEqual(current[key], merged[key])) return true;
+  }
+  return false;
 }
 
 export function mergeMutationEntity(current, patch) {

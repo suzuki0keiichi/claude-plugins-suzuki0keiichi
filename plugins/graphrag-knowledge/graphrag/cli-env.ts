@@ -223,6 +223,12 @@ export interface VaultIsolation {
   in_worktree: boolean;
   vault_external: boolean;
   mode: VaultMode | null;
+  // needsLocalDecision で null に demote される前の、生の parse 結果。
+  // 制限的 (readonly) な設定は worktree をまたいで「継承してよい」— 消費側
+  // cache のような読み取り経路のルーティングはこちらを見る。書き込みゲート
+  // (assertVaultWriteAllowed) は demote 後の `mode` を見続ける (inherited な
+  // direct が書き込みを許可してはいけないので)。
+  raw_mode: VaultMode | null;
   mode_source: "local" | "inherited" | "none";
   message: string | null;
 }
@@ -243,17 +249,35 @@ function isWorktree(dir: string): boolean {
   } catch { return false; }
 }
 
+// worktree 値の警告は process あたり 1 回だけ出す (read verb は ask 等で
+// detectVaultIsolation を複数回呼びうるため、毎回吠えるとログが埋まる)。
+let warnedWorktreeMode = false;
+
 function parseVaultMode(raw: string | undefined): VaultMode | null {
   if (raw === "readonly") return "readonly";
   if (raw === "direct") return "direct";
   if (raw === "worktree") {
-    // 以前は受理して guard が direct 同然に扱う (黙って隔離なしで書く) という
-    // 最悪の形だった。未実装は未実装と大声で言う。
-    throw new Error(
-      "GRAPHRAG_VAULT_MODE=worktree is not implemented. Use readonly or direct."
-    );
+    // mode は「書き込み」のポリシーであって、読み専用 verb (ask 等) の生死には
+    // 関わらない。以前はここで throw しており、アップグレード後の環境で
+    // .env に legacy な worktree が残っているだけで ask すら死んでいた。
+    // 未実装であることは伝えつつ、read path を殺さないよう unset 扱いにする。
+    // 書き込みは (mode が null のまま) assertVaultWriteAllowed の
+    // 「外部 vault なのに mode 未設定」ゲートで安全側に止まる。
+    if (!warnedWorktreeMode) {
+      warnedWorktreeMode = true;
+      process.stderr.write(
+        "[graphrag] GRAPHRAG_VAULT_MODE=worktree is not implemented, treating as unset — " +
+        "writes to an external vault will hard-error until you set readonly|direct.\n"
+      );
+    }
+    return null;
   }
   return null;
+}
+
+/** テスト用: 「worktree 警告済み」フラグをリセットする (module state のため)。 */
+export function resetWorktreeModeWarningForTest(): void {
+  warnedWorktreeMode = false;
 }
 
 /**
@@ -280,6 +304,11 @@ function readLocalVaultMode(cwd: string): { mode: VaultMode | null; source: "loc
  * walk-up で親から拾った process.env の GRAPHRAG_VAULT_MODE は
  * mode_source: "inherited" として区別し、外部 vault の場合は
  * inherited mode でも安全ゲートを通す（ローカル設定を要求する）。
+ *
+ * `mode` は書き込みゲート用に demote 済み (外部 vault でローカル未決定なら null)。
+ * 読み取り経路 (消費側 cache のルーティング等) は demote 前の `raw_mode` を見る —
+ * readonly のような制限的な設定は worktree をまたいで継承してよく、
+ * inherited だからといって null 扱いにして外部 vault に書いてしまってはいけない。
  */
 export function detectVaultIsolation(cwd: string = process.cwd(), vaultDirOverride?: string): VaultIsolation {
   const vaultDir = vaultDirOverride ?? process.env.GRAPHRAG_VAULT_DIR;
@@ -287,7 +316,7 @@ export function detectVaultIsolation(cwd: string = process.cwd(), vaultDirOverri
 
   const worktree = isWorktree(cwd);
   if (!vaultDir) {
-    return { in_worktree: worktree, vault_external: false, mode, mode_source: source, message: null };
+    return { in_worktree: worktree, vault_external: false, mode, raw_mode: mode, mode_source: source, message: null };
   }
 
   const cwdRepo = gitToplevel(cwd);
@@ -310,6 +339,7 @@ export function detectVaultIsolation(cwd: string = process.cwd(), vaultDirOverri
     in_worktree: worktree,
     vault_external: external,
     mode: needsLocalDecision ? null : mode,
+    raw_mode: mode,
     mode_source: source,
     message
   };

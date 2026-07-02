@@ -1,6 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { normalizeVault } from "./normalize-vault.ts";
 import { buildVaultFiles } from "./build-vault.ts";
@@ -120,5 +122,52 @@ describe("normalize-vault", () => {
     assert.ok(!existsSync(path.join(vault, "Vein")), "Vein/ pruned");
 
     rmSync(TMP, { recursive: true, force: true });
+  });
+});
+
+// ── #4: normalize-vault の git commit も mutate-vault.gitCommitVault を共用する ──
+describe("normalize-vault: git commit (mid-merge, #4)", () => {
+  test("vault だけ staged の mid-merge (MERGE_HEAD 存在) でも commit できる (pathspec 無し commit)", () => {
+    const repo = mkdtempSync(path.join(tmpdir(), "normvault-repo-"));
+    try {
+      execFileSync("git", ["-C", repo, "init", "-q"]);
+      execFileSync("git", ["-C", repo, "config", "user.email", "t@t"]);
+      execFileSync("git", ["-C", repo, "config", "user.name", "t"]);
+      const vault = path.join(repo, "vault");
+      writeVault(vault, {
+        nodes: [{ id: "vein:s:auth", type: "Vein", title: "認証", summary: "横断" }],
+        edges: [],
+      });
+      execFileSync("git", ["-C", repo, "add", "."]);
+      execFileSync("git", ["-C", repo, "commit", "-q", "-m", "seed"]);
+      const base = execFileSync("git", ["-C", repo, "symbolic-ref", "--short", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+
+      // feature/main とも vault 配下だけを (非重複に) 変更して分岐させる。foreign な
+      // ファイルには一切触れないので merge 自体の staged 差分も vault 配下だけになる。
+      execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "feature"]);
+      writeFileSync(path.join(vault, "side-feature.txt"), "feature\n");
+      execFileSync("git", ["-C", repo, "add", "-A"]);
+      execFileSync("git", ["-C", repo, "commit", "-q", "-m", "feature touches vault only"]);
+
+      execFileSync("git", ["-C", repo, "checkout", "-q", base]);
+      writeFileSync(path.join(vault, "side-main.txt"), "main\n");
+      execFileSync("git", ["-C", repo, "add", "-A"]);
+      execFileSync("git", ["-C", repo, "commit", "-q", "-m", "main touches vault only"]);
+
+      execFileSync("git", ["-C", repo, "merge", "--no-commit", "-q", "feature"]);
+      assert.ok(existsSync(path.join(repo, ".git", "MERGE_HEAD")), "前提: MERGE_HEAD が存在");
+
+      // Vein/ → Concern/ への正規化で追加の vault 差分が出る (normalizeVault 自身の commit 対象)。
+      const result = normalizeVault(vault, { git: true });
+      assert.ok(result.head, "mid-merge でも commit が成立し HEAD が返る");
+      assert.ok(
+        !existsSync(path.join(repo, ".git", "MERGE_HEAD")),
+        "commit で merge も確定し MERGE_HEAD は消える"
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

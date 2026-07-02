@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fingerprintQuestion, bumpCallCount, loadAskState, saveAskState, gcAskState, recordAskHits, readRecentHitIds } from "./cli-ask-state.ts";
+import { fingerprintQuestion, bumpCallCount, loadAskState, saveAskState, gcAskState, recordAskHits, readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 
 test("fingerprintQuestion is stable and short", () => {
   const a = fingerprintQuestion("hello world");
@@ -157,5 +157,57 @@ test("loadAskState: cache/ に無ければ legacy (.graphrag 直下) を読み�
     assert.equal(migrated["legacyfp"]?.count, 2, "legacy のエントリも新パスに引き継がれる");
   } finally {
     rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+// ── #10: resolveAskStateDir — 読み手 (ask) と書き手 (mutate-vault) を同じ解決に一本化 ──
+
+test("resolveAskStateDir: GRAPHRAG_STATE_DIR が明示されていれば最優先でその cache/ を返す", () => {
+  const prevEnv = process.env.GRAPHRAG_STATE_DIR;
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-resolve-explicit-"));
+  try {
+    process.env.GRAPHRAG_STATE_DIR = dir;
+    const resolved = resolveAskStateDir("/some/unrelated/vault/dir");
+    assert.equal(resolved, path.join(dir, "cache"));
+  } finally {
+    if (prevEnv === undefined) delete process.env.GRAPHRAG_STATE_DIR;
+    else process.env.GRAPHRAG_STATE_DIR = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveAskStateDir: GRAPHRAG_STATE_DIR 未設定なら vault の隣の .graphrag/cache", () => {
+  const prevEnv = process.env.GRAPHRAG_STATE_DIR;
+  delete process.env.GRAPHRAG_STATE_DIR;
+  const root = mkdtempSync(path.join(tmpdir(), "askstate-resolve-vault-"));
+  try {
+    const vault = path.join(root, "vault");
+    mkdirSync(vault, { recursive: true });
+    const resolved = resolveAskStateDir(vault);
+    assert.equal(resolved, path.join(root, ".graphrag", "cache"));
+  } finally {
+    if (prevEnv !== undefined) process.env.GRAPHRAG_STATE_DIR = prevEnv;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAskStateDir: GRAPHRAG_STATE_DIR 設定時、共有解決関数で記録したヒットは同じ関数経由で読める", () => {
+  // #10 再現防止: ask 側 (record) と書き込み側 (read) が別ロジックで state dir を
+  // 決めると、GRAPHRAG_STATE_DIR を設定した環境では永遠にヒットが見えなくなっていた。
+  const prevEnv = process.env.GRAPHRAG_STATE_DIR;
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-resolve-rw-"));
+  try {
+    process.env.GRAPHRAG_STATE_DIR = dir;
+    const vaultDir = "/some/vault/that/does/not/matter/once/GRAPHRAG_STATE_DIR/is/set";
+    const askDirForRecord = resolveAskStateDir(vaultDir)!;
+    recordAskHits("q1", ["decision:s:a"], askDirForRecord);
+    // 別々の呼び出しでも (readonly mode 等の分岐が無い限り) 同じ解決結果になる。
+    const askDirForRead = resolveAskStateDir(vaultDir)!;
+    assert.equal(askDirForRead, askDirForRecord);
+    assert.deepEqual(readRecentHitIds(askDirForRead), ["decision:s:a"]);
+  } finally {
+    if (prevEnv === undefined) delete process.env.GRAPHRAG_STATE_DIR;
+    else process.env.GRAPHRAG_STATE_DIR = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
