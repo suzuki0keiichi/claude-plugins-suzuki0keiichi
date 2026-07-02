@@ -15,6 +15,9 @@ import { canonicalType } from "./schema.ts";
 // relations モードは write-time の relations 副産物 (duplicate-check) と同じ帯・同じ思想。
 // 閾値はあちらの単一正本を import して共有する (band がズレると「書けたのに後で別基準」になる)。
 import { RELATION_BAND_LOW, RELATION_BAND_HIGH } from "./duplicate-check.ts";
+// エッジ id 規約と「実装 File」判定は単一正本を共有する (binding_debt / typed-add と同一)。
+import { edgeId } from "./cli-typed-add.ts";
+import { isImplFileBinding } from "./binding-debt.ts";
 
 // ── E0 書き込み時 binding 提案の中核 ──────────────────────────────────────
 // suggest-policy-edges の CLI も書き込み時提案 (mutate-vault) も、同じ
@@ -32,12 +35,13 @@ export const BINDING_EDGE_TYPE_BY_NODE: Record<string, string> = {
   Constraint: "constrains",
 };
 
-// typed-add verb は知識型ごとに違う。binding 候補に「そのまま実行できる確定手段」を
-// 添えるため、型 → verb と紐付けフラグの対応をここで持つ。
+// typed-add verb は知識型ごとに違う。binding 候補に「ノード作成前なら使える CLI 手段」を
+// 添えるため、型 → verb と紐付けフラグの対応をここで持つ。フラグは typed-add に実在する
+// ものに限る (OK の documented_by は --evidence フラグが担う。--documented-by は存在しない)。
 const BINDING_VERB_BY_NODE: Record<string, { verb: string; flag: string }> = {
   Decision: { verb: "add-decision", flag: "--sets-policy-for" },
   Risk: { verb: "add-risk", flag: "--risks-in" },
-  OperationalKnowledge: { verb: "add-ok", flag: "--documented-by" },
+  OperationalKnowledge: { verb: "add-ok", flag: "--evidence" },
   Constraint: { verb: "add-constraint", flag: "--constrains" },
 };
 
@@ -48,18 +52,25 @@ function vnorm(v: number[]): number {
 }
 
 // docs/knowhow/plans/design-decisions の File は「出所」であって実装ファイルではない。
-// binding (方針が効く実装) の候補からは除外する (suggest-policy-edges の従来基準と一致)。
-function isImplFileId(id: string): boolean {
-  return id.startsWith("file:") && !/docs\/knowhow\/|plans\/|docs\/design-decisions\//.test(id);
-}
+// binding (方針が効く実装) の候補からは除外する (単一正本: binding-debt.isImplFileBinding)。
+const isImplFileId = isImplFileBinding;
 
 export type BindingCandidate = {
   file_id: string;
   path?: string;
   title?: string;
+  summary?: string;
   similarity: number;
-  // LLM/人間がそのまま実行できる確定手段 (typed-add フラグ断片)。
-  apply: { verb: string; flag: string; example: string };
+  // LLM/人間がそのまま実行できる確定手段。
+  // plan_fragment: 既存ノードへ後付けするエッジの commit-mutation 断片 (そのまま
+  //   plan.edges に貼れる)。「同じ add-* を再実行」は node already exists で失敗するため、
+  //   書き込み後の提案には実行可能なこちらを正とする。
+  // verb/flag: ノード作成「前」なら typed-add の当該フラグで同じエッジを一発付与できる。
+  apply: {
+    plan_fragment: { op: "create"; id: string; type: string; from: string; to: string };
+    verb: string;
+    flag: string;
+  };
 };
 
 export type NodeBindingSuggestion = {
@@ -121,6 +132,7 @@ export async function suggestBindingsForNodes(args: {
       const sim = dot / (nNorm * fNorm);
       if (sim < threshold) continue;
       const verb = BINDING_VERB_BY_NODE[ctype];
+      const edgeType = BINDING_EDGE_TYPE_BY_NODE[ctype];
       const meta = fileMeta.get(r.node_id) ?? {};
       cands.push({
         file_id: r.node_id,
@@ -128,10 +140,16 @@ export async function suggestBindingsForNodes(args: {
         title: meta.title,
         similarity: Number(sim.toFixed(4)),
         apply: {
+          // そのまま commit-mutation の plan.edges に貼れる断片 (edgeId 規約は typed-add と同一)。
+          plan_fragment: {
+            op: "create",
+            id: edgeId(node.id, edgeType, r.node_id),
+            type: edgeType,
+            from: node.id,
+            to: r.node_id,
+          },
           verb: verb.verb,
           flag: verb.flag,
-          // そのまま実行できる断片: <verb> ... <flag> <file-id>
-          example: `${verb.verb} --slug <slug> ... ${verb.flag} ${r.node_id}`,
         },
       });
     }
@@ -331,8 +349,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   // 既存紐付けマップ (--missing-only 用)
   const out: Record<string, any[]> = {};
   for (const e of graph.edges) (out[e.from] = out[e.from] || []).push(e);
-  const isImplFile = (toId: string) =>
-    toId.startsWith("file:") && !/docs\/knowhow\/|plans\/|docs\/design-decisions\//.test(toId);
+  const isImplFile = isImplFileBinding;
   // binding 済み判定は型ごと。
   // - D/OK/R: sets_policy_for または documented_by が実装 File 宛 (従来定義)
   // - Constraint: constrains エッジが 1 本でもあれば skip

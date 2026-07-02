@@ -115,7 +115,14 @@ export function applyMutationToGraph(graph, plan, audit?: { cascadedEdgeIds: str
     if (mutationOp(node) === "create") {
       nextNodes.push(withOutOp);
     } else if (index !== -1) {
-      nextNodes[index] = mergeMutationEntity(nextNodes[index], node);
+      const merged = mergeMutationEntity(nextNodes[index], node);
+      // op:update = 「今この時点で再検証された」。generated_at を now に進めないと
+      // staleness-check が作成時点からのコミット数を数え続け、手入れされたノードが
+      // 永遠に stale 扱いになる。plan が generated_at を明示した場合はそれを尊重する。
+      const patchStampsGeneratedAt = mutationEntityFields(node).generated_at !== undefined;
+      nextNodes[index] = patchStampsGeneratedAt
+        ? merged
+        : { ...merged, generated_at: new Date().toISOString() };
     }
   }
 

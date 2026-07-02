@@ -492,3 +492,82 @@ test("carving-check: temporary_relation_candidate が無ければ WARN は出な
   const { out } = runCheck(graph);
   assert.doesNotMatch(out, /temporary-relation-remaining/);
 });
+
+// ── summary_provisional の免除会計 (builtin-orphan / role 閉集合は ERROR にしない) ──
+
+test("carving-check: summary_provisional はソース File で ERROR、builtin-orphan/role 免除は INFO 別勘定", () => {
+  const graph = {
+    nodes: [
+      // ERROR 対象: 実装ソース (Component 未所属の component-coverage ERROR も出るが本題ではない)
+      { ...fileNode("src/core.ts", "source"), summary_provisional: true },
+      // 免除 (builtin): lockfile はそもそも embedding から除外され意味要約を強制しない
+      { ...fileNode("pnpm-lock.yaml", "config"), summary_provisional: true },
+      // 免除 (role 閉集合): documentation
+      { ...fileNode("docs/readme.md", "documentation"), summary_provisional: true },
+    ],
+    edges: [],
+  };
+  const { out } = runCheck(graph);
+  assert.match(out, /\[ERROR\] summary-provisional/, "ソース File は従来どおり ERROR");
+  assert.match(out, /summary-provisional-exempt/, "免除分は INFO で別勘定");
+  // ERROR 側の details に免除 File が混ざらない (ERROR は 1 件のみ)
+  assert.match(out, /summary_provisional\): 1件 \[File:1\]/);
+  assert.match(out, /免除対象.*: 2件/);
+});
+
+test("carving-check: summary_provisional が免除 File のみなら ERROR ゼロ (exit 0)", () => {
+  const pocket = { id: "component:s:core", type: "Component", title: "中核", summary: "core" };
+  const impl = fileNode("src/impl.ts", "source"); // Component 所属でカバレッジ ERROR を防ぐ
+  const graph = {
+    nodes: [
+      pocket,
+      impl,
+      { ...fileNode("pnpm-lock.yaml", "config"), summary_provisional: true },
+    ],
+    edges: [{ id: "ev0", type: "evidenced_by", from: pocket.id, to: impl.id }],
+  };
+  const { code, out } = runCheck(graph);
+  assert.equal(code, 0, "免除 File の provisional だけでは fail しない");
+  assert.doesNotMatch(out, /\[ERROR\] summary-provisional/);
+  assert.match(out, /summary-provisional-exempt/);
+});
+
+test("carving-check: Component/Layer 候補の summary_provisional は従来どおり ERROR", () => {
+  const graph = {
+    nodes: [
+      { id: "layer:s:found", type: "Layer", title: "基盤層", summary: "x", summary_provisional: true },
+    ],
+    edges: [],
+  };
+  const { code, out } = runCheck(graph);
+  assert.equal(code, 1);
+  assert.match(out, /\[ERROR\] summary-provisional/);
+  assert.match(out, /Layer:1/);
+});
+
+// ── superseded-no-successor (置き換え宣言の片肺検出) ─────────────────────────
+
+test("carving-check: state:superseded で後継からの refines が無ければ WARN", () => {
+  const graph = {
+    nodes: [
+      { id: "decision:s:old", type: "Decision", title: "旧方針", summary: "d", state: "superseded" },
+    ],
+    edges: [],
+  };
+  const { out } = runCheck(graph);
+  assert.match(out, /superseded-no-successor/);
+});
+
+test("carving-check: superseded でも後継からの refines があれば superseded-no-successor は出ない", () => {
+  const graph = {
+    nodes: [
+      { id: "decision:s:old", type: "Decision", title: "旧方針", summary: "d", state: "superseded" },
+      { id: "decision:s:new", type: "Decision", title: "新方針", summary: "d" },
+    ],
+    edges: [
+      { id: "r1", type: "refines", from: "decision:s:new", to: "decision:s:old" },
+    ],
+  };
+  const { out } = runCheck(graph);
+  assert.doesNotMatch(out, /superseded-no-successor/);
+});

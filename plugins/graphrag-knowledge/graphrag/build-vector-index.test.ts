@@ -142,9 +142,9 @@ test("buildVectorIndex on an empty vault yields zero rows without crashing", asy
   }
 });
 
-test("defaultVectorIndexPath places the index next to the vault (.graphrag/vector.json)", () => {
+test("defaultVectorIndexPath places the index in the vault's .graphrag/cache (E1)", () => {
   // 索引は実 FS の絶対パスなので OS ネイティブ区切りが正しい。POSIX 直書きせず再導出して比較。
-  const expected = path.join(path.dirname(path.resolve("/a/b/myvault")), ".graphrag", "vector.json");
+  const expected = path.join(path.dirname(path.resolve("/a/b/myvault")), ".graphrag", "cache", "vector.json");
   assert.equal(defaultVectorIndexPath("/a/b/myvault"), expected);
   // 末尾スラッシュも正規化される
   assert.equal(defaultVectorIndexPath("/a/b/myvault/"), expected);
@@ -153,7 +153,7 @@ test("defaultVectorIndexPath places the index next to the vault (.graphrag/vecto
 test("parseArgs defaults --out to the vault-adjacent index path when only --vault is given", () => {
   const args = parseArgs(["--vault", "/a/b/myvault"]);
   assert.equal(args.vault, "/a/b/myvault");
-  assert.equal(args.out, path.join(path.dirname(path.resolve("/a/b/myvault")), ".graphrag", "vector.json"));
+  assert.equal(args.out, path.join(path.dirname(path.resolve("/a/b/myvault")), ".graphrag", "cache", "vector.json"));
   // 明示 --out があればそちらが優先
   const explicit = parseArgs(["--vault", "/a/b/myvault", "--out", "/custom/v.json"]);
   assert.equal(explicit.out, "/custom/v.json");
@@ -190,8 +190,8 @@ test("main builds the index and writes it next to the vault (atomic), injected p
   }
   try {
     await main(["--vault", vaultDir], { provider: fakeProvider(3) });
-    const expected = path.join(root, ".graphrag", "vector.json");
-    assert.ok(existsSync(expected), "index written next to the vault");
+    const expected = path.join(root, ".graphrag", "cache", "vector.json");
+    assert.ok(existsSync(expected), "index written next to the vault (cache/)");
     const payload = JSON.parse(readFileSync(expected, "utf8"));
     assert.ok(payload.rows.length >= 1, "rows embedded");
     assert.equal(payload.provider, "fake");
@@ -374,4 +374,85 @@ test("buildVectorIndex re-embeds legacy rows lacking text_hash (v1 index backwar
   const p = await buildVectorIndex({}, { provider, graphObject: g, previousIndex: legacyPrev });
   assert.equal(provider.calls, 1, "legacy row without text_hash is re-embedded");
   assert.notDeepEqual(p.rows[0].vector, [9, 9, 9], "stale legacy vector not reused");
+});
+
+// ── vault_head 打刻 (索引 staleness の可視化基盤) ─────────────────────────────
+
+import { execFileSync } from "node:child_process";
+
+test("buildVectorIndex stamps vault_head when the vault is a git repo", async () => {
+  const graph = {
+    generated_at: "2026-05-29T00:00:00.000Z",
+    nodes: [{ id: "goal:acme:p99", type: "Goal", title: "p99", summary: "perf" }],
+    edges: []
+  };
+  const dir = writeVault(graph);
+  try {
+    execFileSync("git", ["-C", dir, "init", "-q"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "t@t"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
+    execFileSync("git", ["-C", dir, "add", "."]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "seed"]);
+    const head = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const payload = await buildVectorIndex({ vault: dir }, { provider: fakeProvider(3) });
+    assert.equal(payload.vault_head, head, "索引がどの vault HEAD から構築されたかを打刻する");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildVectorIndex omits vault_head when the vault is not a git repo (best-effort)", async () => {
+  const graph = {
+    generated_at: "2026-05-29T00:00:00.000Z",
+    nodes: [{ id: "goal:acme:p99", type: "Goal", title: "p99", summary: "perf" }],
+    edges: []
+  };
+  const dir = writeVault(graph);
+  try {
+    const payload = await buildVectorIndex({ vault: dir }, { provider: fakeProvider(3) });
+    assert.equal(payload.vault_head, undefined, "git 外では打刻しない (エラーにもしない)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- noise baseline (コーパス相対 confidence の基準値) ---
+
+import { computeNoiseBaseline } from "./build-vector-index.ts";
+
+test("computeNoiseBaseline: deterministic median/p90 from row vectors", () => {
+  const rows = [];
+  for (let i = 0; i < 20; i += 1) {
+    // 単位ベクトルを角度でばらす (正規化済み前提と同じ形)
+    const t = (i / 20) * Math.PI;
+    rows.push({ node_id: `n${String(i).padStart(2, "0")}`, vector: [Math.cos(t), Math.sin(t)] });
+  }
+  const a = computeNoiseBaseline(rows);
+  const b = computeNoiseBaseline([...rows].reverse()); // 入力順に依存しない (node_id でソート)
+  assert.ok(a && b);
+  assert.deepEqual(a, b, "seeded PRNG + id ソートで決定論");
+  assert.ok(a.median_cosine <= a.p90_cosine, "median ≤ p90");
+  assert.ok(a.pairs > 0);
+});
+
+test("computeNoiseBaseline: null when fewer than 2 vectors", () => {
+  assert.equal(computeNoiseBaseline([]), null);
+  assert.equal(computeNoiseBaseline([{ node_id: "a", vector: [1, 0] }]), null);
+  assert.equal(computeNoiseBaseline([{ node_id: "a" }, { node_id: "b" }]), null);
+});
+
+test("buildVectorIndex stamps noise_baseline into the payload meta", async () => {
+  const graph = {
+    nodes: [
+      { id: "d:a", type: "Decision", title: "認証", summary: "認証基盤の判断" },
+      { id: "d:b", type: "Decision", title: "決済", summary: "決済まわりの判断" },
+      { id: "d:c", type: "Decision", title: "索引", summary: "索引の再構築" }
+    ],
+    edges: []
+  };
+  const payload = await buildVectorIndex({}, { provider: fakeProvider(4), graphObject: graph });
+  assert.ok(payload.noise_baseline, "noise_baseline が打刻される");
+  assert.equal(typeof payload.noise_baseline.median_cosine, "number");
+  assert.equal(typeof payload.noise_baseline.p90_cosine, "number");
+  assert.ok(payload.noise_baseline.pairs > 0);
 });

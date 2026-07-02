@@ -1,5 +1,6 @@
 import { mkdir, writeFile, rename, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveVectorProvider, nodeVectorText, prefixPolicyForModel } from "./vector.ts";
@@ -65,6 +66,17 @@ export async function buildVectorIndex(args, deps: any = {}) {
   const rows = await embedNodesIncremental(nodes, provider, previousRows, documentPrefix);
   const dimensions = rows[0]?.dimensions ?? provider.dimensions ?? null;
 
+  // コーパスのノイズ床 (ランダムなノード対の cosine 分布) を打刻する。confidence 判定
+  // (confidence.ts) が top1 cosine を絶対値でなくコーパス相対マージンで採点するための
+  // 基準。決定論 (seeded PRNG + node_id ソート) なので同じ索引からは同じ値が出る。
+  const noiseBaseline = computeNoiseBaseline(rows);
+
+  // 索引がどの vault HEAD から構築されたかを打刻する (best-effort)。書き込み時重複
+  // ゲートが「索引再構築の失敗後に stale な索引で ok を報告する」のを検出できるように
+  // する (mutate-vault の duplicate_check.index_stale)。vault が git でない/HEAD 無し
+  // (unborn) は打刻無しで従来どおり (staleness 判定は不能として skip される)。
+  const vaultHeadStamp = args.vault ? tryVaultHead(args.vault) : null;
+
   return {
     version: 1,
     provider: provider.id,
@@ -80,9 +92,71 @@ export async function buildVectorIndex(args, deps: any = {}) {
     ...(prefixPolicy ? { prefix_policy: { document: prefixPolicy.document, query: prefixPolicy.query } } : {}),
     graph_version: graph.version ?? null,
     generated_at: new Date().toISOString(),
+    ...(noiseBaseline ? { noise_baseline: noiseBaseline } : {}),
+    ...(vaultHeadStamp ? { vault_head: vaultHeadStamp } : {}),
     branch_delta: baseGraph ? describeBranchDelta(baseGraph, graph, args.base) : undefined,
     rows
   };
+}
+
+// ── noise baseline: コーパス相対 confidence の基準値 ─────────────────────────
+// ランダムなノード対 (最大 NOISE_BASELINE_PAIRS 対、seeded PRNG で決定論) の
+// cosine の median / p90 を返す。ベクトルは正規化済み (createVectorProvider の
+// normalizeVector) なので内積 = cosine。行が 2 未満なら null (基準を出せない)。
+const NOISE_BASELINE_PAIRS = 400;
+const NOISE_BASELINE_SEED = 42;
+
+// mulberry32: 依存無しの決定論 PRNG。乱数品質は問わない (サンプリング用)。
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function computeNoiseBaseline(rows: any[]): { median_cosine: number; p90_cosine: number; pairs: number } | null {
+  const usable = (rows ?? [])
+    .filter((row) => Array.isArray(row?.vector) && row.vector.length > 0)
+    .sort((a, b) => String(a.node_id).localeCompare(String(b.node_id)));
+  if (usable.length < 2) return null;
+  const random = mulberry32(NOISE_BASELINE_SEED);
+  const sims: number[] = [];
+  const attempts = Math.min(NOISE_BASELINE_PAIRS, usable.length * (usable.length - 1));
+  for (let i = 0; i < attempts; i += 1) {
+    const a = Math.floor(random() * usable.length);
+    const b = Math.floor(random() * usable.length);
+    if (a === b) continue;
+    const va = usable[a].vector;
+    const vb = usable[b].vector;
+    const length = Math.min(va.length, vb.length);
+    let sum = 0;
+    for (let k = 0; k < length; k += 1) sum += va[k] * vb[k];
+    sims.push(sum);
+  }
+  if (sims.length === 0) return null;
+  sims.sort((left, right) => left - right);
+  const at = (q: number) => sims[Math.min(sims.length - 1, Math.floor(sims.length * q))];
+  return {
+    median_cosine: Number(at(0.5).toFixed(4)),
+    p90_cosine: Number(at(0.9).toFixed(4)),
+    pairs: sims.length
+  };
+}
+
+// vault の現 HEAD sha (打刻用)。git 外 / unborn branch は null (打刻しない)。
+export function tryVaultHead(vaultDir: string): string | null {
+  try {
+    return execFileSync("git", ["-C", vaultDir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 // embedding 入力テキストの内容ハッシュ。node.id は nodeVectorText が意図的に除外する

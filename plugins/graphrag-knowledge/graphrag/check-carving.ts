@@ -30,7 +30,8 @@
 //   P6. Goal no-task: active Goal with no incoming achieves edge → WARN.
 //   P7. Theme empty: Theme with 0 encompasses edges → WARN.
 import fs from "node:fs";
-import { canonicalType } from "./schema.ts";
+import { canonicalType, DEFAULT_SCHEMA } from "./schema.ts";
+import { isImplFileBinding } from "./binding-debt.ts";
 import {
   loadCarvingConfig,
   resolveCarvingConfigPath,
@@ -399,7 +400,18 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   // LLM が意味に書き換えるまで残る provisional は retrieval/concern-hint の品質を直接
   // 劣化させる (embedding が構成要素語に支配され縦串が言語/階層クラスタに退化)。空でない
   // =完了に見えるので、File も Component/Layer candidate も対称にゲートで明示的に弾く。
-  const provisionalNodes = graph.nodes.filter((n: any) => n.summary_provisional === true);
+  // 免除: role 閉集合 (documentation/generated) と builtin-orphan パターンに該当する File
+  // (lockfile / generated / tool 設定 等) は、そもそも embedding から除外され (vector.ts の
+  // nodeVectorText)、Component 網羅性ゲートでも免除される「非実装」なので、意味要約の
+  // 書き換えを ERROR で強制しない。件数は INFO で別勘定にして正直に見せる。
+  // source / ui_component / api_route / entrypoint 等の File と Component/Layer 候補は
+  // 従来どおり ERROR。
+  const provisionalAll = graph.nodes.filter((n: any) => n.summary_provisional === true);
+  const isProvisionalExempt = (n: any) =>
+    n.type === "File" &&
+    (ROLE_ALONE_EXEMPT.has(n.role) || builtinOrphanMatch(String(n.path ?? "")) !== null);
+  const provisionalExempt = provisionalAll.filter(isProvisionalExempt);
+  const provisionalNodes = provisionalAll.filter((n: any) => !isProvisionalExempt(n));
   if (provisionalNodes.length > 0) {
     const byType: Record<string, number> = {};
     for (const n of provisionalNodes) byType[n.type] = (byType[n.type] || 0) + 1;
@@ -408,6 +420,14 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       rule: "summary-provisional",
       message: `要約が機械テンプレのまま (summary_provisional): ${provisionalNodes.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各ノードの「構成要素サマリ」を「意味」(何をする/何のため/どの関心) に書き換え summary_provisional を外す。テンプレのままだと concern-hint が言語/階層クラスタに退化する。`,
       details: provisionalNodes.slice(0, 30).map((n: any) => n.path || n.id),
+    });
+  }
+  if (provisionalExempt.length > 0) {
+    findings.push({
+      severity: "INFO",
+      rule: "summary-provisional-exempt",
+      message: `summary_provisional だが免除対象 (role 閉集合 / builtin-orphan File): ${provisionalExempt.length}件。lockfile・generated・tool 設定類は embedding から除外済みで意味要約の強制対象外 (書き換えは任意)。`,
+      details: provisionalExempt.slice(0, 30).map((n: any) => n.path || n.id),
     });
   }
 
@@ -656,8 +676,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   // ─────────────────────────────────────────────────────────────
   // (X) Decision/OK/Risk の実装ファイル紐付け不在 (knowledge-impl-binding-missing)
   // ─────────────────────────────────────────────────────────────
-  const isImplFileBinding = (toId: string) =>
-    toId.startsWith("file:") && !/docs\/knowhow\/|plans\/|docs\/design-decisions\//.test(toId);
+  // isImplFileBinding は binding-debt.ts の単一定義を使う (gate #9 / binding_debt と同値)。
   const knowledgeTypes = new Set(["Decision", "OperationalKnowledge", "Risk"]);
   const knowledgeNodes = files.length > 0 ? graph.nodes.filter((n: any) => knowledgeTypes.has(n.type)) : [];
   const noImplBinding: string[] = [];
@@ -727,8 +746,10 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         embById.set(r.node_id, r.vector);
         normById.set(r.node_id, vectorNorm(r.vector));
       }
-      // 同型ノード間 pair-wise similarity
-      const checkTypes = ["Decision", "OperationalKnowledge", "Risk", "Concern", "Component"];
+      // 同型ノード間 pair-wise similarity。対象型は書き込み時重複ゲートと単一正本
+      // (schema categories.duplicateCheck) — 監査対象がゲートとズレると
+      // 「書けたのに後で別基準」になるため。
+      const checkTypes = DEFAULT_SCHEMA.categories.duplicateCheck;
       const duplicates: string[] = [];
       for (const tp of checkTypes) {
         const sameType = graph.nodes.filter((n: any) => canonicalType(n.type) === tp);
@@ -887,6 +908,28 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       rule: "superseded-premise",
       message: `現役ノードが終端 state (superseded/abandoned/closed) のノードを前提にしている: ${deadPremises.length}件。前提が死んでいる。refines 逆引きで後継を確認し、前提を後継に張り替えるか依存側の見直しを検討。`,
       details: deadPremises.slice(0, 30),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // superseded-no-successor: state:superseded なのに後継からの refines が 1 本も無い
+  // superseded は「後継に置き換えられた」の宣言なので、refines 逆引き (後継 → 旧) が
+  // 無いと「何に置き換えられたのか」が graph 上から辿れない (supersede レシピの片肺)。
+  // ─────────────────────────────────────────────────────────────
+  const supersededNoSuccessor: string[] = [];
+  for (const n of graph.nodes) {
+    if (String(n.state) !== "superseded") continue;
+    const hasSuccessor = (inEdges[n.id] || []).some((e: any) => e.type === "refines");
+    if (!hasSuccessor) {
+      supersededNoSuccessor.push(`[${n.type}] ${String(n.id).split(":").pop()} - ${(n.title || "").slice(0, 60)}`);
+    }
+  }
+  if (supersededNoSuccessor.length > 0) {
+    findings.push({
+      severity: "WARN",
+      rule: "superseded-no-successor",
+      message: `state:superseded なのに後継からの refines が 0 本のノードが ${supersededNoSuccessor.length} 件。「何に置き換えられたか」が辿れない。後継ノードから refines エッジを張るか、後継が無いなら state の見直しを検討。`,
+      details: supersededNoSuccessor.slice(0, 30),
     });
   }
 

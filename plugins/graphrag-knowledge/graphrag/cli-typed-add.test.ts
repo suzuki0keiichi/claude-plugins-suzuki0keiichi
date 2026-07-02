@@ -431,3 +431,37 @@ test("歴史的 id 接頭辞 (conversation:/ok:/rejected-option:/operational-kno
   });
   assert.equal(supPlan.edges.find((e) => e.type === "supersedes").to, "rejectedoption:s:r");
 });
+
+// ── 入口の slug/system 検証 (id 3 セグメント規約の保護) ───────────────────────
+
+test("nodeId 入口検証: ':' を含む slug は 3 セグメント規約を壊すので明示エラー", () => {
+  assert.throws(
+    () => buildAddDecisionPlan({ system: "s", slug: "bad:slug", title: "T", summary: "S" }),
+    /--slug.*kebab-case/s
+  );
+});
+
+test("nodeId 入口検証: 大文字・空白の slug / system も拒否 (意味 kebab-case を要求)", () => {
+  assert.throws(
+    () => buildAddOkPlan({ system: "s", slug: "BadSlug", title: "T", summary: "S" }),
+    /--slug/
+  );
+  assert.throws(
+    () => buildAddRiskPlan({ system: "s", slug: "has space", title: "T", summary: "S" }),
+    /--slug/
+  );
+  assert.throws(
+    () => buildAddGoalPlan({ system: "My System", slug: "ok-slug", title: "T", summary: "S" }),
+    /--system/
+  );
+});
+
+test("nodeId 入口検証: 正当な kebab-case (数字始まり・. _ - 含む) は通る", () => {
+  const plan = buildAddDecisionPlan({
+    system: "graphrag-skill-dev",
+    slug: "2026-06-17.state_dir-v2",
+    title: "T",
+    summary: "S",
+  });
+  assert.equal(plan.nodes[0].id, "decision:graphrag-skill-dev:2026-06-17.state_dir-v2");
+});

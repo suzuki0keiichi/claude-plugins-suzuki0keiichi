@@ -104,3 +104,38 @@ test("create に null フィールドがあればキーごと落とす", () => {
   const node = next.nodes.find((n) => n.id === "decision:s:b");
   assert.ok(!("state" in node));
 });
+
+// ── op:update の generated_at 更新 (staleness 収束) ──────────────────────────
+
+test("op:update は generated_at を now に進める (再検証の刻印。staleness の起点が進む)", () => {
+  const graph = {
+    nodes: [
+      { id: "n1", type: "Decision", title: "T", generated_at: "2020-01-01T00:00:00.000Z" },
+      { id: "n2", type: "Decision", title: "U", generated_at: "2020-01-01T00:00:00.000Z" },
+    ],
+    edges: [],
+  };
+  const plan = normalizeMutationPlan({
+    nodes: [{ op: "update", id: "n1", updates: { summary: "re-verified" } }],
+  });
+  const before = Date.now() - 1000;
+  const next = applyMutationToGraph(graph, plan);
+  const updated = next.nodes.find((n) => n.id === "n1");
+  assert.notEqual(updated.generated_at, "2020-01-01T00:00:00.000Z");
+  assert.ok(Date.parse(updated.generated_at) >= before, "now に更新される");
+  // 触っていないノードは据え置き (unrelated files must not churn)
+  const untouched = next.nodes.find((n) => n.id === "n2");
+  assert.equal(untouched.generated_at, "2020-01-01T00:00:00.000Z");
+});
+
+test("op:update で plan が generated_at を明示した場合はそれを尊重する", () => {
+  const graph = {
+    nodes: [{ id: "n1", type: "Decision", title: "T", generated_at: "2020-01-01T00:00:00.000Z" }],
+    edges: [],
+  };
+  const plan = normalizeMutationPlan({
+    nodes: [{ op: "update", id: "n1", updates: { generated_at: "2024-06-01T00:00:00.000Z" } }],
+  });
+  const next = applyMutationToGraph(graph, plan);
+  assert.equal(next.nodes[0].generated_at, "2024-06-01T00:00:00.000Z");
+});

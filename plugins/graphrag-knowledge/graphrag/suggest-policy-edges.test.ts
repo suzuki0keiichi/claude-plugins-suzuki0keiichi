@@ -35,9 +35,31 @@ test("Decision の binding 候補は sets_policy_for・閾値以上の File を 
   assert.equal(out[0].edge_type, "sets_policy_for");
   assert.equal(out[0].candidates[0].file_id, "file:s:src/a.ts", "cosine 1.0 が先頭");
   assert.ok(out[0].candidates[0].similarity >= out[0].candidates[1].similarity);
-  // そのまま実行できる確定手段 (typed-add フラグ断片)。
-  assert.equal(out[0].candidates[0].apply.flag, "--sets-policy-for");
-  assert.match(out[0].candidates[0].apply.example, /add-decision/);
+  // そのまま実行できる確定手段: commit-mutation に貼れる plan_fragment (再 add-* は
+  // node already exists で失敗するため example 形式は廃止) + 作成前用の verb/flag。
+  const apply = out[0].candidates[0].apply;
+  assert.equal(apply.verb, "add-decision");
+  assert.equal(apply.flag, "--sets-policy-for");
+  assert.deepEqual(apply.plan_fragment, {
+    op: "create",
+    id: "decision_s_d__sets_policy_for__file_s_src/a.ts",
+    type: "sets_policy_for",
+    from: "decision:s:d",
+    to: "file:s:src/a.ts",
+  });
+});
+
+test("apply.plan_fragment: OK は documented_by エッジ + 作成前 CLI フラグは --evidence (実在フラグ)", async () => {
+  const out = await suggestBindingsForNodes({
+    vectorIndex: indexWith({ node_id: "file:s:src/a.ts", vector: [1, 0, 0], path: "src/a.ts" }),
+    nodes: [{ id: "ok:s:o", type: "OperationalKnowledge", title: "O", summary: "x" }],
+    embed: embedConst([1, 0, 0]),
+  });
+  const apply = out[0].candidates[0].apply;
+  assert.equal(apply.verb, "add-ok");
+  assert.equal(apply.flag, "--evidence", "add-ok に --documented-by は存在しない (documented_by は --evidence が担う)");
+  assert.equal(apply.plan_fragment.type, "documented_by");
+  assert.equal(apply.plan_fragment.id, "ok_s_o__documented_by__file_s_src/a.ts");
 });
 
 test("型別固定: Risk→risks_in / OK→documented_by / Constraint→constrains", async () => {

@@ -185,11 +185,32 @@ export type AddRejectedOptionArgs = {
   rejectedInFavorOf: string; // "decision:<system>:<slug>"
 };
 
+// id 規約 `<typeSlug>:<system>:<slug>` の 3 セグメント構造を守る入口検証。
+// `:` を含む slug は nodeTypeFromId / xref / edgeId のセグメント解釈を壊し、
+// 大文字・空白は lexical 照合や slug 規約 (意味を担う kebab-case) から外れる。
+// create 専用経路なので既存 vault のレガシー id には影響しない (update は nodeId を通らない)。
+const ID_SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+function assertIdSegment(value: string, flag: string): void {
+  if (!ID_SEGMENT_RE.test(value)) {
+    throw new Error(
+      `${flag}: "${value}" is invalid. ` +
+        `slug must be meaning-bearing kebab-case: lowercase letters/digits plus . _ - ` +
+        `(pattern ${ID_SEGMENT_RE}). ":" や空白・大文字は id の 3 セグメント規約 ` +
+        `(<type>:<system>:<slug>) を壊すため使えません。`
+    );
+  }
+}
+
 function nodeId(typeSlug: string, system: string, slug: string): string {
+  assertIdSegment(system, "--system");
+  assertIdSegment(slug, "--slug");
   return `${typeSlug}:${system}:${slug}`;
 }
 
-function edgeId(from: string, type: string, to: string): string {
+// mutation plan のエッジ id 規約 (単一正本)。suggest-policy-edges の plan_fragment も
+// この規約で id を組む (同じエッジは同じ id になり、二重付与が validate で弾ける)。
+export function edgeId(from: string, type: string, to: string): string {
   const norm = (s: string) => s.replace(/:/g, "_");
   return `${norm(from)}__${type}__${norm(to)}`;
 }

@@ -18,12 +18,17 @@ import {
   validateMutation,
 } from "./mutation-core.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
-import { defaultVectorIndexPath, loadVectorIndex } from "./retrieval.ts";
-import { stateDirForVault } from "./cli-env.ts";
+import { defaultVectorIndexPath, vaultVectorIndexReadPath, loadVectorIndex } from "./retrieval.ts";
+import { stateDirForVault, cacheDirUnder } from "./cli-env.ts";
 import { withVaultLock, beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
-import { runDuplicateCheck } from "./duplicate-check.ts";
-import { embedQueryForVectorIndex } from "./vector.ts";
+import {
+  runDuplicateCheck,
+  duplicateGateCandidates,
+  duplicateGateText,
+} from "./duplicate-check.ts";
+import { embedForIndex } from "./vector.ts";
 import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
+import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 
@@ -185,11 +190,16 @@ function gitCommitVault(vaultDir: string, message: string): string {
   // path.relative で求める方式は、macOS の /var → /private/var シンボリックリンク
   // 解決で root と vaultDir の prefix がずれ、"outside repository" になるため使わない。
   execFileSync("git", ["add", "--", "."], { cwd: vaultDir });
-  const staged = execFileSync("git", ["diff", "--cached", "--name-only"], {
+  // pathspec を vault(.) に限定する。vault はプロジェクト repo 内に置かれるのが通常
+  // 形なので、pathspec 無しの commit は利用者が repo の別所で事前に stage していた
+  // 変更まで巻き込んで確定してしまう。`git commit -- <path>` は --only 相当で、
+  // vault 外の staged 変更を index に残したまま vault 配下だけを commit する
+  // (unborn branch の初回コミットでも動く)。
+  const staged = execFileSync("git", ["diff", "--cached", "--name-only", "--", "."], {
     cwd: vaultDir,
     encoding: "utf8",
   }).trim();
-  if (staged) execFileSync("git", ["commit", "-q", "-m", message], { cwd: vaultDir });
+  if (staged) execFileSync("git", ["commit", "-q", "-m", message, "--", "."], { cwd: vaultDir });
   return vaultHead(vaultDir);
 }
 
@@ -198,36 +208,8 @@ function gitCommitVault(vaultDir: string, message: string): string {
 // すべて非致命: index/endpoint 不在は各提案を空 + reason で skip し、書き込みは決して
 // 止めない (apply は既に commit 済み)。エッジは一切張らない (提案のみ)。
 
-// binding_debt の定義は check-carving gate #9 (knowledge-impl-binding-missing) +
-// #9 拡張 (constraint-binding-missing) と一致させる。check-carving に依存させず自前で
-// 数えるが、判定式はそちらと同一 (相互参照: check-carving.ts の isImplFileBinding /
-// constraint-binding-missing)。
-function isImplFileBinding(toId: string): boolean {
-  return toId.startsWith("file:") && !/docs\/knowhow\/|plans\/|docs\/design-decisions\//.test(toId);
-}
-function countBindingDebt(graph: { nodes?: any[]; edges?: any[] }): number {
-  const outEdges = new Map<string, any[]>();
-  for (const e of graph.edges ?? []) {
-    const arr = outEdges.get(e.from) ?? [];
-    arr.push(e);
-    outEdges.set(e.from, arr);
-  }
-  let debt = 0;
-  for (const n of graph.nodes ?? []) {
-    const t = canonicalType(n.type);
-    const oe = outEdges.get(n.id) ?? [];
-    if (t === "Decision" || t === "OperationalKnowledge" || t === "Risk") {
-      // #9: 実装ファイルへの sets_policy_for / documented_by が無ければ debt。
-      const hasPolicy = oe.some((e) => e.type === "sets_policy_for" && isImplFileBinding(e.to));
-      const hasImplDoc = oe.some((e) => e.type === "documented_by" && isImplFileBinding(e.to));
-      if (!hasPolicy && !hasImplDoc) debt += 1;
-    } else if (t === "Constraint") {
-      // #9 拡張: constrains エッジ (宛先不問) が 0 本なら debt。
-      if (!oe.some((e) => e.type === "constrains")) debt += 1;
-    }
-  }
-  return debt;
-}
+// binding_debt の定義 (check-carving gate #9 + Constraint 拡張と同値) は
+// binding-debt.ts の countBindingDebt に一本化 (三重定義の漂流防止)。
 
 // schema.categories.premiseCandidate から構築 (buildSuggestions 内で参照)。
 
@@ -269,6 +251,20 @@ async function buildSuggestions(args: {
         nodes: createdNodes,
         embed: args.embed,
       });
+      // write path の索引行は {node_id, dimensions, vector, text_hash} のみで path/title を
+      // 持たない (suggest 側は best-effort で読むだけ)。候補が「どのファイルか」を id 以外で
+      // 判断できるよう、nextGraph のノードから path/title/summary (先頭 100 字) を補完する。
+      for (const suggestion of list) {
+        for (const cand of suggestion.candidates) {
+          const fileNode = nodeById.get(cand.file_id);
+          if (!fileNode) continue;
+          if (cand.path === undefined && typeof fileNode.path === "string") cand.path = fileNode.path;
+          if (cand.title === undefined && typeof fileNode.title === "string") cand.title = fileNode.title;
+          if (cand.summary === undefined && typeof fileNode.summary === "string") {
+            cand.summary = fileNode.summary.slice(0, 100);
+          }
+        }
+      }
       binding = { suggestions: list };
     } catch (e: any) {
       binding = { suggestions: [], skipped: `embedding unavailable: ${String(e?.message ?? e)}` };
@@ -326,8 +322,9 @@ export async function applyMutationToVault(args: {
     threshold?: number;
   };
   // E0 書き込み時提案の DI (binding 用 index/embed と ask-trail base dir)。
-  // 全て省略可: 既定は再構築後の vector index を読み、embed は index ポリシー準拠の
-  // query 埋め込み、recentHitIds は stateDir から読む。失敗・不在は全て非致命 skip。
+  // 全て省略可: 既定は再構築後の vector index を読み、embed は index の document 空間
+  // 準拠 (embedForIndex(index, text, "document"))、recentHitIds は stateDir から読む。
+  // 失敗・不在は全て非致命 skip。
   suggestDeps?: {
     loadIndex?: () => Promise<any> | any;
     embed?: (text: string) => Promise<number[]>;
@@ -345,6 +342,9 @@ export async function applyMutationToVault(args: {
   // 既定レイアウト <root>/.graphrag/vault でも <root>/.graphrag/.graphrag を
   // 掘らないよう、冪等な stateDirForVault に集約 (retrieval.loadGraph と同一規約)。
   const stateDir = args.stateDir ?? stateDirForVault(vaultDir);
+  // E1: lock / seq / ask-state は機械ローカルなので stateDir 直下ではなく cache/ に置く
+  // (読み手 retrieval.loadGraph の seq 参照も cacheDirForVault で同じ場所を見る)。
+  const cacheDir = cacheDirUnder(stateDir);
   // 既定の索引ビルドは buildAndWriteVectorIndex (out へ実際に書き出す版)。
   // buildVectorIndex は payload を返すだけなので直に使うと索引が更新されない。
   // vectorDeps は provider 等の DI 用 (テストで endpoint 非依存にする等)。
@@ -352,8 +352,71 @@ export async function applyMutationToVault(args: {
     args.buildIndex ??
     ((a: { vault: string; out: string }) =>
       buildAndWriteVectorIndex({ vault: a.vault, out: a.out }, args.vectorDeps ?? {}));
-  mkdirSync(stateDir, { recursive: true });
-  const result = await withVaultLock(stateDir, async () => {
+  mkdirSync(cacheDir, { recursive: true });
+
+  // plan 正規化は純粋関数なのでロック外で先に済ませる (重複ゲートの事前埋め込みが使う)。
+  const plan = normalizeMutationPlan(args.plan);
+
+  // ── 書き込み時重複ゲートの準備 (すべてロック取得前) ────────────────────────
+  // 索引読み込みと候補の embedding (ネットワーク IO) をクリティカルセクションの外に
+  // 出す。endpoint がハングしてもロック保持時間は writeVaultDelta + git commit のまま。
+  const dupDeps = args.dupDeps ?? {};
+  let dupIndex: any = null;
+  try {
+    dupIndex = await (dupDeps.loadIndex
+      ? dupDeps.loadIndex()
+      : loadVectorIndex(vaultVectorIndexReadPath(vaultDir)));
+  } catch {
+    dupIndex = null; // 索引が読めない = 不在扱いで skip (NON-FATAL)
+  }
+  // 索引と同じ document 空間で候補を埋め込む (index の prefix_policy 準拠)。索引行は
+  // nodeVectorText を document 接頭辞で埋め込んだものなので、query 埋め込みで比較すると
+  // 空間がずれ 0.92 閾値が系統的に甘くなる。
+  const dupEmbed =
+    dupDeps.embed ?? ((text: string) => embedForIndex(dupIndex, text, "document"));
+  const gateCandidates = duplicateGateCandidates(plan, args.schema);
+  const preEmbedded = new Map<string, number[]>();
+  let preEmbedError: unknown = null;
+  if (gateCandidates.length > 0 && Array.isArray(dupIndex?.rows) && dupIndex.rows.length > 0) {
+    try {
+      for (const candidate of gateCandidates) {
+        const text = duplicateGateText(candidate);
+        if (!text || preEmbedded.has(text)) continue;
+        preEmbedded.set(text, await dupEmbed(text));
+      }
+    } catch (e) {
+      preEmbedError = e; // ゲート実行時に同じ理由で skip させる (非致命)
+    }
+  }
+  // ロック内で呼ばれる embed は事前計算の参照のみ (想定外のテキストだけ fallback で
+  // 実 embed に落ちるが、候補列挙は同じ関数なので通常発生しない)。
+  const gateEmbed = async (text: string): Promise<number[]> => {
+    if (preEmbedError) throw preEmbedError;
+    const vec = preEmbedded.get(text);
+    if (vec) return vec;
+    return dupEmbed(text);
+  };
+  // 索引の staleness: 索引再構築は post-commit 非致命なので、失敗した直後の mutation は
+  // 古い索引でゲートを回すことになる。索引に打刻された vault_head と現 HEAD が違えば
+  // それを正直に出力へ載せる (判定はしない: 非致命の情報提供のみ)。
+  let indexStale: { index_stale: true; index_stale_reason: string } | null = null;
+  if (typeof dupIndex?.vault_head === "string") {
+    try {
+      const currentHead = vaultHead(vaultDir);
+      if (currentHead !== dupIndex.vault_head) {
+        indexStale = {
+          index_stale: true,
+          index_stale_reason:
+            `vector index was built at vault HEAD ${dupIndex.vault_head} but current HEAD is ` +
+            `${currentHead} (a previous index rebuild likely failed; the duplicate gate ran on a stale index)`,
+        };
+      }
+    } catch {
+      /* vault が git でない等 → staleness 判定不能 (打刻無し扱い) */
+    }
+  }
+
+  const result = await withVaultLock(cacheDir, async () => {
     // OCC: base_sha が現 HEAD と違えば「古い判断」として拒否（粗い粒度）。
     if (args.baseSha) {
       const head = vaultHead(vaultDir);
@@ -366,7 +429,6 @@ export async function applyMutationToVault(args: {
       }
     }
     const current = importVault(vaultDir);
-    const plan = normalizeMutationPlan(args.plan);
     const v = validateMutation({ currentGraph: current, plan, enforceSourceBacking: true, schema: args.schema });
     if (!v.valid) {
       const err: any = new Error("Refusing to mutate invalid graph");
@@ -374,24 +436,16 @@ export async function applyMutationToVault(args: {
       throw err;
     }
 
-    // 書き込み時重複ゲート: op:create の知識/横断ノードを既存索引と embedding 照合し、
+    // 書き込み時重複ゲート: lexical exact pre-pass + 既存索引との embedding 照合。
     // duplicate_ack で承認されない suspect が居れば all-or-nothing で拒否する。
-    // 索引不在・embedding 不達は非致命スキップ (index_status と同じ扱い)。
-    const dupDeps = args.dupDeps ?? {};
-    let dupIndex: any = null;
-    try {
-      dupIndex = await (dupDeps.loadIndex
-        ? dupDeps.loadIndex()
-        : loadVectorIndex(defaultVectorIndexPath(vaultDir)));
-    } catch {
-      dupIndex = null; // 索引が読めない = 不在扱いで skip (NON-FATAL)
-    }
+    // 索引不在・embedding 不達は embedding 段のみ非致命スキップ (lexical は常に走る)。
     const dup = await runDuplicateCheck({
       plan,
       currentGraph: current,
       vectorIndex: dupIndex,
-      embed: dupDeps.embed ?? ((text: string) => embedQueryForVectorIndex(text, dupIndex)),
+      embed: gateEmbed,
       threshold: dupDeps.threshold,
+      schema: args.schema,
     });
     if (dup.failures.length > 0) {
       const err: any = new Error(
@@ -399,18 +453,27 @@ export async function applyMutationToVault(args: {
       );
       err.code = "DUPLICATE_SUSPECT";
       err.failures = dup.failures;
-      err.duplicate_check = { suspects: dup.suspects };
+      // 拒否を「壁」でなく判断材料にする: 各 suspect は既存ノードの type/title/summary/state
+      // と next_step (update / supersede / --dup-ack) を同梱している。
+      err.duplicate_check = {
+        suspects: dup.suspects,
+        cross_type_suspects: dup.cross_type_suspects,
+        ...(indexStale ?? {}),
+      };
       throw err;
     }
     const duplicate_check = {
       status: dup.status,
       ...(dup.reason ? { reason: dup.reason } : {}),
       suspects: dup.suspects,
+      // 型跨ぎ (D↔OK / Risk↔Constraint) の重複疑い。非ブロッキング (reject に使わない)。
+      cross_type_suspects: dup.cross_type_suspects,
+      ...(indexStale ?? {}),
     };
     // relations は副産物 (suggest-only)。lock 外の suggestions 組み立てに渡すため保持。
     const relationCandidates = dup.relations ?? [];
 
-    const began = beginVaultWrite(stateDir);
+    const began = beginVaultWrite(cacheDir);
     // 適用中に書いた partial をここに積む。writeVaultDelta が途中で throw しても
     // created が残るので、巻き戻しで untracked な新規ファイルを確実に消せる。
     const delta = { written: [] as string[], removed: [] as string[], created: [] as string[] };
@@ -454,7 +517,7 @@ export async function applyMutationToVault(args: {
         }
       throw applyErr;
     } finally {
-      endVaultWrite(stateDir, began);
+      endVaultWrite(cacheDir, began);
     }
   });
 
@@ -478,30 +541,33 @@ export async function applyMutationToVault(args: {
   // E0 書き込み時提案: index 再構築後 (= 新ノードが索引に載った状態) に組む。
   // すべて非致命。何が失敗しても suggestions を空寄りにして返すだけで、apply は確定済み。
   const { __suggestionsInput, ...publicResult } = result as any;
+  const sd = args.suggestDeps ?? {};
+  // ask-trail 直近ヒット: premise_candidates と ask-precheck 観測 (下記) の両方が使う。
+  let recentHitIds: string[] = [];
+  try {
+    recentHitIds = sd.recentHitIds ? sd.recentHitIds() : readRecentHitIds(cacheDir);
+  } catch {
+    recentHitIds = []; // ask-state 読めずでも非致命
+  }
   let suggestions: any;
   try {
-    const sd = args.suggestDeps ?? {};
     // binding 用の index は再構築後の on-disk 索引 (新ノードが載っている)。読めなければ null。
     let suggestIndex: any = null;
     try {
       suggestIndex = await (sd.loadIndex
         ? sd.loadIndex()
-        : loadVectorIndex(defaultVectorIndexPath(vaultDir)));
+        : loadVectorIndex(vaultVectorIndexReadPath(vaultDir)));
     } catch {
       suggestIndex = null; // 索引が読めない = 不在扱いで skip (NON-FATAL)
     }
-    // embed: index ポリシー準拠の埋め込み。index 不在なら null (binding は skip 理由を返す)。
+    // embed: index の document 空間準拠の埋め込み (索引行と同じ側の接頭辞。
+    // suggest-policy-edges の契約 = embedForIndex(index, text, "document") 相当)。
+    // index 不在なら null (binding は skip 理由を返す)。
     const embed = sd.embed
       ? sd.embed
       : suggestIndex
-        ? (text: string) => embedQueryForVectorIndex(text, suggestIndex)
+        ? (text: string) => embedForIndex(suggestIndex, text, "document")
         : null;
-    let recentHitIds: string[] = [];
-    try {
-      recentHitIds = sd.recentHitIds ? sd.recentHitIds() : readRecentHitIds(stateDir);
-    } catch {
-      recentHitIds = []; // ask-state 読めずでも非致命
-    }
     suggestions = await buildSuggestions({
       nextGraph: __suggestionsInput.nextGraph,
       plan: __suggestionsInput.plan,
@@ -519,6 +585,22 @@ export async function applyMutationToVault(args: {
       led_to: [],
       premise_candidates: [],
       binding_debt: 0,
+    };
+  }
+
+  // E5 ask-precheck 観測 (advisory only): SKILL.md は知識ノード作成前の ask pre-check を
+  // 求めるが、これまで何も観測していなかった。知識ノードを作る plan なのにこの state dir の
+  // ask-trail が空/期限切れなら、その事実だけを非ブロッキングで duplicate_check に載せる
+  // (reject には決して使わない)。
+  if (gateCandidates.length > 0 && recentHitIds.length === 0 && publicResult.duplicate_check) {
+    publicResult.duplicate_check = {
+      ...publicResult.duplicate_check,
+      precheck: {
+        recent_ask_hits: recentHitIds.length,
+        note:
+          "ask-trail にこの state dir の直近 ask ヒットが無い。SKILL.md の ask pre-check " +
+          "(作成前に既存ノードを ask で確認) が実施されたか確認を推奨 (advisory only・reject しない)。",
+      },
     };
   }
 
