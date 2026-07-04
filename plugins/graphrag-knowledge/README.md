@@ -52,12 +52,23 @@
 
 主なスキル:
 - **graphrag-knowledge** — 知識の読み書き（着手前に `ask` で引く、一段落で書き戻す）
+- **graphrag-checkpoint** — compact 対策の退避（下記）
 - **graphrag-pr-review** — PR/diff をグラフと照合してレビュー
 - **graphrag-design-review** — 設計案をグラフと照合してレビュー
 - **graphrag-review-doc** — 人間向けのレビュー説明資料（HTML）を生成
 
+## compact 対策（退避 → 自動復元）
+
+長時間セッションで避けられない compact の情報ロストを、盲目的要約に任せず**狙って残す**。
+
+- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態（active Investigation の `raw_content`）と、未書き戻しの恒久知識（Decision / RejectedOption / Risk / 運用知識…）をグラフへフラッシュする。
+- **復元**（自動）: compact 直後に `SessionStart` フックが `brief --mode resume` を注入し、直前 checkpoint を再水和する。**無操作**。
+- **無害化**: 非 graphrag リポジトリでは即 no-op（透明）。復元フックを黙らせたい時は `.graphrag/.env` に `GRAPHRAG_COMPACT_RESTORE=off`。
+- auto-compact は捕捉できない（残 context signal が無いため）。checkpoint は人間が余力のうちに撃つ前提。
+
 ## テスト
 
 ```bash
-node --experimental-strip-types --test graphrag/*.test.ts
+node --experimental-strip-types --test graphrag/*.test.ts   # CLI（702 tests）
+node --test hooks/*.test.mjs                                 # フック
 ```

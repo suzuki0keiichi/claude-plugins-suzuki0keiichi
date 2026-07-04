@@ -147,6 +147,51 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 
 ---
 
+## Compaction checkpoint (退避 A + 救出 B を1本にまとめる)
+
+`graphrag-checkpoint` skill が compact 直前に撃つ一括プラン。**A(作業状態の退避)と B(未書き戻し恒久知識の救出)を同格に1本で**適用する。両 preset 共通(救出先の知識型と Assumption/Agreement の有無だけ preset で変わる)。
+
+規律:
+- **Investigation は focus 単位で1個・固定 slug で `op:update` して上書き**(op:update が `generated_at` を now に進め、`brief --mode resume` の primary 選択で最新として先頭に来る)。初回だけ `op:create`(`state: "active"`)。
+- 作業状態は Investigation の **`raw_content`** に構造化テキストで置く(専用フィールドは作らない)。`brief --mode resume` が `work_state` として surface する。
+- 深い生ログは **ConversationChunk**(固定 slug で update-in-place・高価値片のみ)、`discussed_in` で Investigation へ。
+- 救出した知識ノードは **`derived_from`(知識→Investigation)** で必ず Investigation に繋ぐ(復元時に文章だけでなく実ノードへ到達させる)。Decision はさらに **`led_to`(Investigation→Decision)**。
+- **計画/スケジュール型(Task/Milestone/Resource/Stakeholder)には書かない。**
+
+```json
+{
+  "reason": "compaction checkpoint: <focus の一言>",
+  "nodes": [
+    { "op": "update", "id": "investigation:<system>:<focus-slug>",
+      "updates": { "raw_content": "current focus: <いま何を>\nnext: <次の具体手>\nblocker: <詰まり>\ntouched: <file:line ...>" } },
+    { "op": "update", "id": "conversationchunk:<system>:<focus-slug>-scratch",
+      "updates": { "raw_content": "<失敗した道 / 正確なコマンド / 非自明な発見 / このセッションのユーザ制約>" } },
+    { "op": "create", "id": "decision:<system>:<slug>", "type": "Decision",
+      "title": "<採用した判断>", "summary": "...", "description": "なぜそう決めたか" },
+    { "op": "create", "id": "risk:<system>:<slug>", "type": "Risk",
+      "title": "<気づいた脅威>", "summary": "...", "description": "なぜリスクか" }
+  ],
+  "edges": [
+    { "op": "create", "id": "conversationchunk_<focus-slug>-scratch__discussed_in__investigation_<focus-slug>",
+      "type": "discussed_in", "from": "conversationchunk:<system>:<focus-slug>-scratch", "to": "investigation:<system>:<focus-slug>" },
+    { "op": "create", "id": "investigation_<focus-slug>__led_to__decision_<slug>",
+      "type": "led_to", "from": "investigation:<system>:<focus-slug>", "to": "decision:<system>:<slug>" },
+    { "op": "create", "id": "decision_<slug>__derived_from__investigation_<focus-slug>",
+      "type": "derived_from", "from": "decision:<system>:<slug>", "to": "investigation:<system>:<focus-slug>" },
+    { "op": "create", "id": "risk_<slug>__derived_from__investigation_<focus-slug>",
+      "type": "derived_from", "from": "risk:<system>:<slug>", "to": "investigation:<system>:<focus-slug>" },
+    { "op": "create", "id": "decision_<slug>__documented_by__file_<file_slug>",
+      "type": "documented_by", "from": "decision:<system>:<slug>", "to": "file:<system>:<path>" }
+  ]
+}
+```
+
+- 初回で Investigation 自体が無ければ、1つ目のノードを `op:create` + `type: "Investigation"` + `state: "active"` + `title`/`summary` にする。
+- 救出が Decision/Risk 各1件とは限らない。**型別に一巡**(Decision/RejectedOption/Risk/OperationalKnowledge、project は +Assumption/Agreement)し、`ask` の重複確認で**無い物だけ**を並べる。各知識ノードに `derived_from`→Investigation を必ず添える。
+- 退避だけ(救出ゼロ)なら nodes は Investigation(+ConversationChunk)のみ、edges は `discussed_in` のみで成立する。
+
+---
+
 ## Plan 共通形
 
 ```typescript

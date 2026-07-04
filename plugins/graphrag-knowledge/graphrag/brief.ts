@@ -11,6 +11,17 @@ export { judgeMatchConfidence };
 
 const DEFAULT_SUMMARY_CHARS = 280;
 const DEFAULT_LIMIT = 5;
+// resume が primary の作業状態 (Investigation.raw_content) を surface する際の上限。
+// summary より長く許すが、compact 直後の注入文脈を膨らませすぎない中庸。
+const RESUME_RAW_CHARS = 2000;
+// resume が active Investigation にぶら下げて surface する「恒久知識」型。
+// checkpoint はこの focus が生んだ知識を derived_from / led_to で Investigation に繋ぐので、
+// 文章 (work_state) だけでなく実ノードへ到達させる。計画/構造型 (Task/Milestone/File/Layer 等) は
+// 意図的に除外 — checkpoint の守備範囲外 (チャット作業がプロジェクト計画を書き換えない)。
+const RESUME_LINKED_TYPES = new Set([
+  "Decision", "RejectedOption", "Risk", "OperationalKnowledge",
+  "Goal", "Assumption", "Agreement"
+]);
 
 const CALL_EXCESSIVE = 3;
 
@@ -38,7 +49,8 @@ export async function buildGraphBrief(options: any = {}) {
         includeCandidates: options.includeCandidates ?? false
       }),
       usage: [
-        "Use active.primary.current_focus and active.primary.next_actions before running broad evidence retrieval.",
+        "Use active.primary.work_state (the checkpointed focus / next actions / blockers / in-flight edits) and active.primary.linked_knowledge before running broad evidence retrieval.",
+        "Follow active.primary.scratch (discussed_in ConversationChunk) only when work_state is not enough — it holds the deep raw log.",
         "Run graph:evidence only after choosing a concrete next action that needs source-backed context."
       ]
     };
@@ -81,16 +93,27 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
     .filter((node) => node.state === "active")
     .map((node) => ({
       ...compactNode(node, options),
-      updated_at: node.updated_at ?? node.last_updated_at ?? null,
-      current_focus: cleanScalar(node.current_focus),
-      next_actions: parseListLike(node.next_actions),
-      blockers: parseListLike(node.blockers),
-      touched_files: parseListLike(node.touched_files),
-      linked_decisions: linkedNodes(graph, nodesById, node.id, {
-        type: "Decision",
-        relations: new Set(["led_to", "has_premise"]),
+      // 並べ替えキー。checkpoint は op:update で generated_at を now に進めるので、
+      // これで「最新の checkpoint を刻んだ Investigation」が primary になる。
+      generated_at: cleanScalar(node.generated_at) || null,
+      // A (退避): 作業状態 (focus / 次アクション / 詰まり / 途中の編集) は
+      // Investigation.raw_content に構造化テキストで載る。compact 直後の再水和の本体。
+      work_state: truncate(node.raw_content, RESUME_RAW_CHARS),
+      // B への到達: この focus が生んだ恒久知識。checkpoint が derived_from (知識→Investigation)
+      // と led_to (Investigation→Decision) で張る。文章だけでなく実ノードに届かせる。
+      linked_knowledge: linkedNodes(graph, nodesById, node.id, {
+        types: RESUME_LINKED_TYPES,
+        relations: new Set(["led_to", "has_premise", "derived_from"]),
         minimal: true,
-        limit: 5
+        limit: 8
+      }),
+      // 深い生ログ (会話 / 正確なコマンド / 非自明な発見) は discussed_in で繋がる
+      // ConversationChunk 側。ポインタだけ surface し、本文は必要時に辿らせる。
+      scratch: linkedNodes(graph, nodesById, node.id, {
+        types: new Set(["ConversationChunk"]),
+        relations: new Set(["discussed_in"]),
+        minimal: true,
+        limit: 3
       })
     }))
     .sort(compareResumeItems);
@@ -220,7 +243,9 @@ function linkedNodes(graph, nodesById, nodeId, options: any = {}) {
     if (edge.from !== nodeId && edge.to !== nodeId) continue;
     const otherId = edge.from === nodeId ? edge.to : edge.from;
     const other = nodesById.get(otherId);
-    if (!other || (options.type && other.type !== options.type)) continue;
+    if (!other) continue;
+    if (options.type && other.type !== options.type) continue;
+    if (options.types && !options.types.has(other.type)) continue;
     linked.push({
       relation: edge.type,
       direction: edge.from === nodeId ? "out" : "in",
@@ -299,8 +324,11 @@ function compactReasons(reasons = []) {
 }
 
 function compareResumeItems(left, right) {
-  const leftTime = Date.parse(left.updated_at ?? "");
-  const rightTime = Date.parse(right.updated_at ?? "");
+  // generated_at 降順 (= 最終更新が新しい順)。checkpoint は op:update で generated_at を
+  // 進めるので最新 checkpoint が先頭 (primary) に来る。旧キー updated_at はどこにも
+  // 書かれず常に null だったため id 順に空振りしていた — 実在する generated_at に統一。
+  const leftTime = Date.parse(left.generated_at ?? "");
+  const rightTime = Date.parse(right.generated_at ?? "");
   const leftSortable = Number.isNaN(leftTime) ? 0 : leftTime;
   const rightSortable = Number.isNaN(rightTime) ? 0 : rightTime;
   return rightSortable - leftSortable || left.id.localeCompare(right.id);

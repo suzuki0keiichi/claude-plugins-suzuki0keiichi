@@ -126,6 +126,78 @@ test("resume does not count closed Investigations as legacy stateless", () => {
   assert.ok(!("legacy_stateless_investigations" in resume), "closed は意図的な終端、注記不要");
 });
 
+// compact 退避/復元: 複数 active があるとき、最新 checkpoint (generated_at が新しい) が primary。
+// 旧実装は書かれない updated_at で空振りし id 順に決めていた — generated_at 実キーで最新に向く。
+test("resume primary is the most recently checkpointed active Investigation (generated_at desc)", () => {
+  const graph = {
+    nodes: [
+      // id 順では aaa が先頭だが generated_at は zzz が最新 → zzz が primary であるべき。
+      { id: "investigation:s:aaa", type: "Investigation", title: "古い focus", state: "active",
+        generated_at: "2026-07-01T00:00:00.000Z" },
+      { id: "investigation:s:zzz", type: "Investigation", title: "直近 checkpoint", state: "active",
+        generated_at: "2026-07-05T00:00:00.000Z" }
+    ],
+    edges: []
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  assert.equal(resume.active_count, 2);
+  assert.equal(resume.primary.id, "investigation:s:zzz", "generated_at が最新のものが primary");
+});
+
+// A (退避): 作業状態は Investigation.raw_content に載り、resume が work_state として surface する。
+test("resume surfaces the Investigation raw_content as work_state", () => {
+  const graph = {
+    nodes: [
+      { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active",
+        raw_content: "current focus: X を実装中\nnext: Y を直す\nblocker: Z 待ち" }
+    ],
+    edges: []
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  assert.match(resume.primary.work_state ?? "", /current focus: X を実装中/);
+  assert.match(resume.primary.work_state ?? "", /next: Y を直す/);
+});
+
+// B への到達: この focus が生んだ恒久知識に、Decision 以外 (Risk 等) も derived_from 経由で届く。
+// 旧実装は Decision 限定だったため Risk/OK は「文章しか思い出せない」状態だった。
+test("resume surfaces linked knowledge beyond Decision via derived_from (Risk/OK reachable)", () => {
+  const graph = {
+    nodes: [
+      { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active" },
+      { id: "decision:s:d1", type: "Decision", title: "採用した判断" },
+      { id: "risk:s:r1", type: "Risk", title: "踏んだリスク" },
+      { id: "ok:s:o1", type: "OperationalKnowledge", title: "運用ハマり" }
+    ],
+    edges: [
+      // checkpoint の標準配線: 知識 → Investigation (derived_from) + led_to (Investigation→Decision)。
+      { id: "e1", type: "led_to", from: "investigation:s:live", to: "decision:s:d1" },
+      { id: "e2", type: "derived_from", from: "risk:s:r1", to: "investigation:s:live" },
+      { id: "e3", type: "derived_from", from: "ok:s:o1", to: "investigation:s:live" }
+    ]
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  const ids = resume.primary.linked_knowledge.map((l) => l.node.id);
+  assert.ok(ids.includes("decision:s:d1"), "Decision が届く");
+  assert.ok(ids.includes("risk:s:r1"), "Risk も derived_from 経由で届く");
+  assert.ok(ids.includes("ok:s:o1"), "OperationalKnowledge も届く");
+});
+
+// 深い生ログは discussed_in の ConversationChunk 側。resume は scratch ポインタとして surface。
+test("resume surfaces the discussed_in ConversationChunk as a scratch pointer", () => {
+  const graph = {
+    nodes: [
+      { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active" },
+      { id: "conversationchunk:s:c1", type: "ConversationChunk", title: "生ログ" }
+    ],
+    edges: [
+      { id: "e1", type: "discussed_in", from: "conversationchunk:s:c1", to: "investigation:s:live" }
+    ]
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  const ids = resume.primary.scratch.map((l) => l.node.id);
+  assert.ok(ids.includes("conversationchunk:s:c1"), "discussed_in の ConversationChunk が scratch に出る");
+});
+
 // --- query brief: relations の slim 化 / 優先度 / standout 露出 ---
 
 import { buildQueryBrief } from "./brief.ts";
