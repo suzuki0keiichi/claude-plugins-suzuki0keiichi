@@ -19,8 +19,31 @@ const runHook = (input, env = {}) =>
     env: { ...process.env, ...env }
   });
 
-test("非 compact の source では何も出さない (startup)", () => {
+test("未対応の source では何も出さない (startup)", () => {
   const out = runHook({ hook_event_name: "SessionStart", source: "startup", cwd: process.cwd() });
+  assert.equal(out, "");
+});
+
+test("未対応の source では何も出さない (resume)", () => {
+  const out = runHook({ hook_event_name: "SessionStart", source: "resume", cwd: process.cwd() });
+  assert.equal(out, "");
+});
+
+test("clear でも .graphrag が見つからなければ何も出さない (非 graphrag リポジトリ)", () => {
+  const empty = mkdtempSync(path.join(tmpdir(), "no-graphrag-"));
+  try {
+    const out = runHook({ hook_event_name: "SessionStart", source: "clear", cwd: empty });
+    assert.equal(out, "", "vault の無い場所では clear でも透明");
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("clear でも GRAPHRAG_COMPACT_RESTORE=off なら何も出さない", () => {
+  const out = runHook(
+    { hook_event_name: "SessionStart", source: "clear", cwd: process.cwd() },
+    { GRAPHRAG_COMPACT_RESTORE: "off" }
+  );
   assert.equal(out, "");
 });
 
