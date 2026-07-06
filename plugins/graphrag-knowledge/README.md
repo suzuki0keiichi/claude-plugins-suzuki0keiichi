@@ -61,13 +61,10 @@
 
 長時間セッションで避けられない compact の情報ロストを、盲目的要約に任せず**狙って残す**。
 
-- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態（active Investigation の `raw_content`）と、未書き戻しの恒久知識（Decision / RejectedOption / Risk / 運用知識…）をグラフへフラッシュする。
-- **復元**（自動）: `SessionStart` フックが `brief --mode resume` を注入し、直前 checkpoint を再水和する。**無操作**。発火する source は 2 つ:
-  - **compact 直後**: 常に復元（auto-compact を含む。盲目的要約に curated な checkpoint を重ねる保険）。
-  - **clear 直後**: 直前 checkpoint が**新鮮なとき（`generated_at` が 10 分以内）だけ**復元。古ければ真の白紙 — 無関係な作業のための `/clear` は邪魔しない。
-- **おすすめの回し方**: 余力があるなら **`checkpoint` → `/clear` → 綺麗に再開**（盲目的要約ゼロで curated な状態だけが立ち上がる）。カツカツになって auto-compact に飲まれても、compact 側の復元が保険として効く。
-- **無害化**: 非 graphrag リポジトリでは即 no-op（透明）。復元フックを黙らせたい時は `.graphrag/.env` に `GRAPHRAG_COMPACT_RESTORE=off`。
-- auto-compact は捕捉できない（残 context signal が無いため）。checkpoint は人間が余力のうちに撃つ前提。
+- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態と未書き戻しの恒久知識をグラフへフラッシュする。
+- **復元**（自動）: `SessionStart` フックが直前 checkpoint を再水和する。**無操作**（compact 直後は常に、`/clear` 直後は checkpoint が新鮮なときだけ）。
+
+非 graphrag リポジトリでは no-op。細かい挙動は `graphrag-checkpoint` skill を参照。
 
 ## テスト
 
