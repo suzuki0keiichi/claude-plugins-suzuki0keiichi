@@ -61,8 +61,8 @@
 
 長時間セッションで避けられない compact の情報ロストを、盲目的要約に任せず**狙って残す**。
 
-- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態と未書き戻しの恒久知識をグラフへフラッシュする。
-- **復元**（自動）: `SessionStart` フックが直前 checkpoint を再水和する。**無操作**（compact 直後は常に、`/clear` 直後は checkpoint が新鮮なときだけ）。
+- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態と未書き戻しの恒久知識をグラフへフラッシュし、最後に `checkpoint-mark` で「/clear されたら復元せよ」の one-shot マーカーを刻む。
+- **復元**（自動）: `SessionStart` フックが直前 checkpoint を再水和する。**無操作**（compact 直後は常に、`/clear` 直後はマーカーがあるとき — 読んだ時点で消費されるので一度きり、失効 60 分。マーカー無しの旧 checkpoint は generated_at 10 分以内の後方互換ゲート）。
 
 非 graphrag リポジトリでは no-op。細かい挙動は `graphrag-checkpoint` skill を参照。
 

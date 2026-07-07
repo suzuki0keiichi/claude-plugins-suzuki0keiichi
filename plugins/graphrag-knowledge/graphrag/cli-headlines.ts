@@ -968,6 +968,11 @@ export async function dispatchHeadline(verb: string, argv: string[]): Promise<vo
     case "carve": return runCarve(argv);
     case "commit-mutation": return runCommitMutation(argv);
     case "inspect": return runInspect(argv);
+    case "checkpoint-mark": {
+      // one-shot 復元マーカー (graphrag-checkpoint skill 用)。実装は checkpoint-marker.ts。
+      const mod = await import("./checkpoint-marker.ts");
+      return mod.runCheckpointMark(argv);
+    }
     default: throw new Error(`headline verb '${verb}' not in dispatch`);
   }
 }

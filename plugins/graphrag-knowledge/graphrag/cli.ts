@@ -20,7 +20,7 @@ const HEADLINE_VERBS = [
   "add-investigation", "add-rejected-option",
   "add-stakeholder", "add-resource", "add-milestone", "add-assumption",
   "add-agreement", "add-task", "add-source", "add-theme",
-  "inspect"
+  "inspect", "checkpoint-mark"
 ] as const;
 
 type PrimitiveVerb = typeof PRIMITIVE_VERBS[number];

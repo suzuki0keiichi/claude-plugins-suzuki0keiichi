@@ -30,16 +30,16 @@ test("cli has expected headline verbs", () => {
     "add-investigation", "add-rejected-option",
     "add-stakeholder", "add-resource", "add-milestone", "add-assumption",
     "add-agreement", "add-task", "add-source", "add-theme",
-    "inspect"
+    "inspect", "checkpoint-mark"
   ];
   for (const v of expected) {
     assert.ok(isHeadlineVerb(v), `expected headline: ${v}`);
   }
 });
 
-test("listKnownVerbs returns all 37 verbs (18 primitive + 19 headline)", () => {
+test("listKnownVerbs returns all 38 verbs (18 primitive + 20 headline)", () => {
   const all = listKnownVerbs();
-  assert.equal(all.length, 37);
+  assert.equal(all.length, 38);
   // Guard against a verb id being registered twice across the primitive/headline lists.
   assert.equal(new Set(all).size, all.length, "duplicate verb id across primitive/headline lists");
 });

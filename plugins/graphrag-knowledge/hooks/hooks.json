@@ -1,5 +1,5 @@
 {
-  "description": "(1) git commit 直前に判断/却下案/リスク/運用知識の書き戻しを促す。(2) compact 直後 (常に)、または clear 直後 (直前 checkpoint が新鮮なときだけ) に、直前 checkpoint の作業状態と恒久知識を resume 注入する。いずれも常に非ブロッキング (vault 無しや失敗時は無音)。",
+  "description": "(1) git commit 直前に判断/却下案/リスク/運用知識の書き戻しを促す。(2) compact 直後 (常に)、または clear 直後 (checkpoint-mark が刻んだ one-shot マーカーがあるとき。無ければ旧 10 分ゲートに後方互換で落ちる) に、直前 checkpoint の作業状態と恒久知識を resume 注入する。いずれも常に非ブロッキング (vault 無しや失敗時は無音)。",
   "hooks": {
     "PreToolUse": [
       {

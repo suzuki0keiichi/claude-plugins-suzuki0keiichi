@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.6.0
+version: 4.7.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④⑤ 実装一段落・結論確定・却下・記録指示で書き戻す (詳細は §Proactive Persistence)。
 ---
 
@@ -128,6 +128,7 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
 - `inspect` — status of env + artifacts as single JSON (vault / graph.json / vector-index / world, plus `vault_dir_source`, `state_dir`, `ask_state`, `indexed_graph`)
+- `checkpoint-mark` — one-shot "restore me after /clear" marker for the SessionStart restore hook (written to state-dir cache; consumed once, 60-min expiry). Fired as the final step of the `graphrag-checkpoint` skill — not needed in ordinary write flows.
 
 ## Primitive verbs (per-stage, fine-grained control)
 
