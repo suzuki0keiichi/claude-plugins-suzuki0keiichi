@@ -16,7 +16,7 @@ For time-bounded initiatives (business projects). Differences from system vault:
   - `ConversationChunk` = Raw dialogue record.
 - **Project-specific (8)**:
   - `Source` = External information source (URL + freshness). Attributes: `source_kind` (document/event/regulation/incident), `url`, `fetched_at`, `refresh_method`, `staleness_threshold`.
-  - `Theme` = Cross-project concern (cost reduction, cross-team infrastructure migration, etc.). Often unnecessary within a single project.
+  - `Theme` = Cross-project concern (cost reduction, cross-team infrastructure migration, etc.). Often unnecessary within a single project. A theme's footprint in a project is a Goal (active response) or a Constraint (imposed boundary) — not every theme spawns a goal.
   - `Stakeholder` = Interested party. Person, team, or external org.
   - `Resource` = People, assets, money, time. Attribute: `category` (people/budget/asset/time).
   - `Milestone` = Time-axis checkpoint. Grounds Goal in time.
@@ -56,7 +56,8 @@ For time-bounded initiatives (business projects). Differences from system vault:
 - `party_to`: **Stakeholder** → **Agreement**
 
 ### Crosscut
-- `encompasses`: **Theme** → Goal|Decision|Risk|**Task**|**Resource**|**Assumption**
+- `encompasses`: **Theme** → Goal|Decision|Risk|**Task**|**Resource**|**Assumption**|**OK**|**Constraint**
+  - Milestone is deliberately NOT a member: a milestone belongs to a theme only via the Goal it grounds (Theme → Goal → `targets` → Milestone), never directly. OK/Constraint can be *primary* members (knowledge or a boundary condition can itself be the theme's subject); a milestone never is.
 
 ### Infrastructure
 - `discussed_in`: ConversationChunk → Investigation

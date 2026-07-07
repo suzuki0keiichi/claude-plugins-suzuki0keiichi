@@ -66,7 +66,9 @@ const PROJECT_EDGE_TYPES = [
   "party_to",            // Stakeholder → Agreement
 
   // --- crosscut (横断) ---
-  "encompasses",         // Theme → Goal/Decision/Risk/Task/Resource/Assumption
+  "encompasses",         // Theme → Goal/Decision/Risk/Task/Resource/Assumption/OperationalKnowledge/Constraint
+                         //   Milestone is deliberately excluded: a milestone belongs to a theme only via the
+                         //   Goal it grounds in time (Theme → Goal → targets → Milestone), never directly.
 
   // --- infrastructure ---
   "discussed_in",        // ConversationChunk → Investigation
@@ -143,7 +145,8 @@ const EDGE_TYPE_RULES: Record<ProjectEdgeType, TypeRule[]> = {
     ["Stakeholder", "Agreement"]
   ],
   encompasses: [
-    ["Theme", ["Goal", "Decision", "Risk", "Task", "Resource", "Assumption"]]
+    ["Theme", ["Goal", "Decision", "Risk", "Task", "Resource", "Assumption",
+               "OperationalKnowledge", "Constraint"]]
   ],
   discussed_in: [
     ["ConversationChunk", "Investigation"]

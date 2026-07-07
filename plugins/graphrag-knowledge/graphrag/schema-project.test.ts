@@ -123,19 +123,36 @@ describe("project schema preset", () => {
     assert.deepStrictEqual(validateGraph(g, S), []);
   });
 
-  it("encompasses: Theme → Goal/Decision/Risk/Task/Resource/Assumption", () => {
+  it("encompasses: Theme → Goal/Decision/Risk/Task/Resource/Assumption/OperationalKnowledge/Constraint", () => {
     const g = {
       nodes: [
         { id: "theme:p:a", type: "Theme" },
         { id: "goal:p:b", type: "Goal" },
         { id: "assumption:p:c", type: "Assumption", certainty: "Assumed" },
+        { id: "ok:p:d", type: "OperationalKnowledge" },
+        { id: "constraint:p:e", type: "Constraint" },
       ],
       edges: [
         { id: "e1", type: "encompasses", from: "theme:p:a", to: "goal:p:b" },
         { id: "e2", type: "encompasses", from: "theme:p:a", to: "assumption:p:c" },
+        { id: "e3", type: "encompasses", from: "theme:p:a", to: "ok:p:d" },
+        { id: "e4", type: "encompasses", from: "theme:p:a", to: "constraint:p:e" },
       ],
     };
     assert.deepStrictEqual(validateGraph(g, S), []);
+  });
+
+  it("encompasses rejects Theme → Milestone (reach it via Theme → Goal → targets → Milestone)", () => {
+    const g = {
+      nodes: [
+        { id: "theme:p:a", type: "Theme" },
+        { id: "milestone:p:b", type: "Milestone" },
+      ],
+      edges: [
+        { id: "e1", type: "encompasses", from: "theme:p:a", to: "milestone:p:b" },
+      ],
+    };
+    assert.ok(validateGraph(g, S).some(f => f.includes("invalid type pair")));
   });
 
   it("rejects system-vault-only types (File, Layer, Component)", () => {
