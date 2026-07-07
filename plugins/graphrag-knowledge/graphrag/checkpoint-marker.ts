@@ -1,79 +1,49 @@
-// checkpoint → /clear 復元の one-shot マーカー。
+// checkpoint → /clear 復元の予約キーを ask-state.json に刻む `checkpoint-mark` verb。
 //
-// graphrag-checkpoint skill が退避を書き終えた後に `checkpoint-mark` verb で
-// 「clear されたら復元せよ」という意図を state dir の cache に刻む。
-// SessionStart フック (hooks/compact-restore.mjs) が clear/compact 時にこれを
-// 読み取り、消費 (削除) する。
+// graphrag-checkpoint skill が退避 (A ステップ: active Investigation の raw_content 更新) を
+// 書き終えた後にこれを呼ぶ。ここで active Investigation の work_state を「検証」してから、
+// ask-state.json の予約キー (CHECKPOINT_STATE_KEY) に「clear されたら復元せよ」の内容を書く。
+// SessionStart フック (hooks/clear-restore.mjs) が source==="clear" のときだけ one-shot で消費する。
 //
-// なぜ壁時計ゲート (generated_at 10 分以内) だけでは足りないか:
-//   1. checkpoint 完了 → 報告を読む → 少し会話 → /clear で 10 分は簡単に超える。
-//   2. op:update は内容が実際に変わった時しか generated_at を進めない
-//      (mutation-core の idempotence 維持)。同内容の再 checkpoint 直後の /clear が
-//      「古い」と誤判定される。
-// マーカーは「復元してほしい」という明示の意図なので、消費されるまで有効
-// (暴発防止の緩い TTL のみ)。
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+// 設計 (旧「ファイルマーカー方式」からの転換):
+//   - 新ファイル種を増やさない: checkpoint-pending.json を廃し ask-state.json に相乗り。
+//   - 復元経路を素にする: フックは CLI 起動も graph パースも primary 選択ヒューリスティックも
+//     せず、予約キーの中身をそのまま注入する。検証は「文脈が生きている checkpoint 時」に済ませる
+//     ので、失敗はここで (直せる場所で) hard-error になる。
+//   - compact では復元しない: 古い checkpoint の無条件再注入はミスリードなので clear 限定。
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { cacheDirForVault } from "./cli-env.ts";
+import { loadGraph } from "./retrieval.ts";
+import {
+  CHECKPOINT_STATE_KEY,
+  loadAskState,
+  saveAskState,
+  type CheckpointStateEntry
+} from "./cli-ask-state.ts";
 
-export const CHECKPOINT_MARKER_FILENAME = "checkpoint-pending.json";
+// 予約キーの失効窓。主の消費はフック側の one-shot 削除であり、これは「checkpoint-mark を
+// 撃ったが clear しなかった」古い意図が翌日の無関係な /clear で暴発しないための保険。
+// hooks/clear-restore.mjs は依存ゼロ方針でこの値を import せず複製する (相互参照コメントを両側に置く)。
+export const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
 
-/** 暴発防止の TTL。one-shot 消費が主で、これは「撃ったが clear しなかった」古い意図の失効用。 */
-export const CHECKPOINT_MARKER_TTL_MS = 60 * 60 * 1000; // 60 分
-
-export type CheckpointMarker = {
-  marked_at: string; // ISO 8601
-  focus?: string;    // 任意: 退避した focus の一行 (人間/フックのデバッグ用)
-};
-
-export function checkpointMarkerPath(vaultDir: string): string {
-  return path.join(cacheDirForVault(vaultDir), CHECKPOINT_MARKER_FILENAME);
-}
-
-export function writeCheckpointMarker(
-  vaultDir: string,
-  focus?: string,
-  now: number = Date.now()
-): { marker_path: string; marker: CheckpointMarker } {
-  const markerPath = checkpointMarkerPath(vaultDir);
-  mkdirSync(path.dirname(markerPath), { recursive: true });
-  const marker: CheckpointMarker = {
-    marked_at: new Date(now).toISOString(),
-    ...(focus ? { focus } : {})
-  };
-  writeFileSync(markerPath, JSON.stringify(marker, null, 2));
-  return { marker_path: markerPath, marker };
-}
-
-/** 壊れた/読めないマーカーは null (存在しない扱い)。 */
-export function readCheckpointMarker(vaultDir: string): CheckpointMarker | null {
-  const markerPath = checkpointMarkerPath(vaultDir);
-  if (!existsSync(markerPath)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(markerPath, "utf8"));
-    if (!parsed || typeof parsed !== "object" || typeof parsed.marked_at !== "string") return null;
-    return parsed as CheckpointMarker;
-  } catch {
-    return null;
-  }
-}
-
-/** one-shot 消費。無くても失敗しない。 */
-export function consumeCheckpointMarker(vaultDir: string): void {
-  try {
-    unlinkSync(checkpointMarkerPath(vaultDir));
-  } catch {
-    // 既に無い / 消せない — 消費は best-effort
-  }
-}
+// raw_content の上限。これを超える深い生ログは ConversationChunk に置くべき。
+const RAW_CONTENT_MAX_BYTES = 8 * 1024; // 8KB
 
 /**
- * `checkpoint-mark` verb 本体。
- * 引数: [--focus "<一行>"] [--vault <dir>]
- * 出力: { marker_path, marked_at, ttl_minutes } の JSON。
+ * `checkpoint-mark` verb 本体 (cli-headlines.ts の dispatchHeadline から呼ばれる)。
+ * 引数: --investigation <id> (必須) [--vault <dir>]
+ * 出力: { investigation_id, first_action, marked_at, ttl_minutes, state_path, note } の JSON。
  */
 export async function runCheckpointMark(argv: string[]): Promise<void> {
   const flags = parseMarkFlags(argv);
+
+  if (!flags.investigation) {
+    throw new Error(
+      "checkpoint-mark requires --investigation <id>: A ステップで更新した active Investigation の " +
+      "id を渡せ。この id のノードから work_state を検証し復元内容を組む。"
+    );
+  }
   const vaultDir = flags.vault ?? process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) {
     throw new Error(
@@ -81,23 +51,137 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
       "(.graphrag/.env or auto-discovery)"
     );
   }
-  const { marker_path, marker } = writeCheckpointMarker(vaultDir, flags.focus);
-  // 書き込み系 verb と同じく、どの vault (state dir) に書いたかを stderr で可視化する。
-  process.stderr.write(`[graphrag] checkpoint marker: ${marker_path}\n`);
+
+  // cli-headlines.ts と同じ経路で graph をロードし、注入対象ノードを検証する。
+  const graph = await loadGraph(vaultDir);
+  const node = (graph.nodes ?? []).find((n: any) => n.id === flags.investigation);
+  if (!node) {
+    throw new Error(
+      `checkpoint-mark: Investigation "${flags.investigation}" が vault に存在しない。` +
+      "A ステップで更新した Investigation の実 id を渡せ (typo か未 commit の可能性)。"
+    );
+  }
+  if (node.type !== "Investigation") {
+    throw new Error(
+      `checkpoint-mark: "${flags.investigation}" は type=${node.type} であり Investigation ではない。` +
+      "work_state を載せる active Investigation の id を渡せ。"
+    );
+  }
+  if (node.state !== "active") {
+    throw new Error(
+      `checkpoint-mark: Investigation "${flags.investigation}" は state=${node.state ?? "(無し)"} で active でない。` +
+      "復元対象は進行中 (state: active) の focus のみ。checkpoint する前に op:update で active にせよ。"
+    );
+  }
+
+  const raw = typeof node.raw_content === "string" ? node.raw_content : "";
+  if (raw.trim() === "") {
+    throw new Error(
+      `checkpoint-mark: Investigation "${flags.investigation}" の raw_content が空。` +
+      "skill の work_state 書式 (current focus:/next:/blocker:/touched:) で作業状態を書け。"
+    );
+  }
+  // 大文字小文字は寛容 (/mi)。行頭マッチで「current focus:」「next:」の存在を確かめる。
+  if (!/^current focus:/mi.test(raw)) {
+    throw new Error(
+      `checkpoint-mark: raw_content に "current focus:" 行が無い。` +
+      "skill の work_state 書式 (current focus:/next:/blocker:/touched:) で書け。"
+    );
+  }
+  if (!/^next:/mi.test(raw)) {
+    throw new Error(
+      `checkpoint-mark: raw_content に "next:" 行が無い。` +
+      "skill の work_state 書式 (current focus:/next:/blocker:/touched:) で書け。"
+    );
+  }
+
+  const firstAction = extractFirstAction(raw);
+  if (!firstAction) {
+    throw new Error(
+      `checkpoint-mark: next の最初の一手が空。next: の先頭に一意な最初の一手 ` +
+      "(file:line か実行コマンドまで具体化) を書け。復元はこの一手から再開する。"
+    );
+  }
+
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes > RAW_CONTENT_MAX_BYTES) {
+    throw new Error(
+      `checkpoint-mark: raw_content が ${bytes} bytes で上限 ${RAW_CONTENT_MAX_BYTES} bytes (8KB) 超。` +
+      "深い生ログは ConversationChunk に置き、work_state は focus/next/blocker/touched の要約に絞れ。"
+    );
+  }
+
+  // 予約キーの置き場所は cacheDirForVault(vaultDir) 固定。resolveAskStateDir は使わない:
+  //   - 依存ゼロのフック (clear-restore.mjs) は walk-up で vault 側の .graphrag/cache しか
+  //     見つけられないので、書き手も同じ場所へ書かないと復元時に読めない。
+  //   - checkpoint は vault へ知識を書く行為なので readonly モード (consumer cache) は前提にない。
+  const stateDir = cacheDirForVault(vaultDir);
+  if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+
+  const now = Date.now();
+  const entry: CheckpointStateEntry = {
+    count: 0,                              // ask 連打カウントとは無縁。0 固定 (型互換のため持たせる)。
+    last_at: now,                          // ms epoch。既存 24h GC に自然に乗る (無いと不死化)。
+    marked_at: new Date(now).toISOString(),
+    cwd: process.cwd(),
+    investigation_id: flags.investigation,
+    first_action: firstAction,
+    work_state: raw
+  };
+
+  // 他キー (ask 連打カウント等) を保ったまま予約キーだけ差し替える。
+  const state = loadAskState(stateDir);
+  state[CHECKPOINT_STATE_KEY] = entry;
+  saveAskState(stateDir, state);
+
+  const statePath = path.join(stateDir, "ask-state.json");
+  // 書き込み系 verb と同じく、どの state dir へ書いたかを stderr で可視化する。
+  process.stderr.write(`[graphrag] checkpoint state: ${statePath}\n`);
   process.stdout.write(JSON.stringify({
-    marker_path,
-    marked_at: marker.marked_at,
-    ttl_minutes: CHECKPOINT_MARKER_TTL_MS / 60_000,
-    note: "one-shot: /clear または compact の復元フックが一度だけ消費する"
+    investigation_id: flags.investigation,
+    first_action: firstAction,
+    marked_at: entry.marked_at,
+    ttl_minutes: CHECKPOINT_TTL_MS / 60_000,
+    state_path: statePath,
+    note: "one-shot: /clear の復元フックが一度だけ消費する。compact では復元しない"
   }, null, 2) + "\n");
 }
 
-function parseMarkFlags(argv: string[]): { vault?: string; focus?: string } {
-  const out: { vault?: string; focus?: string } = {};
+/**
+ * next: の「最初の一手」を抽出する。
+ *   1. `next:` と同じ行の後続テキストが非空ならそれ。
+ *   2. 空なら next: 行の直後の最初の非空行 (箇条書き記号 `-` `*` `1)` `1.` 等を剥がす)。
+ * 抽出できなければ "" を返す (呼び手が hard-error にする)。
+ */
+export function extractFirstAction(raw: string): string {
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^next:(.*)$/i.exec(lines[i]);
+    if (!m) continue;
+    // 1. 同一行の後続
+    const inline = m[1].trim();
+    if (inline) return stripBullet(inline);
+    // 2. 直後の最初の非空行
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (t) return stripBullet(t);
+    }
+    return "";
+  }
+  return "";
+}
+
+// 先頭の箇条書き記号 (- * • / 1) 1. 等) を 1 つ剥がす。以降のテキストはそのまま。
+function stripBullet(s: string): string {
+  return s.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim();
+}
+
+function parseMarkFlags(argv: string[]): { vault?: string; investigation?: string } {
+  const out: { vault?: string; investigation?: string } = {};
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
     if (tok === "--vault" && typeof argv[i + 1] === "string") { out.vault = argv[++i]; continue; }
-    if (tok === "--focus" && typeof argv[i + 1] === "string") { out.focus = argv[++i]; continue; }
+    if (tok === "--investigation" && typeof argv[i + 1] === "string") { out.investigation = argv[++i]; continue; }
   }
   return out;
 }

@@ -1,5 +1,5 @@
 {
-  "description": "(1) git commit 直前に判断/却下案/リスク/運用知識の書き戻しを促す。(2) compact 直後 (常に)、または clear 直後 (checkpoint-mark が刻んだ one-shot マーカーがあるとき。無ければ旧 10 分ゲートに後方互換で落ちる) に、直前 checkpoint の作業状態と恒久知識を resume 注入する。いずれも常に非ブロッキング (vault 無しや失敗時は無音)。",
+  "description": "(1) git commit 直前に判断/却下案/リスク/運用知識の書き戻しを促す。(2) clear 直後にのみ、checkpoint-mark が ask-state.json の予約キーに刻んだ作業状態と『最初の一手』を one-shot で消費して additionalContext に注入する (60 分失効・cwd 厳密一致・読んだら即消費)。compact では復元しない (古い checkpoint の無条件再注入を避ける)。いずれも常に非ブロッキング (vault 無しや失敗時は無音)。",
   "hooks": {
     "PreToolUse": [
       {
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/compact-restore.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/clear-restore.mjs\"",
             "timeout": 15
           }
         ]

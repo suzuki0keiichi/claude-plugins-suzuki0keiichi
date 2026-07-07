@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMode } from "./cli-env.ts";
@@ -6,10 +6,32 @@ import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMo
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 時間
 const STATE_FILENAME = "ask-state.json";
 
+// checkpoint 復元の予約キー。8 文字 fingerprint (fingerprintQuestion) とは長さで
+// 衝突しない (14 文字・アンダースコア境界)。checkpoint-mark verb が書き、clear-restore
+// フックが one-shot で消費する。ask の連打カウントとは別レーンで ask-state.json に同居する。
+export const CHECKPOINT_STATE_KEY = "__checkpoint__";
+
 // hits: その質問の直近の top≤3 ヒットノード id (E4 ask-trail)。premise 候補提案が
 // 「直近で見ていたノード」を引くために使う。既存 count/last_at の entry に同居する。
 export type AskStateEntry = { count: number; last_at: number; hits?: string[] };
-export type AskState = Record<string, AskStateEntry>;
+
+// checkpoint 予約キーの値。既存 entry の読み手を壊さないための不変条件:
+//   - count/last_at を必ず持つ (bumpCallCount / gcAskState / readRecentHitIds が触る)。
+//     特に last_at (ms epoch) が無いと 24h GC の NaN 比較で不死化する。
+//   - hits を持たない (hits?: never)。readRecentHitIds の Array.isArray(e.hits) で
+//     自然に除外され、checkpoint が premise 候補として拾われない。
+export type CheckpointStateEntry = {
+  count: number;
+  last_at: number;
+  hits?: never;
+  marked_at: string;        // ISO 8601。フック側の 60 分失効判定に使う。
+  cwd: string;              // checkpoint 実行時の cwd。フック側の厳密一致判定に使う。
+  investigation_id: string;
+  first_action: string;     // next: から抽出した「最初の一手」。
+  work_state: string;       // Investigation.raw_content 全文。
+};
+
+export type AskState = Record<string, AskStateEntry | CheckpointStateEntry>;
 
 /**
  * 質問文を 8 文字の hex fingerprint に。case-sensitive、whitespace は trim のみ。
@@ -64,7 +86,15 @@ export function loadAskState(baseDir: string): AskState {
 
 export function saveAskState(baseDir: string, state: AskState): void {
   if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
-  writeFileSync(stateFilePath(baseDir), JSON.stringify(state, null, 2));
+  // 原子書き込み: 同ディレクトリの一時ファイルへ書いてから rename する。
+  // rename は同一 FS 上で原子的なので、並行 load→save が競合しても読み手は
+  // 常に「古い完全な JSON」か「新しい完全な JSON」を見る (中途半端な切れた
+  // ファイルを読まない)。完全な排他ではない — 片方の更新が消える可能性は残るが、
+  // lock を持ち込まずに「壊れた JSON を読ませない」ところまでを保証する。
+  const fp = stateFilePath(baseDir);
+  const tmp = `${fp}.tmp.${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(state, null, 2));
+  renameSync(tmp, fp);
 }
 
 export function gcAskState(baseDir: string, now: number = Date.now()): void {

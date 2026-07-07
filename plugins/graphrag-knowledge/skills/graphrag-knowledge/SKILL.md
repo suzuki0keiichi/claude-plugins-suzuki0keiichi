@@ -28,7 +28,7 @@ This skill is the read/write foundation. Three derived skills review changes and
 - `/graphrag-knowledge:graphrag-pr-review` — PR/diff review against graph (crosscut axis + File), detecting concept deltas in 3 tiers
 - `/graphrag-knowledge:graphrag-review-doc` — generate concept-level explanation doc (HTML) for human reviewers
 
-**Compaction lifecycle** (separate from review): `/graphrag-knowledge:graphrag-checkpoint` flushes the live session to the graph before `/compact` (A: work-state → active Investigation `raw_content` + ConversationChunk; B: unpersisted durable knowledge → normal knowledge nodes, wired back via `derived_from`/`led_to`). Restore is automatic — the `compact-restore.mjs` SessionStart hook injects `brief --mode resume` after compaction. `brief --mode resume` surfaces the newest active Investigation (by `generated_at`) with `work_state` / `linked_knowledge` / `scratch`.
+**Checkpoint / clear handoff lifecycle** (separate from review): `/graphrag-knowledge:graphrag-checkpoint` flushes the live session to the graph before `/compact` (A: work-state → active Investigation `raw_content` + ConversationChunk; B: unpersisted durable knowledge → normal knowledge nodes, wired back via `derived_from`/`led_to`), then fires `checkpoint-mark --investigation <id>` to write a one-shot restore intent into the reserved `__checkpoint__` key of `ask-state.json`. Restore is automatic on `/clear` only — the `clear-restore.mjs` SessionStart hook consumes the one-shot intent (60-min expiry, cwd match) and injects the snapshot. Nothing is injected after compact; run `brief --mode resume` manually to reach the same Investigation.
 
 ## Invariants (non-negotiable design boundaries)
 
@@ -128,7 +128,7 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
 - `inspect` — status of env + artifacts as single JSON (vault / graph.json / vector-index / world, plus `vault_dir_source`, `state_dir`, `ask_state`, `indexed_graph`)
-- `checkpoint-mark` — one-shot "restore me after /clear" marker for the SessionStart restore hook (written to state-dir cache; consumed once, 60-min expiry). Fired as the final step of the `graphrag-checkpoint` skill — not needed in ordinary write flows.
+- `checkpoint-mark --investigation <id>` — one-shot "restore me after /clear" intent for the SessionStart restore hook, written into the reserved `__checkpoint__` key of `ask-state.json` (no new file; consumed once, 60-min expiry). Fired as the final step of the `graphrag-checkpoint` skill — not needed in ordinary write flows.
 
 ## Primitive verbs (per-stage, fine-grained control)
 
