@@ -1,7 +1,7 @@
 ---
 name: graphrag-checkpoint
 version: 1.1.0
-description: compact で消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで context が埋まってきた時、compact の盲目的要約に任せず狙って残す。「compact する前に退避して」「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「compact しても大丈夫なようにグラフに残して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。/clear 直後の復元は SessionStart フックが自動で行う (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
+description: context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、`/clear` で綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。退避後に `/clear` すると SessionStart フックが直前の作業状態を自動で戻す (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
 ---
 
 # Compact Checkpoint（退避・最終フラッシュ）

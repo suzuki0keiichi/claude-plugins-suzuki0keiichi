@@ -52,7 +52,7 @@
 
 主なスキル:
 - **graphrag-knowledge** — 知識の読み書き（着手前に `ask` で引く、一段落で書き戻す）
-- **graphrag-checkpoint** — compact 対策の退避（下記）
+- **graphrag-checkpoint** — 退避 → `/clear` で綺麗に再開（下記）
 - **graphrag-pr-review** — PR/diff をグラフと照合してレビュー
 - **graphrag-design-review** — 設計案をグラフと照合してレビュー
 - **graphrag-review-doc** — 人間向けのレビュー説明資料（HTML）を生成
