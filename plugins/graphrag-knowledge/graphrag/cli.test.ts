@@ -9,7 +9,7 @@ test("cli has expected primitive verbs", () => {
     "concern-hint", "edge-suggest-policy", "carving-check",
     "branch-merge", "world-refresh",
     "carving-allow", "harvest-history", "staleness-check",
-    "xref-check", "fsck"
+    "xref-check", "fsck", "stocktake"
   ];
   for (const v of expected) {
     assert.ok(isPrimitiveVerb(v), `expected primitive: ${v}`);
@@ -37,9 +37,9 @@ test("cli has expected headline verbs", () => {
   }
 });
 
-test("listKnownVerbs returns all 38 verbs (18 primitive + 20 headline)", () => {
+test("listKnownVerbs returns all 39 verbs (19 primitive + 20 headline)", () => {
   const all = listKnownVerbs();
-  assert.equal(all.length, 38);
+  assert.equal(all.length, 39);
   // Guard against a verb id being registered twice across the primitive/headline lists.
   assert.equal(new Set(all).size, all.length, "duplicate verb id across primitive/headline lists");
 });

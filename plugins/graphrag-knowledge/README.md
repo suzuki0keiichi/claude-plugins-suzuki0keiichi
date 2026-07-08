@@ -53,6 +53,7 @@
 主なスキル:
 - **graphrag-knowledge** — 知識の読み書き（着手前に `ask` で引く、一段落で書き戻す）
 - **graphrag-checkpoint** — 退避 → `/clear` で綺麗に再開（下記）
+- **graphrag-stocktake** — Investigation ライフサイクルの定期クリーニング（下記）
 - **graphrag-pr-review** — PR/diff をグラフと照合してレビュー
 - **graphrag-design-review** — 設計案をグラフと照合してレビュー
 - **graphrag-review-doc** — 人間向けのレビュー説明資料（HTML）を生成
@@ -65,6 +66,10 @@
 - **復元**（自動、`/clear` 直後のみ）: `SessionStart` フックが直前の意図を**読んだ時点で消費(一度きり)**して作業状態を再水和する。失効 60 分。**compact では何も注入しない**（旧来どおり compact 自身の要約に任せる）。auto-compact に飲まれた場合は、次セッションで `$CLI brief --mode resume` を手動で撃てば同じ Investigation から辿れる。
 
 非 graphrag リポジトリでは no-op。細かい挙動は `graphrag-checkpoint` skill を参照。
+
+## 棚卸し（Investigation の定期クリーニング）
+
+閉じ忘れ・レガシー化した Investigation を、`stocktake` verb の機械検出 + `graphrag-stocktake` skill の裏取り裁定で `state:closed` に整える定期スイープ。閉じるだけで削除はしない。`brief --mode resume` が溜まりを検知すると `stocktake_hint` を返す。
 
 ## テスト
 

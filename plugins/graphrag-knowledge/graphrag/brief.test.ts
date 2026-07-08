@@ -126,6 +126,45 @@ test("resume does not count closed Investigations as legacy stateless", () => {
   assert.ok(!("legacy_stateless_investigations" in resume), "closed は意図的な終端、注記不要");
 });
 
+// 棚卸し誘導: state 無しレガシーが混じる、または active が溜まり気味なら stocktake_hint を出す。
+test("resume adds stocktake_hint when stateless Investigations coexist", () => {
+  const graph = {
+    nodes: [
+      { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active" },
+      { id: "investigation:s:old", type: "Investigation", title: "旧" } // state 無し
+    ],
+    edges: []
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  assert.match(resume.stocktake_hint, /stocktake/);
+  assert.match(resume.stocktake_hint, /state無し Investigation が 1 件/);
+});
+
+test("resume adds stocktake_hint when active piles up (>= 3)", () => {
+  const graph = {
+    nodes: [
+      { id: "investigation:s:a", type: "Investigation", title: "a", state: "active" },
+      { id: "investigation:s:b", type: "Investigation", title: "b", state: "active" },
+      { id: "investigation:s:c", type: "Investigation", title: "c", state: "active" }
+    ],
+    edges: []
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  assert.match(resume.stocktake_hint, /active が 3 件/);
+});
+
+test("resume omits stocktake_hint when healthy (1-2 active, no stateless)", () => {
+  const graph = {
+    nodes: [
+      { id: "investigation:s:a", type: "Investigation", title: "a", state: "active" },
+      { id: "investigation:s:b", type: "Investigation", title: "b", state: "active" }
+    ],
+    edges: []
+  };
+  const resume = buildResumeBrief(graph, nodesById(graph));
+  assert.ok(!("stocktake_hint" in resume), "健全なら埋め草を出さない");
+});
+
 // compact 退避/復元: 複数 active があるとき、最新 checkpoint (generated_at が新しい) が primary。
 // 旧実装は書かれない updated_at で空振りし id 順に決めていた — generated_at 実キーで最新に向く。
 test("resume primary is the most recently checkpointed active Investigation (generated_at desc)", () => {

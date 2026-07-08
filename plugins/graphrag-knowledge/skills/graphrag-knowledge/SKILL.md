@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.7.0
+version: 4.8.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④⑤ 実装一段落・結論確定・却下・記録指示で書き戻す (詳細は §Proactive Persistence)。
 ---
 
@@ -153,6 +153,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `carving-allow` | manage `.graphrag/carving.json` (carving exemptions): `add` / `remove` / `list` / `migrate` |
 | `harvest-history` | deterministic extraction from git history (no writes): reverts → RejectedOption candidates, HACK/FIXME markers → OK/Risk candidates |
 | `staleness-check` | count commits since `generated_at` for files linked via documented_by/sets_policy_for/constrains, list candidates above threshold (read-only) |
+| `stocktake` | Investigation lifecycle audit (read-only, deterministic): returns suspect Investigations (stateless / active-and-stale / no-generated-at / progress-claiming-summary) as JSON. Adjudication is the `graphrag-stocktake` skill's job, not this verb's |
 | `fsck` | vault integrity check (read-only): parse / duplicate-id / id↔path / edge-endpoint / schema / round-trip / uncommitted-delta (torn-write) checks as single JSON `{status, checks, counts}`; exit 1 only on error |
 
 ## Parallel work and semantic merge (vault branch)
@@ -203,6 +204,7 @@ Do not wait for the user to say "remember this." Write via `add-*` immediately w
 
 - **Implementation/fix/improvement/refactor reached a milestone (action trigger)**: just before committing or after finishing changes and reporting to user. Write back the underlying adoption decision, rejected alternatives, risks encountered, operational gotchas. **This is a silent action — actively watch for it** (easier to miss than verbal markers).
   → `add-decision` / `add-rejected-option` / `add-risk` / `add-ok` (whichever applies)
+  → Additionally: if this focus's active Investigation has reached its conclusion, include an `op:update` on that Investigation (`state: closed`) in the same plan. There is no other natural trigger to close it — the write-back boundary itself is the closing moment.
 - **User states a conclusion**: "we'll go with X", "X is not an option", "X doesn't work", "from now on, Y"
   → `add-decision` / `add-rejected-option` / `add-risk` (whichever applies)
 - **LLM itself states a conclusion**: "we should X", "avoid Y" in future tense

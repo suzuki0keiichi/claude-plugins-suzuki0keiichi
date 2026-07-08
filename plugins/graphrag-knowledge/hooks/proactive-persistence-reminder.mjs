@@ -21,7 +21,7 @@ const REMINDER = {
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
     additionalContext:
-      "<この変更の背後の採用判断・却下した代替案・踏んだリスク・運用ハマりを graphrag に書き戻したか。未なら commit 後に add-* で書き戻す (重複確認を先に)>",
+      "<この変更の背後の採用判断・却下した代替案・踏んだリスク・運用ハマりを graphrag に書き戻したか。未なら commit 後に add-* で書き戻す (重複確認を先に)。作業が決着したなら、その focus の active Investigation を state:closed にする op:update も同じ書き戻しプランに含めよ (閉じるトリガは自然に存在しないので、この commit 境界が閉じ時)>",
   },
 };
 

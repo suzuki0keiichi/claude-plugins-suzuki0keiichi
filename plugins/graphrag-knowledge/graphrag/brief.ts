@@ -132,11 +132,23 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
       }
     : {};
 
+  // 棚卸し誘導: state 無しレガシーが居る、または active が溜まり気味 (3 件以上) のとき、
+  // 決定的な検出 verb (stocktake) の存在を思い出させる。閾値未満なら埋め草を出さない
+  // (null 埋め禁止 — 既存の legacy_note と同じく「出す時だけ出す」流儀)。
+  const stocktakeNotice = stateless.length > 0 || active.length >= 3
+    ? {
+        stocktake_hint:
+          `state無し Investigation が ${stateless.length} 件 / active が ${active.length} 件。` +
+          "$CLI stocktake で棚卸し候補を確認できる"
+      }
+    : {};
+
   return {
     primary,
     candidates: options.includeCandidates ? active.slice(0, options.limit ?? 3) : undefined,
     active_count: active.length,
-    ...legacyNotice
+    ...legacyNotice,
+    ...stocktakeNotice
   };
 }
 

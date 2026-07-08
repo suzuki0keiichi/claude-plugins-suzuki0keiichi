@@ -1,6 +1,6 @@
 ---
 name: graphrag-checkpoint
-version: 1.1.0
+version: 1.2.0
 description: context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、`/clear` で綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。退避後に `/clear` すると SessionStart フックが直前の作業状態を自動で戻す (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
 ---
 
@@ -26,6 +26,7 @@ context が埋まってきた頃合い(compact 直前、または狙って `/cle
 1. `$CLI brief --mode resume` で**現 focus の active Investigation** を探す。
    - あれば **update**(focus が同じ間は1個を更新し続ける)。手順 C で**この Investigation の id を `checkpoint-mark` に名指しで渡す**ので、focus ごとに 1 個の active を保つ(復元は id 名指し — generated_at や primary 選択には依存しない)。
    - 無ければ **create**(`state: active`)。focus が途中で変わっていれば旧を `state: closed` にして新規(§親skill Focus continuity)。
+   - **checkpoint がそのセッションの「締め」で focus 自体が決着しているなら**、この Investigation を `state: closed` にして手順 C(checkpoint-mark)は撃たない — 決着した作業に復元は不要。
 2. その Investigation の **`raw_content` に作業状態を構造化テキストで**書く(commit-mutation の `updates`。※専用フィールドは作らない):
    - `current focus:` いま何をしているか(復元後の再起点の一文)
    - `next:` 次の具体アクション(再導出なしで再開できる粒度。済んだ枝は落とす)。**先頭は「一意な最初の一手」** — 復元直後のエージェントが迷わず着手できるよう、対象(file:line か実行コマンド)と期待結果まで具体化した 1 アクションを必ず先頭に置く。「〜を調べる」「〜まわりを整理」のような探索でしか始められない書き方は禁止(それが復元後の彷徨いと ctx 浪費の主因)。
