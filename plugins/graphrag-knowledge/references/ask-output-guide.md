@@ -1,55 +1,55 @@
-# ask 出力フィールドガイド
+# ask Output Field Guide
 
-`ask` の出力に含まれるフィールドの詳細。行動ルール (連打抑止・打ち切り判定) は SKILL.md「Retrieval ladder and `ask` cutoff」に記載。
+Details of the fields in `ask`'s output. Behavioral rules (repeat suppression, cutoff judgment) are in SKILL.md "Retrieval ladder and `ask` cutoff".
 
-共通原則: null / 欠損フィールドは出力されない (`path: null` のような埋め草は無い)。無いキーは「その属性が無い」と読む。
+Common principle: null / missing fields are not emitted (no filler like `path: null`). Read an absent key as "that attribute is absent".
 
 ## `final_stage`
 
-`brief` / `evidence` — どこまで自動段上げしたか。brief の confidence が high かつ matches ありなら `brief` で停止、それ以外は evidence まで自動で掘る。`evidence` で `direct_evidence` が空なら本当に無い。
+`brief` / `evidence` — how far it auto-escalated. If brief's confidence is high and there are matches, it stops at `brief`; otherwise it auto-digs down to evidence. If `direct_evidence` is empty at `evidence`, it truly does not exist.
 
 ## `next_action_hint`
 
-**最終段** の結果から計算される (brief で十分なら brief の、evidence まで掘ったなら evidence の confidence/件数を見る)。そのままユーザー向け説明として使える文言。
+Computed from the **final stage**'s result (if brief sufficed, brief's; if it dug down to evidence, evidence's confidence/count). Wording usable as-is as a user-facing explanation.
 
 ## `stages[*].output.query.match_confidence`
 
-- `high` + matches あり → 採用、`final_stage: brief` で stop している
-- `low` / `none` / matches 空 → launcher が evidence まで段上げ済み。それでも空なら **別キーワードを 1 度だけ試す** (キーワード変更は LLM 責務)。連打しない。
+- `high` + matches present → adopt; it has stopped at `final_stage: brief`
+- `low` / `none` / empty matches → the launcher has already escalated to evidence. If still empty, **try a different keyword exactly once** (keyword change is the LLM's responsibility). Do not repeat.
 
-判定の内訳: vector と lexical (alias 完全一致 / coverage / ngram) を独立に採点し強い方を採る。vector は索引メタの `noise_baseline` (索引構築時に打刻される、ランダムなノード対の cosine 分布) からの **コーパス相対マージン** で判定する — 絶対 cosine はモデル依存で意味を持たないため。baseline の無い旧索引では絶対値の暫定バンドに落ちる (索引を再構築すれば相対判定になる)。
+Breakdown of the judgment: vector and lexical (alias exact match / coverage / ngram) are scored independently and the stronger is taken. Vector is judged by the **corpus-relative margin** from the index meta's `noise_baseline` (stamped at index build, the cosine distribution of random node pairs) — because absolute cosine is model-dependent and meaningless. On an old index without a baseline, it falls back to provisional absolute-value bands (rebuilding the index makes it a relative judgment).
 
-## `stages[*].output.query.standout` / evidence packet の `standout`
+## `stages[*].output.query.standout` / the evidence packet's `standout`
 
-world_hints と同じ相対判定を手元 vault の matches にも適用したもの。
+The same relative judgment as world_hints, applied to the local vault's matches too.
 
-- `state`: `clear` = top1 が他候補から突出 (相対 gap ≥ 0.30。high でなければ 1 段格上げ済み) / `none` = 横並び / `single` = 候補 1 件以下で相対判定なし
-- `gap_above_next`: (top1 − top2) / top1 の相対 gap (根拠)
+- `state`: `clear` = top1 stands out from the other candidates (relative gap ≥ 0.30; if not high, it has been promoted one level) / `none` = level pegging / `single` = one or fewer candidates, no relative judgment
+- `gap_above_next`: (top1 − top2) / top1, the relative gap (the basis)
 
 ## `stages[*].output.query.repeat.repeat_state`
 
-- `excessive` (call_number ≥ 3) → **グラフ検索を打ち切り、コード / doc 直読みに移る**。`--call-number` は launcher が自動加算するので LLM 自己申告は不要。
+- `excessive` (call_number ≥ 3) → **stop graph search and move to reading code / docs directly**. `--call-number` is auto-incremented by the launcher, so no LLM self-reporting is needed.
 
-## match の `state` / `state_note`
+## a match's `state` / `state_note`
 
-state が superseded/closed/abandoned/achieved のノードはランキングスコアが 0.6 倍に減点される (除外はしない = hard reject しない原則)。減点された match には `state_note` (例 `"superseded — refines 逆引きで後継を確認"`) が付くので、注記に従い後継/現役ノードを優先する。
+Nodes whose state is superseded/closed/abandoned/achieved are penalized to 0.6x their ranking score (not excluded = the no-hard-reject principle). A penalized match gets a `state_note` (e.g. `"superseded — refines 逆引きで後継を確認"`), so follow the note and prefer the successor/live node.
 
-## match の `relations` (brief)
+## a match's `relations` (brief)
 
-edge 型の優先度順 (supersedes / refines / has_premise / sets_policy_for / constrains が先、discussed_in / documented_by が最後) に最大 8 件。3 つの形がある:
+Up to 8, in edge-type priority order (supersedes / refines / has_premise / sets_policy_for / constrains first, discussed_in / documented_by last). Three shapes:
 
-- `{relation, direction, node: {...}}` — 初出ノード。詳細つき (要約は ~120 字に短縮)
-- `{relation, direction, id}` — 2 回目以降の出現。詳細は初出箇所か `matches[*].node` を見る (同じノードを 2 回ダンプしない)
-- `{relation, direction, to: "vault:<slug>/<nodeId>"}` — 未解決の cross-vault 参照 stub。`GRAPHRAG_WORLD_DIR` 設定時は `cross_vault_resolved` に解決結果が付く
+- `{relation, direction, node: {...}}` — first appearance of a node. With details (summary shortened to ~120 chars)
+- `{relation, direction, id}` — second and later appearances. For details see the first appearance or `matches[*].node` (the same node is not dumped twice)
+- `{relation, direction, to: "vault:<slug>/<nodeId>"}` — an unresolved cross-vault reference stub. When `GRAPHRAG_WORLD_DIR` is set, the resolution result is attached in `cross_vault_resolved`
 
-## evidence packet (`stages[*].output`, final_stage が evidence の時)
+## evidence packet (`stages[*].output`, when final_stage is evidence)
 
-- `direct_evidence[*]` — ランク付き match。`node` は全文 (id/type/title/summary/path/state/provenance/short_label/display/aliases のうち在るもの)。**まずこれを使う**。
-- `graph_context` — 近傍展開の文脈。supporting context 専用:
-  - `graph_context.nodes` — **id をキーにした表**。値は `{type, title?, summary?(~140字), path?, state?}`。同じノードは 1 回だけ載る。direct_evidence に全文が出た match ノードは再掲しない (id は edges から引く)。「この id は何か」はこの表で確認できる (再クエリ不要)。
-  - `graph_context.edges[*]` — `{depth, relation, from, to}` (from/to は id 参照)。近傍展開はノードあたり最大 ~10 本 (edge 型優先度順)・全体 ~40 本で打ち切られる。`vault:` 参照の端点は nodes 表に載らず id 参照のまま。
-- `standout` — 上記と同じ相対判定。
-- `answer_instructions` — 1 行の要約 + 本ガイドへのポインタ。
+- `direct_evidence[*]` — ranked matches. `node` is full text (whichever of id/type/title/summary/path/state/provenance/short_label/display/aliases is present). **Use this first**.
+- `graph_context` — the neighbor-expansion context. For supporting context only:
+  - `graph_context.nodes` — **a table keyed by id**. Values are `{type, title?, summary?(~140 chars), path?, state?}`. The same node appears only once. Match nodes whose full text appeared in direct_evidence are not repeated (pull the id from edges). "What is this id" can be checked in this table (no re-query needed).
+  - `graph_context.edges[*]` — `{depth, relation, from, to}` (from/to are id references). Neighbor expansion is truncated at ~10 edges per node (in edge-type priority order) / ~40 overall. Endpoints of `vault:` references are not in the nodes table and stay as id references.
+- `standout` — the same relative judgment as above.
+- `answer_instructions` — a one-line summary + a pointer to this guide.
 
 ## `cross_vault_resolved` (`GRAPHRAG_WORLD_DIR` only)
 
@@ -61,10 +61,10 @@ When a matched node's edges (relations) contain a cross-vault ref (`vault:<slug>
 
 **Action**: if title/summary suffices, no further ask needed. If deeper context is required, follow the pointer by running `ask "<question>" --vault <path>` against the target vault. This is a graph-structural pointer traversal, not a heuristic search — follow it proactively.
 
-## `world_hints` (`GRAPHRAG_WORLD_DIR` 設定時のみ)
+## `world_hints` (only when `GRAPHRAG_WORLD_DIR` is set)
 
-「他の vault X にも知識がありそう」のヒント。
+Hints that "vault X probably also has knowledge".
 
-- `hints[*].confidence` が `high` で手元の `match_confidence` が弱い時は、`hints[*].ask_command` (= `ask "<質問>" --vault <path>`) を実行して外の vault に掛けるのを検討する。掛けるかどうかは呼び手 (LLM) の判断 — 自動では掛からない。
-- `freshness.state: stale` は写しが古い (取得時刻つき) という正直な申告。
-- `standout` は相対判定: `clear` = top1 が他候補から突出 (その vault の領域に固有の問いの可能性が高い)、`crowd` = 候補が横並び (本当に複数に関係するか、どこにも無いかのどちらか — low ヒントを全部追う前にこれを見る)、`single` = 候補 1 つで相対判定なし。突出した top1 は絶対値が low でも high に格上げ済み (`gap_above_next` がその根拠)。
+- When `hints[*].confidence` is `high` and the local `match_confidence` is weak, consider running `hints[*].ask_command` (= `ask "<question>" --vault <path>`) to query the outside vault. Whether to run it is the caller's (LLM's) judgment — it does not run automatically.
+- `freshness.state: stale` is an honest declaration that the copy is old (with fetch time).
+- `standout` is a relative judgment: `clear` = top1 stands out from the other candidates (likely a question specific to that vault's domain), `crowd` = candidates level pegging (either it truly relates to several, or it is nowhere — look at this before chasing every low hint), `single` = one candidate, no relative judgment. A top1 that stands out is promoted to high even if its absolute value is low (`gap_above_next` is the basis).

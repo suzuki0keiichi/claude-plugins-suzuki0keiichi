@@ -1,162 +1,201 @@
-# 概念解釈パス — スキーマ合法マッピング(汎用)
+# Conceptual pass — schema-legal mapping (general)
 
-indexer の決定論足場の上に、LLM が概念・アーキ・履歴を乗せる手順の正確版。
-任意リポジトリに通用。新エッジ/ノード型は足さない。全プランは `validateGraph`
-0 失敗を確認してからマージ。root ノードや contains は不要 (v3.3 で撤去。
-scope は vault 境界が、所属は id 規約 `<typeSlug>:<system>:<slug>` が担う)。
+The exact procedure for the LLM to layer concepts, architecture, and history on top of
+the indexer's deterministic scaffold. Applies to any repository. Do not add new edge/node
+types. Merge every plan only after confirming `validateGraph` passes with 0 failures. No root
+node or `contains` needed (removed in v3.3; scope is carried by the vault boundary, membership
+by the id convention `<typeSlug>:<system>:<slug>`).
 
-**本ファイルは「手順」**。Component / Concern / Layer (alias: Pocket / Vein / Stratum) の
-**切り方・粒度・命名・網羅性・増分追従の品質ルール**は `carving-rules.md` に分離。本ファイルの各 step は
-carving-rules.md の該当節を必ず満たすこと。手順だけ追って carving-rules を満たさない mutation は不良。
+**This file is the "procedure."** The **carving / granularity / naming / coverage / incremental
+follow-up quality rules** for Component / Concern / Layer (alias: Pocket / Vein / Stratum) are
+split out into `carving-rules.md`. Each step here must satisfy the corresponding section of
+carving-rules.md. A mutation that follows only the procedure but fails to satisfy carving-rules
+is defective.
 
-## 0. 大原則 — 「意味」を書く(「構成要素のサマリ」は意味ではない)
+## 0. Prime rule — write "meaning" (a "constituent summary" is not meaning)
 
-すべての蒸留テキスト(File / node の summary・description、Component / Layer / Concern の命名)に通底する唯一の規則。各 step はこれを満たす。
+The single rule that runs through all distilled text (File / node summary and description, and
+the naming of Component / Layer / Concern). Every step satisfies it.
 
-- **構成要素のサマリ** = 中身の部品を機械的に言い換えたもの。File なら symbols / imports、Component / Layer / Concern なら束ねた File 群の列挙。「何が入っているか」。
-- **意味** = なぜ在るか / 何のため / どの関心・責務を担うか。「何のためか」。
-- **書くのは必ず意味。** 構成要素の列挙・言い換えで埋めない(= サボり)。薄い結節点でも、それ自体の意味(なぜ束ねたか)を書く。
-- **description は原則書く**(SKILL.md §Mutation Plan / carving-check #14 と同基準)。書く内容は意味(その集合・横断が何を意味するか)。**summary の丸写しにしかならない時だけ省く**(構成要素の羅列で埋めるくらいなら省く)。summary と内容が近くても、意味が書いてあれば問題ない ── **等価判定はしない**。
-- **機械が出した構成要素サマリ**(File summary / Component・Layer candidate summary)は `summary_provisional: true` が立つ。意味に書き換えて `summary_provisional` を外す。残すと carving-check が `summary-provisional` ERROR で止める。
-- 書いた内容が意味か構成要素サマリかの判定は、**書くのと同じ LLM の責務**(別の機械チェックは置かない ── 同じ LLM による事後判定は循環で無意味だから)。よってこの規則を**書く時点で**守る。
+- **Constituent summary** = a mechanical restatement of the internal parts. For a File, its
+  symbols / imports; for a Component / Layer / Concern, an enumeration of the File set it bundles.
+  "What is inside."
+- **Meaning** = why it exists / what it is for / which concern or responsibility it carries.
+  "What it is for."
+- **Always write meaning.** Do not pad with an enumeration or restatement of constituents
+  (= shirking). Even for a thin junction, write its own meaning (why it was bundled).
+- **Write a description in principle** (same standard as SKILL.md §Mutation Plan / carving-check
+  #14). What you write is meaning (what the collection or crosscut means). **Omit only when it
+  would be nothing more than a copy of the summary** (better to omit than to pad with a list of
+  constituents). Even if the description is close to the summary, there is no problem as long as
+  it states meaning — **no equivalence check is performed**.
+- **Machine-produced constituent summaries** (File summary / Component・Layer candidate summary)
+  carry `summary_provisional: true`. Rewrite to meaning and remove `summary_provisional`. Leaving
+  it in makes carving-check stop with a `summary-provisional` ERROR.
+- Deciding whether what you wrote is meaning or a constituent summary is the **responsibility of
+  the same LLM that writes it** (no separate machine check is placed — an after-the-fact judgment
+  by the same LLM is circular and meaningless). So obey this rule **at the time of writing**.
 
-## 入力(indexer / 環境が用意)
+## Inputs (provided by indexer / environment)
 
-- 依存コミュニティ Component 候補・トポロジ Layer 候補(`judgment_input.member_files`)。
-- 全 File の `{path, role, summary}`(summary は `interpretation-guidance.md` 準拠の解釈済み)。
-- `role=documentation` の doc File 一覧(+ 必要なら本文を読む)。
-- `git log`(hash・date・subject、時系列)。
+- Dependency-community Component candidates and topology Layer candidates
+  (`judgment_input.member_files`).
+- `{path, role, summary}` for all Files (summary already interpreted per
+  `interpretation-guidance.md`).
+- The list of `role=documentation` doc Files (+ read the body if needed).
+- `git log` (hash, date, subject; chronological).
 
-## 1. Component / Layer 命名(グラフ距離が単位、LLM は命名)
+## 1. Component / Layer naming (graph distance is the unit, the LLM names)
 
-- 既存候補ノードの `title`/`summary` を**意味**(その機能境界 / アーキ層が何を担うか。§0)に更新、`summary_provisional` を外す、`candidate:false`、`judgment_input` 削除。candidate summary は構成要素サマリ(束ねた File 群の機械テンプレ)なので、列挙の言い換えで埋め直さない。
-- **機械プレースホルダ命名 (`band0` / `c1` / `(N files)` 入り title) を引き継がない** — 必ず「その層/塊が何を担うか」の意味 title + 意味 kebab slug に置き換える(正本: `carving-rules.md`「意味ある命名 必須」)。
-- 無意味クラスタは accept=false で却下(ノードと付随エッジを除去)。
-- 構造は変えない(メンバーは依存グラフが決める)。
-- 命名・粒度・異物検査・意味 slug・Layer 除外規則は `carving-rules.md` の
-  「意味ある命名 必須」「Component carving」「Layer carving」を厳守(項目: 意味 title/slug・プレースホルダ
-  禁止 / 同ディレクトリ原則 / 粒度ガード / Layer は実行依存対象のみ / テストは実装と同じ Layer)。判断基準と
-  閾値は carving-rules.md を正本とし、本ファイルでは再掲しない。
-- carve 完了の判定は機械ゲートで強制: `carving-check` の `candidate-uncarved` / `placeholder-title` /
-  `summary-provisional` が **0 ERROR** になって初めて carve 完了(プレースホルダのまま確定すると止まる)。
+- Update existing candidate nodes' `title`/`summary` to **meaning** (what that functional boundary
+  / architecture layer carries; §0), remove `summary_provisional`, set `candidate:false`, delete
+  `judgment_input`. The candidate summary is a constituent summary (a machine template of the
+  bundled File set), so do not refill it with a restatement of the enumeration.
+- **Do not carry over machine placeholder names (titles containing `band0` / `c1` / `(N files)`)** —
+  always replace with a meaning title of "what that layer/cluster carries" + a meaning kebab slug
+  (canonical: carving-rules.md "Meaningful naming required").
+- Reject meaningless clusters with accept=false (remove the node and its incident edges).
+- Do not change the structure (membership is decided by the dependency graph).
+- Strictly follow carving-rules.md "Meaningful naming required", "Component carving", "Layer
+  carving" for naming / granularity / foreign-matter inspection / meaning slug / Layer exclusion
+  rules (items: meaning title/slug, placeholder prohibition / same-directory principle / granularity
+  guard / Layer covers only runtime-dependency targets / tests in the same Layer as the
+  implementation). carving-rules.md is canonical for criteria and thresholds; this file does not
+  restate them.
+- Carve completion is enforced by a machine gate: carve is complete only once `carving-check`'s
+  `candidate-uncarved` / `placeholder-title` / `summary-provisional` reach **0 ERROR** (finalizing
+  with placeholders still in place stops it).
 
-## 2. Concern（横断関心のモデリング）
+## 2. Concern (modeling crosscutting concerns)
 
-**Component / Layer との根本的な違い。** Component は依存コミュニティ、Layer はトポロジ
-深さ帯 — どちらも indexer が決定論で候補を出し、LLM は命名と意味付けを担う。
-**Concern にはこの足場が無い。** 横断関心は構造距離に現れない。LLM 自身が
-「このシステムを貫く横断的な関心は何か」を概念的にモデリングする行為であり、
-carving 全体の中で最も LLM の創発的な理解力が問われるステップ。
+**The fundamental difference from Component / Layer.** Component is a dependency community, Layer
+is a topology depth band — for both the indexer emits candidates deterministically, and the LLM
+carries the naming and meaning-assignment. **Concern has no such scaffold.** Crosscutting concerns
+do not appear in structural distance. It is the act of the LLM itself conceptually modeling "what
+crosscutting concerns run through this system," and it is the step in all of carving that most tests
+the LLM's emergent understanding.
 
-### 手順
+### Procedure
 
-1. **全体像からの横断関心モデリング（主）。** Component / Layer で構造が見えた
-   段階で、コードベース全体を俯瞰し「このシステムにはどのような横断的な関心が
-   走っているか」を問う。ドメイン知識・ソフトウェアアーキテクチャの一般的パターン
-   (認証/認可・観測性・エラーハンドリング・暗号化・i18n・設定管理・自動更新 等)
-   ・このシステム固有の特性を動員し、機械候補の有無にかかわらず横断関心を発見する。
-2. **機械ヒントでの見落とし確認（補助）。** `concern-hint`（embedding 近接
-   クラスタリング、Concern 発見用）の出力と `cross_component_in_degree ≥ 2` の構造シグナルを
-   自分のモデリングの盲点チェックとして突き合わせる。機械が拾って自分が見落として
-   いた横断があれば追加する。逆に、機械が出さなかった横断関心が存在しないとは限らない。
-3. 各 Concern について **横断条件（≧2 Component）・単一動機原則・Component との
-   二重表現禁止** を検証。品質ルールは `carving-rules.md`「Concern carving」を
-   正本とし、本ファイルでは再掲しない。
-4. 新規 `Concern` ノード `concern:<sys>:<slug>` + `Concern -evidenced_by-> File`。
+1. **Crosscutting-concern modeling from the whole picture (primary).** Once the structure is
+   visible via Component / Layer, survey the whole codebase and ask "what crosscutting concerns run
+   through this system." Mobilize domain knowledge, general software-architecture patterns
+   (authentication/authorization, observability, error handling, encryption, i18n, configuration
+   management, auto-update, etc.), and this system's specific characteristics to discover
+   crosscutting concerns regardless of whether machine candidates exist.
+2. **Blind-spot check via machine hints (auxiliary).** Cross-check the output of `concern-hint`
+   (embedding-proximity clustering, for Concern discovery) and the `cross_component_in_degree ≥ 2`
+   structural signal against your own modeling as a blind-spot check. If the machine picked up a
+   crosscut you had missed, add it. Conversely, that the machine emitted nothing does not mean no
+   crosscutting concern exists.
+3. Verify for each Concern the **crosscut condition (≥2 Components), single-motive principle, and
+   prohibition of double representation with Component**. carving-rules.md "Concern carving" is
+   canonical for the quality rules; this file does not restate them.
+4. New `Concern` node `concern:<sys>:<slug>` + `Concern -evidenced_by-> File`.
 
-## 3. ドキュメント蒸留
+## 3. Document distillation
 
-- 許可ノード: `Decision` / `Risk` / `OperationalKnowledge` / `Concern`。
-- 出所リンク(これだけが合法):
-  - `Decision|Risk|OperationalKnowledge -documented_by-> File(出所doc)`。
-  - `Concern -evidenced_by-> File(出所doc)`。
-- `Constraint` は `documented_by` 不可。使うなら `Constraint -constrains->
-  File|Decision|OperationalKnowledge`。基本は Decision/OK に寄せる。
-- `Decision -derived_from-> ConversationChunk|Investigation` も可(履歴と接続時)。
+- Allowed nodes: `Decision` / `Risk` / `OperationalKnowledge` / `Concern`.
+- Provenance links (these only are legal):
+  - `Decision|Risk|OperationalKnowledge -documented_by-> File(source doc)`.
+  - `Concern -evidenced_by-> File(source doc)`.
+- `Constraint` cannot use `documented_by`. If used, `Constraint -constrains->
+  File|Decision|OperationalKnowledge`. Prefer Decision/OK by default.
+- `Decision -derived_from-> ConversationChunk|Investigation` is also allowed (when connecting to
+  history).
 
-## 4. git 履歴 → 知識
+## 4. git history → knowledge
 
-- ノード: `ConversationChunk`(開発エピソード)/`Investigation`/`Decision`。
-- 合法エッジのみ:
+- Nodes: `ConversationChunk` (development episode) / `Investigation` / `Decision`.
+- Legal edges only:
   - `ConversationChunk -discussed_in-> Investigation`
   - `Investigation -led_to-> Decision`
   - `Decision -derived_from-> ConversationChunk|Investigation`
-- ~12–25 ノードに束ねる(132 コミットを全ノード化しない)。撤退/移行/長期格闘も残す。
+- Bundle into ~12–25 nodes (do not turn all 132 commits into nodes). Keep retreats/migrations/
+  long struggles too.
 
-## 5. 知識軸シーディング(carve 完了後・初回に必ず)
+## 5. Knowledge-axis seeding (always on first index, after carve completes)
 
-carve(軸2: Component / Concern / Layer)が完了しても、知識軸(Goal / Constraint / Decision /
-RejectedOption / Risk / OperationalKnowledge)が空のままでは **design-review の scope-creep /
-roadmap 観点が無効**になる(照合先の Goal が無ければ「目的から外れていないか」を問えない)。
-この状態は `carving-check` の `knowledge-floor` 規則が WARN `knowledge-floor-goal-missing` で
-可視化する(Constraint 0 件も同形 WARN)。carve 完了後、下記 5a / 5b で知識軸の床を起こす。
+Even once carve (axis 2: Component / Concern / Layer) completes, if the knowledge axis (Goal /
+Constraint / Decision / RejectedOption / Risk / OperationalKnowledge) stays empty, **design-review's
+scope-creep / roadmap lens is invalid** (with no Goal to check against, you cannot ask "does this
+stray from the purpose"). This state is made visible by `carving-check`'s `knowledge-floor` rule as a
+WARN `knowledge-floor-goal-missing` (0 Constraints is the same-shape WARN). After carve completes,
+raise the knowledge-axis floor via 5a / 5b below.
 
-### 5a. ユーザーインタビュー → Goal ツリー + 主要 Constraint
+### 5a. User interview → Goal tree + key Constraints
 
-ユーザーへの短いインタビューで起こす。**Goal / Constraint / RejectedOption はいずれも typed-add
-(`add-goal` / `add-constraint` / `add-rejected-option`)で足りる**(commit-mutation 雛形は複雑ケース用)。
-問いは 3 つで足りる:
+Raise it via a short interview with the user. **Goal / Constraint / RejectedOption are all
+sufficiently handled by typed-add (`add-goal` / `add-constraint` / `add-rejected-option`)** (the
+commit-mutation template is for complex cases). Three questions suffice:
 
-1. **このシステムの到達点は何か** → `Goal` ツリー。最上位 Goal 1 個に下位 Goal を
-   `refines`(Goal → Goal)でぶら下げ、計 **3〜7 個**。粒度はロードマップで語れる単位
-   (機能名の羅列にしない。§0 大原則 — 構成要素でなく意味)。state 語彙は
-   `"planned" | "active" | "achieved" | "abandoned"`(state 無しも合法)。
+1. **What is this system's end state** → `Goal` tree. Hang lower Goals off a single top-level Goal
+   via `refines` (Goal → Goal), **3–7 total**. Granularity at the unit you can speak of on a roadmap
+   (not an enumeration of feature names; §0 prime rule — meaning, not constituents). State
+   vocabulary is `"planned" | "active" | "achieved" | "abandoned"` (no state is also legal).
    - `node graphrag/cli.ts add-goal --system <s> --slug <slug> --title "..." --summary "..."`
-     `[--refines <goal-id>]`(上位 Goal にぶら下げる)`[--state planned|active|achieved|abandoned]`
-     `[--derived-from <conversation/investigation-id>]`(出所会話/調査に接地する時)。
-     最上位 Goal は `--refines` 無しで作り、下位 Goal を `--refines <最上位 id>` でぶら下げる。
-2. **絶対に守る制約は何か** → 主要 `Constraint`。`constrains` で対象
-   (Decision|File|OperationalKnowledge)に張る。横断高度の constrains は文法に無いので、
-   高度が無い場合は File 列挙 + 範囲を summary に明記する(`carving-rules.md`
-   「Constraint の Decision ロンダリング禁止」)。
+     `[--refines <goal-id>]` (hang off an upper Goal) `[--state planned|active|achieved|abandoned]`
+     `[--derived-from <conversation/investigation-id>]` (when grounding in a source
+     conversation/investigation). Create the top-level Goal without `--refines`, and hang lower Goals
+     off it with `--refines <top-level id>`.
+2. **What are the constraints you must absolutely uphold** → key `Constraint`s. Attach them to
+   targets (Decision|File|OperationalKnowledge) via `constrains`. A crosscut-altitude `constrains` is
+   not in the grammar, so when there is no altitude, enumerate the Files + state the scope explicitly
+   in the summary (carving-rules.md "No laundering a Constraint as a Decision").
    - `node graphrag/cli.ts add-constraint --system <s> --slug <slug> --title "..." --summary "..."`
-     `--constrains <id,...>`(**必須 ≥1**、宛先 Decision|File|OK)。Constraint は
-     documented_by 不可・evidence 不要なので `--evidence` は取らない。
-3. **過去に試して捨てた案は何か** → `RejectedOption`(却下案一級)。再誘惑されうるものを優先。
-   `add-rejected-option`(出所必須)。
+     `--constrains <id,...>` (**required ≥1**, target Decision|File|OK). Constraint cannot use
+     documented_by and needs no evidence, so it does not take `--evidence`.
+3. **What options did you try in the past and discard** → `RejectedOption` (rejected options are
+   first-class). Prioritize those that could tempt you again. `add-rejected-option` (source required).
 
-いずれも `--aliases "<日本語一般語>,<英語コード語>"` で別名を積んでおくと後で雑な問いから引きやすい
-(aliasExact が最強の lexical 一致。SKILL.md §Stacking aliases)。
+For all of them, stacking aliases via `--aliases "<natural-language term (Japanese)>,<code-language
+term (English)>"` makes them easier to retrieve later from loose questions (aliasExact is the
+strongest lexical match; SKILL.md §Stacking aliases).
 
-### 5b. harvest-history の candidate を種にする(初回索引時の知識収穫)
+### 5b. Seed from harvest-history candidates (knowledge harvest at first index)
 
-`harvest-history --root <repo> [--system <name>] [--out <path>]` は git 履歴から
-**決定論抽出のみ・書き込みなし**で candidate JSON を出す(concern-hint と同じ思想。
-採否は LLM が判断して typed-add する前提):
+`harvest-history --root <repo> [--system <name>] [--out <path>]` emits candidate JSON from git
+history via **deterministic extraction only, no writes** (same philosophy as concern-hint; adoption
+is judged by the LLM which then typed-adds):
 
-- **revert コミット** → `RejectedOption` candidate(`suggested_slug` / `title` / `commits` /
-  `note`)。「一度入れて戻した」は再誘惑される筆頭。中身を見て、却下案として残す価値が
-  あるか**個別判断**する(機械的に全件ノード化しない)。
-- **コメントマーカー** HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk`
-  candidate(`path` / `line` / `marker` / `text`)。恒常的な運用知識・リスクに昇格する
-  価値があるものだけ拾う(一時 TODO の写経にしない)。
+- **Revert commits** → `RejectedOption` candidate (`suggested_slug` / `title` / `commits` / `note`).
+  "Put in once and reverted" is the top thing to be tempted by again. Look at the content and make an
+  **individual judgment** on whether it is worth keeping as a rejected option (do not mechanically
+  turn every one into a node).
+- **Comment markers** HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk` candidate
+  (`path` / `line` / `marker` / `text`). Pick up only those worth promoting to standing operational
+  knowledge / risk (do not transcribe temporary TODOs).
 
-採用した candidate は typed-add(`add-*`)で書く。出所必須(`documented_by` /
-`derived_from`)と書き込み時の duplicate_check は通常どおり効く — 既出と疑われたら
-既存ノードへの追記・統合を先に検討する。
+Write adopted candidates with typed-add (`add-*`). Source is required (`documented_by` /
+`derived_from`) and the write-time duplicate_check works as usual — if a suspect duplicate is
+flagged, first consider appending to / merging into the existing node.
 
-## マージと検証
+## Merge and verify
 
-1. 各プラン JSON を base グラフへ適用(id 重複は skip、エッジ id は決定論生成)。
-2. `validateGraph` 実行。失敗エッジ(型ペア不正・端点欠落)は drop、再検証で 0 に。
-3. **carving 品質ゲート**(`carving-rules.md` の「carving 提出前チェックリスト」)を通す。
-   特に網羅性ゲート: `src/` 配下 File が allowed-orphan を除き全て Component に所属、
-   `src/` + `packaging/` 配下 File が除外規則該当を除き全て Layer に所属していること。
-   未所属 File が残るなら mutation plan の `reason` に allowed-orphan として明記する。
-4. `commit-mutation <plan.json>` で vault に適用(vault writer が validate → 原子書込 → vector-index 更新 → git commit をまとめて行う)。
-5. 回帰: 既知正解クエリで top-1、無コンテキストエージェントで影響波及が辿れること。
+1. Apply each plan JSON to the base graph (duplicate ids skip, edge ids are generated
+   deterministically).
+2. Run `validateGraph`. Drop failing edges (invalid type pair / missing endpoint), re-verify to 0.
+3. Pass the **carving quality gate** (carving-rules.md "Pre-submission carving checklist"). In
+   particular the coverage gate: every File under `src/` except allowed-orphans belongs to a
+   Component, and every File under `src/` + `packaging/` except those hit by exclusion rules belongs
+   to a Layer. If unassigned Files remain, state them explicitly as allowed-orphans in the mutation
+   plan's `reason`.
+4. Apply to the vault via `commit-mutation <plan.json>` (the vault writer bundles validate → atomic
+   write → vector-index update → git commit).
+5. Regression: top-1 on known-answer queries, and impact propagation traceable by a no-context agent.
 
-## 増分 conceptual-pass(changed / new File への対応)
+## Incremental conceptual-pass (handling changed / new Files)
 
-`node graphrag/cli.ts index` の `change_status: new|changed|unchanged` に従う。詳細は
-`carving-rules.md` の「増分追従」節。要点:
+Follow `change_status: new|changed|unchanged` from `node graphrag/cli.ts index`. Details in
+carving-rules.md "Incremental follow-up". Key points:
 
-- `unchanged`: conceptual-pass 不要。
-- `changed`: File summary を `interpretation-guidance.md` 準拠で再生成。所属関係は維持。
-- `new`: **必ず carving 再評価**。既存 Component に同ディレクトリ原則で吸収できるか確認、
-  できなければ新 Component を carving。新規ディレクトリが出現したら新 Component 必須。
+- `unchanged`: no conceptual-pass needed.
+- `changed`: regenerate the File summary per `interpretation-guidance.md`. Keep membership.
+- `new`: **always re-evaluate carving**. Check whether it can be absorbed into an existing Component
+  by the same-directory principle; if not, carve a new Component. If a new directory appears, a new
+  Component is required.
 
-## エッジ型ペア早見(`graphrag/schema.ts` が正)
+## Edge type-pair quick-ref (`graphrag/schema.ts` is authoritative)
 
 - `evidenced_by`: Layer|Concern|Component → File
 - `documented_by`: Decision|RejectedOption|Risk|OperationalKnowledge|Investigation → File

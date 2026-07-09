@@ -1,17 +1,17 @@
-# 並行作業の枝分かれと意味的 merge (vault branch)
+# Parallel-work branching and semantic merge (vault branch)
 
-vault は git 管理なので、知識グラフの並行作業は **vault の git ブランチ**で隔離する。枝の作成・削除は普通の git でよい (スキルは包まない)。スキルが担うのは **意味的な merge** ── git のファイル単位マージは知識グラフの意味衝突 (言い換えた重複・系譜の無い Decision 等) を取りこぼすため、merge はノード/エッジ単位で意味を見て行う。
+The vault is under git, so parallel work on the knowledge graph is isolated on a **vault git branch**. Creating and deleting branches is plain git (the skill does not wrap it). What the skill owns is the **semantic merge** — git's file-level merge misses the graph's semantic conflicts (rephrased duplicates, lineage-free Decisions, etc.), so the merge is done per-node/per-edge by reading meaning.
 
-## 手順
+## Procedure
 
-1. **枝を切る**: vault の git ブランチを作り、その上で `add-*` / `commit-mutation` で隔離して書く。
-2. **merge 分析**: `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts branch-merge --branch <ref> [--main main] [--vector <index>]`
-   - 分岐点 (git merge-base)・枝・main の3状態を読み、両側の差分と衝突を出し、意味判断が要る所を **判断パケット** (JSON) として返す。**何も書かない**。
-   - `branch_changes` / `main_changes` = 各側が分岐点から変えた内容 (蒸留済みフィールドのみ。要約し直さない)。`flagged_conflicts` = 重点的に見る所 (機械的/意味的ラベル付き。**「引っかからない=安全」ではない**ので全体を見る)。
-3. **解決して反映**: パケットを読み、統合後の姿を mutation plan として組み、`commit-mutation <plan.json>` で **main の vault に**適用する (lock/OCC/検証/原子公開/git commit は既存経路が担保)。同じ判断を別の言葉で書いた重複は 1 つに統合 (supersede/refine) し、二重に残さない。
+1. **Branch off**: create a vault git branch and write in isolation on it via `add-*` / `commit-mutation`.
+2. **Merge analysis**: `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts branch-merge --branch <ref> [--main main] [--vector <index>]`
+   - Reads the 3 states — fork point (git merge-base), branch, and main — surfaces both sides' diffs and conflicts, and returns the spots needing semantic judgment as a **judgment packet** (JSON). **Writes nothing.**
+   - `branch_changes` / `main_changes` = what each side changed from the fork point (distilled fields only; not re-summarized). `flagged_conflicts` = the spots to look at closely (labeled mechanical/semantic; **"not flagged ≠ safe"**, so review the whole thing).
+3. **Resolve and apply**: read the packet, compose the merged state as a mutation plan, and apply it **to main's vault** via `commit-mutation <plan.json>` (lock/OCC/validation/atomic publish/git commit are guaranteed by the existing path). Consolidate duplicates that state the same judgment in different words into one (supersede/refine); do not leave both.
 
-## 制約と読み方
+## Constraints and how to read the output
 
-- `branch-merge` 自体は読み取り専用 (分析のみ)。
-- `--vector` が無いと意味の近さによる重複検出は構造シグナルのみに限定される (出力の `similarity_detection` で明示)。
-- 反映先 (step 3 の plan) は main の vault に向ける。枝側の vault に書いて main に git merge する運用はしない (意味衝突を git に委ねることになる)。
+- `branch-merge` itself is read-only (analysis only).
+- Without `--vector`, semantic-proximity duplicate detection is limited to structural signals only (made explicit in the output's `similarity_detection`).
+- Point the application target (step 3's plan) at main's vault. Do not write on the branch vault and then `git merge` into main (that would delegate semantic conflicts to git).

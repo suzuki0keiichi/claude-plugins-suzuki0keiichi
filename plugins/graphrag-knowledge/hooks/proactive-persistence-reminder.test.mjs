@@ -19,7 +19,7 @@ const EXPECTED = {
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
     additionalContext:
-      "<この変更の背後の採用判断・却下した代替案・踏んだリスク・運用ハマりを graphrag に書き戻したか。未なら commit 後に add-* で書き戻す (重複確認を先に)。作業が決着したなら、その focus の active Investigation を state:closed にする op:update も同じ書き戻しプランに含めよ (閉じるトリガは自然に存在しないので、この commit 境界が閉じ時)>",
+      "<graphrag write-back check, on commit boundary: (1) Have you written back the adoption decision behind this change, the alternatives you rejected, the risks you hit, and the operational gotchas? If not, write them back via add-* right after the commit (run the duplicate pre-check first). (2) If this focus is now settled, include an op:update setting its active Investigation to state:closed in the same write-back plan — no other natural closing trigger exists; this commit boundary IS the closing moment.>",
   },
 };
 

@@ -1,22 +1,22 @@
 # Mutation Plan Templates
 
-これらの plan は `node graphrag/cli.ts commit-mutation <plan.json>` で **vault に**検証適用する (vault が単一正本。書込経路は commit-mutation / add-* のみ)。
+These plans are validated and applied **to the vault** via `node graphrag/cli.ts commit-mutation <plan.json>` (the vault is the single source of truth; the only write paths are commit-mutation / add-*).
 
-> **id の `<system>` について**: id 規約 `<typeSlug>:<system>:<slug>` の `<system>` は名前空間ラベル。
-> 所属を表すエッジは不要 (v3.3 で contains は撤去。所属は vault の存在と id 規約が担う)。
+> **About `<system>` in ids**: the `<system>` in the id convention `<typeSlug>:<system>:<slug>` is a namespace label.
+> No edge to express membership is needed (contains was removed in v3.3; membership is carried by the vault's existence and the id convention).
 
-typed-add (`add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` /
-`add-goal` / `add-constraint`) でカバーされる頻出ケースは CLI 引数だけで済むので本テンプレートは不要。
-**Goal / Constraint も `add-goal` / `add-constraint` で足りる**ようになった (エッジは `--refines` /
-`--constrains` 等のフラグで張る。SKILL.md §Recipe)。以下の Goal / Constraint テンプレは
-複数ノード/エッジを一括で組む複雑ケース用に残置する。残る **Concern (横断関心)** と
-**Update / Delete / 方針転換** 系は typed-add に無いので本テンプレートを使う。
+The frequent cases covered by typed-add (`add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` /
+`add-goal` / `add-constraint`) need only CLI arguments, so this template is unnecessary for them.
+**Goal / Constraint are now covered by `add-goal` / `add-constraint` too** (edges are wired with flags like `--refines` /
+`--constrains`; SKILL.md §Recipe). The Goal / Constraint templates below remain
+for complex cases that assemble multiple nodes/edges at once. The remaining **Concern (crosscut)** and
+**Update / Delete / policy-reversal** families are not in typed-add, so use this template for them.
 
 ---
 
-## Concern (横断関心、evidenced_by で複数 File を指す)
+## Concern (crosscut, points at multiple Files via evidenced_by)
 
-層 (Layer) や塊 (Component) を貫いて走る横断的関心。エッジは evidenced_by のみ。
+A crosscutting concern that runs across Layers and Components. The only edge is evidenced_by.
 
 ```json
 {
@@ -34,15 +34,15 @@ typed-add (`add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-r
 }
 ```
 
-- `evidenced_by` は Concern → File (schema 上 `[ANY_CROSSCUT_NODE, "File"]`、ANY_CROSSCUT = Layer/Concern/Component)。`Layer` / `Component` の手動作成も同形 (evidenced_by で File に接地)。
-- 2-5 個程度の File を束ねる典型。1 File しか繋がないなら Concern にせず File の summary に書き込むだけにする。
-- **`summary` vs `description`**: `summary` = 1 行見出し (frontmatter・検索主担体)。`description` = 蒸留散文で **原則どのノードにも書く** (vault body に `## 説明` が round-trip marker 付きで出る・embedding にも入る)。集合系 (Concern 等が特に重要) は構成要素の列挙でなく「まとまりとして結局何なのか= what の正体」を、判断系 (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge) は「なぜそう決めたか」を書く。判断系の生情報 (会話ログ・Slack URL 等) は捨てず `raw_content` か raw_content を持つ ConversationChunk/Investigation を source backing として残す。summary 丸写しにしかならない時だけ `description` を省く (空でも body に `## 説明` は出ない)。Goal / Constraint も同形。typed-add (`add-*`) でも `--description "..."` で指定できる。
+- `evidenced_by` is Concern → File (in schema `[ANY_CROSSCUT_NODE, "File"]`, ANY_CROSSCUT = Layer/Concern/Component). Manual creation of `Layer` / `Component` has the same shape (grounded to File via evidenced_by).
+- Typically bundles about 2-5 Files. If it would connect only 1 File, do not make it a Concern — just write it into that File's summary.
+- **`summary` vs `description`**: `summary` = one-line headline (frontmatter, primary search carrier). `description` = distilled prose, **written for every node in principle** (appears in the vault body as `## 説明` with a round-trip marker, and also enters the embedding). For aggregate types (Concern etc. especially matter) write "what the collection ultimately is = the true nature of the *what*", not a list of constituents; for judgment types (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge) write "why it was decided that way". Do not discard judgment types' raw information (conversation logs, Slack URLs, etc.) — keep it as source backing in `raw_content` or in a ConversationChunk/Investigation that holds raw_content. Omit `description` only when it would be a mere copy of the summary (when empty, no `## 説明` appears in the body). Goal / Constraint have the same shape. It can also be given via `--description "..."` in typed-add (`add-*`).
 
-## Goal (システムの目的因・到達点。v2 の Requirement を吸収)
+## Goal (the system's final cause / target state; absorbs v2's Requirement)
 
-> 単一 Goal は `add-goal --system <s> --slug <slug> --title "..." --summary "..." [--refines <goal-id>] [--state planned|active|achieved|abandoned] [--derived-from <id>]` で足りる。下記テンプレは複数ノードを一括で組む時用。
+> A single Goal is covered by `add-goal --system <s> --slug <slug> --title "..." --summary "..." [--refines <goal-id>] [--state planned|active|achieved|abandoned] [--derived-from <id>]`. The template below is for assembling multiple nodes at once.
 
-Goal 同士は `refines`、根拠への接続は `derived_from` / `has_premise` (詳細は SKILL.md スキーマ早見)。
+Goals relate to each other via `refines`; connection to grounds is via `derived_from` / `has_premise` (details in SKILL.md's schema quick-ref).
 
 ```json
 {
@@ -57,11 +57,11 @@ Goal 同士は `refines`、根拠への接続は `derived_from` / `has_premise` 
 }
 ```
 
-- 上位 Goal が無ければ `edges` は空でよい。出所会話/調査に接地するなら `Goal -derived_from-> ConversationChunk|Investigation` を足す。
+- If there is no parent Goal, `edges` may be empty. To ground it in the originating conversation/investigation, add `Goal -derived_from-> ConversationChunk|Investigation`.
 
-## Constraint (制約、constrains で対象を指す)
+## Constraint (constraint, points at its target via constrains)
 
-> 単一 Constraint は `add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` で足りる (`--constrains` 必須 ≥1、宛先 Decision|File|OK)。Constraint は documented_by 不可・evidence 不要。下記テンプレは複数 constrains を一括で組む時用。
+> A single Constraint is covered by `add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` (`--constrains` required ≥1, target Decision|File|OK). Constraint disallows documented_by and needs no evidence. The template below is for assembling multiple constrains at once.
 
 ```json
 {
@@ -76,13 +76,13 @@ Goal 同士は `refines`、根拠への接続は `derived_from` / `has_premise` 
 }
 ```
 
-- `constrains`: Constraint → Decision / File / OperationalKnowledge。
-- 「この制約が何を縛るか」を 1 つ以上の constrains で示す (特定 Decision / 特定 File / 特定 OK)。vault 全体に効く規範はグラフでなく CLAUDE.md / AGENTS.md に書く。
+- `constrains`: Constraint → Decision / File / OperationalKnowledge.
+- Show "what this constraint binds" with one or more constrains (a specific Decision / a specific File / a specific OK). A norm that applies to the whole vault goes in CLAUDE.md / AGENTS.md, not the graph.
 
-## Update (既存ノードの記述変更)
+## Update (change the description of an existing node)
 
-`type` / `from` / `to` は immutable。`summary` / `description` / `raw_content` 等の patch のみ。
-**`updates` の値に `null` を渡すとそのフィールド自体を削除する** (例: `{ "state": null }` で state を取り下げる)。null が graph や frontmatter に残ることはない。
+`type` / `from` / `to` are immutable. Only patches to `summary` / `description` / `raw_content` etc.
+**Passing `null` as an `updates` value deletes that field itself** (e.g. `{ "state": null }` withdraws the state). No `null` ever remains in the graph or frontmatter.
 
 ```json
 {
@@ -98,7 +98,7 @@ Goal 同士は `refines`、根拠への接続は `derived_from` / `has_premise` 
 }
 ```
 
-## Delete (ノードを消す。touching edges は cascade)
+## Delete (remove a node; touching edges cascade)
 
 ```json
 {
@@ -110,11 +110,11 @@ Goal 同士は `refines`、根拠への接続は `derived_from` / `has_premise` 
 }
 ```
 
-cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge_ids` で確認できる。
+The cascaded edge IDs can be checked in `summary.cascaded_edge_ids` of the `commit-mutation` output.
 
-## 方針転換 (Decision を覆す。supersedes の文法は変えない)
+## Policy reversal (overturn a Decision; the supersedes grammar is unchanged)
 
-新 Decision を作り、(1) `refines`: 新→旧 を張り、(2) 旧 Decision を op:update で `state: "superseded"` にする。`supersedes` は Decision|OK → RejectedOption のまま — Decision 同士に張る文法は無い。旧ノードへの `has_premise` 流入エッジはそのまま生きる (系譜保存)。
+Create a new Decision, (1) wire `refines`: new→old, and (2) set the old Decision to `state: "superseded"` via op:update. `supersedes` stays Decision|OK → RejectedOption — there is no grammar to wire it between Decisions. Incoming `has_premise` edges to the old node stay live (lineage preservation).
 
 ```json
 {
@@ -133,8 +133,8 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 }
 ```
 
-- 新 Decision にも source backing (`documented_by` File か raw_content 付き ConversationChunk/Investigation への `derived_from`) が必須。
-- **反転で捨てたアプローチが再誘惑されうる場合のみ**、RejectedOption を新設し 新Decision -`supersedes`-> それ を併設する (RejectedOption にも source backing 必須):
+- The new Decision also requires source backing (`documented_by` File, or `derived_from` to a ConversationChunk/Investigation with raw_content).
+- **Only when the approach discarded by the reversal could tempt re-adoption**, create a new RejectedOption and add newDecision -`supersedes`-> it alongside (the RejectedOption also requires source backing):
 
 ```json
   { "op": "create", "id": "rejectedoption:<system>:<slug>", "type": "RejectedOption",
@@ -147,16 +147,16 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 
 ---
 
-## Compaction checkpoint (退避 A + 救出 B を1本にまとめる)
+## Compaction checkpoint (bundles flush A + rescue B into one)
 
-`graphrag-checkpoint` skill が compact 直前に撃つ一括プラン。**A(作業状態の退避)と B(未書き戻し恒久知識の救出)を同格に1本で**適用する。両 preset 共通(救出先の知識型と Assumption/Agreement の有無だけ preset で変わる)。
+The batch plan that the `graphrag-checkpoint` skill fires just before compact. It applies **A (flushing the work state) and B (rescuing unwritten durable knowledge) as equals in a single plan**. Common to both presets (only the rescue-target knowledge types and the presence of Assumption/Agreement vary by preset).
 
-規律:
-- **Investigation は focus 単位で1個・固定 slug で `op:update` して上書き**(op:update が `generated_at` を now に進め、`brief --mode resume` の primary 選択で最新として先頭に来る)。初回だけ `op:create`(`state: "active"`)。
-- 作業状態は Investigation の **`raw_content`** に構造化テキストで置く(専用フィールドは作らない)。`brief --mode resume` が `work_state` として surface する。
-- 深い生ログは **ConversationChunk**(固定 slug で update-in-place・高価値片のみ)、`discussed_in` で Investigation へ。
-- 救出した知識ノードは **`derived_from`(知識→Investigation)** で必ず Investigation に繋ぐ(復元時に文章だけでなく実ノードへ到達させる)。Decision はさらに **`led_to`(Investigation→Decision)**。
-- **計画/スケジュール型(Task/Milestone/Resource/Stakeholder)には書かない。**
+Discipline:
+- **The Investigation is one per focus, overwritten via `op:update` on a fixed slug** (op:update advances `generated_at` to now, so it comes to the front as the latest in `brief --mode resume`'s primary selection). Only the first time is `op:create` (`state: "active"`).
+- Put the work state as structured text in the Investigation's **`raw_content`** (do not create a dedicated field). `brief --mode resume` surfaces it as `work_state`.
+- Put deep raw logs in a **ConversationChunk** (update-in-place on a fixed slug, high-value fragments only), wired to the Investigation via `discussed_in`.
+- Always connect a rescued knowledge node to the Investigation via **`derived_from` (knowledge→Investigation)** (so that restore reaches the actual node, not just the prose). Decisions additionally get **`led_to` (Investigation→Decision)**.
+- **Do not write to plan/schedule types (Task/Milestone/Resource/Stakeholder).**
 
 ```json
 {
@@ -186,53 +186,53 @@ cascade される edge ID は `commit-mutation` 出力の `summary.cascaded_edge
 }
 ```
 
-- 初回で Investigation 自体が無ければ、1つ目のノードを `op:create` + `type: "Investigation"` + `state: "active"` + `title`/`summary` にする。
-- 救出が Decision/Risk 各1件とは限らない。**型別に一巡**(Decision/RejectedOption/Risk/OperationalKnowledge、project は +Assumption/Agreement)し、`ask` の重複確認で**無い物だけ**を並べる。各知識ノードに `derived_from`→Investigation を必ず添える。
-- 退避だけ(救出ゼロ)なら nodes は Investigation(+ConversationChunk)のみ、edges は `discussed_in` のみで成立する。
+- If the Investigation itself does not exist on the first run, make the first node `op:create` + `type: "Investigation"` + `state: "active"` + `title`/`summary`.
+- The rescue is not necessarily one Decision and one Risk. **Sweep once per type** (Decision/RejectedOption/Risk/OperationalKnowledge, plus +Assumption/Agreement for project) and list **only the ones that do not exist** per the `ask` duplicate check. Always attach `derived_from`→Investigation to each knowledge node.
+- For flush only (zero rescue), it holds with nodes = the Investigation (+ConversationChunk) only, and edges = `discussed_in` only.
 
 ---
 
-## Plan 共通形
+## Common plan shape
 
 ```typescript
 {
-  reason: string,                   // 必須、なぜこの mutation を出すか
+  reason: string,                   // required — why this mutation
   nodes: Array<MutationNode>,       // op: create / update / delete
-  edges: Array<MutationEdge>,       // op: create / delete (update は通常不要)
-  duplicate_ack?: string[]          // 重複ゲートの suspect (既存ノード id) を確認済みとして通す時のみ
+  edges: Array<MutationEdge>,       // op: create / delete (update usually unnecessary)
+  duplicate_ack?: string[]          // only when acknowledging duplicate gate suspects (existing node ids)
 }
 ```
 
-`validateGraph` (schema.ts) が:
-- 未知の node type / edge type を拒否 (旧名 Stratum/Vein/Pocket は `canonicalType` で Layer/Concern/Component に正規化され通る)
-- 未許可の (from-type, to-type) 組み合わせを拒否
-- evidence backing が無い Decision/RejectedOption/Risk/OperationalKnowledge を拒否 (enforceSourceBacking)
-- 同じ id の重複 create を拒否
-- state は型ごとの語彙 (`STATE_VOCABULARY`) に限定: Investigation = active/closed、Decision/OperationalKnowledge = superseded のみ、Goal = planned/active/achieved/abandoned。他の型に state があれば拒否、語彙外の値も拒否 (state 無しは常に合法)
+`validateGraph` (schema.ts):
+- rejects unknown node type / edge type (the old names Stratum/Vein/Pocket are normalized to Layer/Concern/Component via `canonicalType` and pass)
+- rejects disallowed (from-type, to-type) combinations
+- rejects Decision/RejectedOption/Risk/OperationalKnowledge without evidence backing (enforceSourceBacking)
+- rejects duplicate create of the same id
+- limits state to the per-type vocabulary (`STATE_VOCABULARY`): Investigation = active/closed, Decision/OperationalKnowledge = superseded only, Goal = planned/active/achieved/abandoned. state on any other type is rejected, as is an out-of-vocabulary value (no state is always legal)
 
-加えて vault writer の検証段に**書き込み時重複ゲート** (`duplicate_check`) がある: op:create の知識/横断ノード (File と ConversationChunk 以外 = schema の duplicateCheck 対象) を同型既存ノードと照合する。照合は 2 経路 — embedding cosine ≥ 0.92 (**document 空間**で埋め込む。索引行と同じテキスト構成・同じ接頭辞で較正が正直になる) と、lexical (正規化 title / alias 完全一致、similarity 1.0)。suspect は `{new_id, existing_id, similarity, basis: "embedding"|"lexical", existing: {type,title,summary,state}, next_step}` の形で判断材料ごと返る。ヒット時は `duplicate_ack` が全 suspect を覆っていなければ all-or-nothing で reject。typed-add からは `--dup-ack <id[,id...]>` で注入する。embedding endpoint 不達 / vector index 不在は非致命スキップ (lexical pre-pass は embedding 不達でも走る)。ゲートは最後の網 — `ask` での事前重複確認は依然必須。
+In addition, the vault writer's validation stage has a **write-time duplicate gate** (`duplicate_check`): it checks op:create knowledge/crosscut nodes (everything except File and ConversationChunk = schema's duplicateCheck targets) against same-type existing nodes. Checking runs two paths — embedding cosine ≥ 0.92 (embedded in **document space**; using the same text composition and same prefix as the index row makes the calibration honest) and lexical (normalized title / alias exact match, similarity 1.0). A suspect is returned with its judgment material in the form `{new_id, existing_id, similarity, basis: "embedding"|"lexical", existing: {type,title,summary,state}, next_step}`. On a hit, it is rejected all-or-nothing unless `duplicate_ack` covers every suspect. From typed-add, inject via `--dup-ack <id[,id...]>`. An unreachable embedding endpoint / absent vector index is a non-fatal skip (the lexical pre-pass runs even when embedding is unreachable). The gate is the last net — pre-checking for duplicates with `ask` is still required.
 
-出力には advisory (決して reject しない) の同梱情報が付く:
+The output carries advisory (never-rejecting) companion information:
 
-- `cross_type_suspects`: 型を跨いだ重複疑い (Decision↔OperationalKnowledge / Risk↔Constraint — 境界が設計上ファジーな型グループのみ)。同型フィルタの構造的取りこぼしを提案として可視化する。
-- `index_stale` + `index_stale_reason`: vector index が vault HEAD より古い時の正直な申告 (ゲート判定の網が古い可能性)。
-- `precheck: {recent_ask_hits, note}`: 知識ノード作成時に ask-trail が空 (= `ask` 事前確認をしていない疑い) の観測。
+- `cross_type_suspects`: cross-type duplicate suspicion (Decision↔OperationalKnowledge / Risk↔Constraint — only type groups whose boundary is fuzzy by design). Surfaces, as a suggestion, what the same-type filter structurally misses.
+- `index_stale` + `index_stale_reason`: an honest declaration when the vector index is older than vault HEAD (the gate's net may be stale).
+- `precheck: {recent_ask_hits, note}`: an observation that the ask-trail is empty when creating a knowledge node (= suspicion that the `ask` pre-check was skipped).
 
-エラー時は `commit-mutation` (vault writer) が `failures` 配列付き Error を投げ、vault は変更されない (all-or-nothing)。
+On error, `commit-mutation` (vault writer) throws an Error with a `failures` array and the vault is unchanged (all-or-nothing).
 
 ---
 
-## 書き込み出力の suggestions
+## Write output suggestions
 
-`add-*` / `commit-mutation` は書き込み後、出力に `suggestions` オブジェクトを添える (全て **suggest-only・非致命**。index / endpoint 不在時は各提案を空+reason 付きで skip し、書き込みは決して止めない)。**提案は判断して確定するか、理由を持って見送る。自動では張られない** — これが境界 (エッジの自動付与はしない・確定は LLM/人間)。
+After writing, `add-*` / `commit-mutation` attach a `suggestions` object to the output (all **suggest-only and non-fatal**; when the index / endpoint is absent, each suggestion is skipped empty with a reason, and the write is never stopped). **Judge and confirm a suggestion, or decline it with a reason. Nothing is wired automatically** — that is the boundary (edges are never auto-attached; confirmation is by the LLM/human).
 
-- `suggestions.binding`: 作成した Decision/OK/Risk/Constraint について、vector index の File と embedding 照合した紐付け候補 (型ごと固定: Decision→sets_policy_for / Risk→risks_in / OK→documented_by / Constraint→constrains)。各候補は `path` / `title` / `summary` (判断材料) と `similarity`、そして `apply.plan_fragment` (エッジの commit-mutation 断片) を持つ → 妥当なら **plan_fragment を commit-mutation plan の `edges` にそのまま貼って 1 手で確定**する。
-- `suggestions.relations`: 同型ノードの cosine が [0.80, 0.92) 帯にある関係候補 (refines / has_premise / supersede のどれかは **LLM が判断** と note 付き)。中身を見て該当する関係を張るか見送る。
-- `suggestions.led_to`: Decision 作成時に graph 内の `state:"active"` な Investigation を列挙 → その調査から導かれた Decision なら led_to を張る。
-- `suggestions.premise_candidates`: ask-trail の直近ヒットのうち Decision/Constraint/Goal/OK 型 → 前提なら has_premise を張る。
-- `suggestions.binding_debt`: bind 無し knowledge ノード総数 (carving-check #9 と同定義、Constraint 拡張込み) を整数 1 つで。増えていたら未紐付けの知識が溜まっている合図。
+- `suggestions.binding`: for the created Decision/OK/Risk/Constraint, binding candidates matched by embedding against Files in the vector index (per-type fixed: Decision→sets_policy_for / Risk→risks_in / OK→documented_by / Constraint→constrains). Each candidate carries `path` / `title` / `summary` (judgment material) and `similarity`, plus `apply.plan_fragment` (a commit-mutation fragment for the edge) → if valid, **paste plan_fragment straight into a commit-mutation plan's `edges` to confirm in one step**.
+- `suggestions.relations`: relation candidates where same-type nodes' cosine is in the [0.80, 0.92) band (noted that which of refines / has_premise / supersede applies is **judged by the LLM**). Read the content and wire the applicable relation or decline.
+- `suggestions.led_to`: on Decision creation, lists `state:"active"` Investigations in the graph → if the Decision was derived from that investigation, wire led_to.
+- `suggestions.premise_candidates`: among the ask-trail's recent hits, those of type Decision/Constraint/Goal/OK → if a premise, wire has_premise.
+- `suggestions.binding_debt`: the total count of unbound knowledge nodes (same definition as carving-check #9, including the Constraint extension) as a single integer. If it is rising, it is a sign that unlinked knowledge is piling up.
 
-いずれも「判断して確定 or 理由を持って見送る」。提案をそのまま無言で放置しない (見送るなら見送る理由が言える状態にする)。
+For all of them: "judge and confirm, or decline with a reason". Do not silently leave a suggestion as-is (if declining, be in a state where you can state the reason).
 
 ---
 

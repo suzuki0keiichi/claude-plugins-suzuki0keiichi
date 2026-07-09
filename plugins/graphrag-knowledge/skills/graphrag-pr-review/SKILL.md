@@ -1,41 +1,41 @@
 ---
 name: graphrag-pr-review
-version: 1.4.0
+version: 1.5.0
 description: PR や diff を、AI 自身がグラフ（プロジェクトの永続知識）と照合して概念レベルでレビューし、所見(findings)を返す。「この PR をレビューして」「この差分をグラフ的に見て」「概念が崩れてない?」「方針に反してない?」と、実装後の変更の是非を問われた時に使う（行レベルのバグ探しが主目的ではない）。人間に渡す説明資料(HTML)が欲しい時は graphrag-review-doc、実装前の設計レビューは graphrag-design-review、変更の記録は graphrag-knowledge。スラッシュ: /graphrag-knowledge:graphrag-pr-review
 ---
 
-# PR レビュー（実装後・横断軸 + File / AI 実施）
+# PR Review (post-implementation, crosscut axis + File / performed by AI)
 
-diff 時のレビュー。**目的は QA でなくコントローラビリティ**（バグ検出は AI が行レベルで既に強い。ここは
-「変更が人間所有の概念層の枠を超えていないか」＋「枠の中で触るべき同胞 File を触り損ねていないか」を見る）。
+Review at diff time. **The goal is controllability, not QA** (AI is already strong at line-level bug detection; here
+we look at "whether the change crosses the frame of the human-owned concept layer" plus "whether it missed sibling files it should have touched within the frame").
 
-共通の土台・CLI の呼び方・逆引きの骨格・概念デルタ観点・3段の強制度は
-**`${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md` を必ず先に読む**こと。本 skill は実行手順の要約だけ。
+For the shared foundation, CLI invocation, the reverse-lookup skeleton, concept-delta perspectives, and the enforcement level of the 3 tiers,
+**you must first read `${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md`**. This skill is only a summary of the execution procedure.
 
-## 入力
+## Input
 
-`$ARGUMENTS` に base/head（例 `main...HEAD`）があればそれを、無ければ現在の作業差分を対象にする。
+If `$ARGUMENTS` carries a base/head (e.g. `main...HEAD`), use it; otherwise target the current working diff.
 
-## 手順（method §1.5 → §2 → §2.5 → §3 → §4 をそのまま実行）
+## Procedure (execute method §1.5 → §2 → §2.5 → §3 → §4 verbatim)
 
-0. **鮮度プリチェック** — method §1.5 そのまま実行。グラフに無い File は「索引が古い」を**所見の冒頭**に出す（§4 の binding 漏れとは原因・処方が違う）。
-1. **変更 File を取る**: `git diff --name-only <base>...<head>`（範囲指定が無ければ現在の作業差分）。
-2. **逆引きで枠を組む** — method §2 そのまま実行。`ask` は領域ごとに1発、連打しない。**現役末端で枠を組む**（state superseded の Decision を基準点にしない）。
-3. **順引きで影響圏を突き合わせる** — method §2.5 そのまま実行。候補は**必ず裏取りする — 候補 File と diff の該当箇所を実際に読む**（読まずに「要確認」で済ませるのは禁止）。裏取りの結果、規範・制約を破るなら **ACK 必須へ格上げ**して騒ぐ。候補が多い時は method §2.5 委譲項に従い subagent へ並列委譲してよい（委譲は実行手段の追加であって義務の縮小ではない）。
-4. **概念デルタを判定** — method §3 の観点リストそのまま実行。diff に `.graphrag/carving.json` の変更が含まれる場合、**免除追加を findings に昇格して人間裁定**。観点リスト外の概念デルタも「グラフ外所見」の作法で明示して出す（黙殺しない）。
-5. **3段で分類** — method §3 の表と格上げ規則。**段は上限ではない** — 実害（壊れる・穴が開く・前提崩れ）と判断した所見は ACK 必須へ格上げ。規範ノードが無い純粋な欠陥も「グラフ外所見」と明示して赤帯に出す。
-6. **枠の自己点検** — method §4 そのまま実行（binding 漏れを黙って「方針なし」にしない。順引きで候補ゼロの時も binding 漏れを疑う）。
+0. **Freshness precheck** — execute method §1.5 verbatim. For Files absent from the graph, surface "stale index" at **the top of the findings** (its cause and prescription differ from the binding gap in §4).
+1. **Get the changed Files**: `git diff --name-only <base>...<head>` (the current working diff if no range is given).
+2. **Build the frame by reverse lookup** — execute method §2 verbatim. One `ask` per area, no repeated firing. **Build the frame at live leaves** (do not anchor on a state-superseded Decision).
+3. **Match against the impact zone by forward expansion** — execute method §2.5 verbatim. Candidates **must be corroborated — actually read the candidate Files and the relevant spots in the diff** (settling for "needs checking" without reading is forbidden). If corroboration shows a norm/constraint is broken, **escalate to ACK-required** and raise the alarm. When candidates are many, you may delegate in parallel to subagents per the delegation clause of method §2.5 (delegation adds a means of execution; it does not shrink the obligation).
+4. **Judge concept deltas** — execute the perspective list of method §3 verbatim. If the diff includes a change to `.graphrag/carving.json`, **escalate the exemption addition into findings for human adjudication**. Concept deltas outside the perspective list are also surfaced explicitly per the "out-of-graph finding" convention (do not silently ignore).
+5. **Classify into 3 tiers** — the table and escalation rules of method §3. **A tier is not a ceiling** — findings judged to cause real harm (breaks, opens a hole, premise-breaking) escalate to ACK-required. A pure defect with no norm node is also surfaced in the red band, explicitly marked as an "out-of-graph finding".
+6. **Frame self-check** — execute method §4 verbatim (do not silently turn a binding gap into "no policy"; suspect a binding gap even when forward expansion yields zero candidates).
 
-## 出力
+## Output
 
-- **ACK 必須を冒頭にまとめる**（赤信号。「止めて確認」を促す。拒否はしない）。
-- **網羅チェックを独立セクションで出す**（影響圏 − diff、method §2.5）: 候補は伝播経路＋根拠ノード id＋**読んだ上での判定**付き。
-  枠ノードごとに「展開 File 数 / 裏取りした候補数 / 落とした候補と理由」の**会計**を記す —
-  「該当なし」は会計付きでしか書けない。既定は advisory 帯、規範・制約を破る触り残しは冒頭の ACK 帯にも載せる。
-- **advisory を該当箇所に添える**。各所見に**根拠ノード id を必ず添える**（traceable）。
-- 各所見は「枠を超える可能性。直すのはコードか、方針（グラフ）側を更新して意図変更を承認するかは人間が決める」形で、fix 方向の裁定を人間に残す。
-- **解決の書き戻し**（method §5）: ACK 必須所見を人間が「意図変更を承認」で解決したら、承認された意図変更を mutation
-  （Decision update / 方針転換レシピ / 新 RejectedOption）として提案し、graphrag-knowledge skill の書き戻しへ繋ぐ。
-  グラフを更新しないと次回も同じ所見が再発する（レビューの狼少年化）。
-- 行レベルのバグ探しは主対象でない（必要なら別途 AI コードレビューへ）と明記し、概念層に集中する。
-  ただし**見つけてしまった確信度の高い欠陥は黙殺しない** — 「グラフ外所見」と明示して赤帯に出す。
+- **Collect ACK-required at the top** (red light; prompts "stop and check"; never rejects).
+- **Emit the coverage check as its own section** (impact zone − diff, method §2.5): candidates carry propagation path + supporting node id + **a judgment made after reading**.
+  Per frame node, record the **accounting** of "number of Files expanded / number of candidates corroborated / dropped candidates and why" —
+  "nothing applicable" may be written only with accounting attached. The default is the advisory band; missed siblings that break a norm/constraint also go into the ACK band at the top.
+- **Attach advisory to the relevant spot**. Attach **a supporting node id to every finding without exception** (traceable).
+- Cast each finding in the form "possible frame crossing; whether to fix the code or update the policy (graph) side to approve the intent change is for the human to decide", leaving the fix-direction ruling to the human.
+- **Resolution write-back** (method §5): once a human resolves an ACK-required finding by "approving the intent change", propose the approved intent change as a mutation
+  (Decision update / policy-reversal recipe / new RejectedOption) and connect it to the graphrag-knowledge skill's write-back.
+  Without updating the graph, the same finding recurs next time (alarm fatigue in review).
+- State that line-level bug hunting is not the main target (route to a separate AI code review if needed) and concentrate on the concept layer.
+  That said, **do not silently ignore a high-confidence defect you happen to find** — surface it in the red band, explicitly marked as an "out-of-graph finding".

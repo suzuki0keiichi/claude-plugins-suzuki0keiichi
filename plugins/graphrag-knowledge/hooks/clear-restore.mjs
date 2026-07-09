@@ -139,24 +139,24 @@ async function main() {
   if (!fresh || !sameCwd) {
     // 沈黙は「なぜ復元しなかったか」の切り分けを不能にするので、理由を一行だけ注入する。
     const reason = !fresh
-      ? "60分の失効窓を超過"
-      : `別ディレクトリ (${entry.cwd}) の checkpoint`;
+      ? "expired: past the 60-minute freshness window"
+      : `checkpoint belongs to a different directory (${entry.cwd})`;
     emit(
-      `graphrag checkpoint が存在したが復元しなかった (${reason})。` +
-      "必要なら graphrag CLI の brief --mode resume で手動復元できる。"
+      `A graphrag checkpoint existed but was NOT restored (${reason}). ` +
+      "If needed, restore manually via the graphrag CLI: brief --mode resume."
     );
     return;
   }
 
   // 判定 OK — 命令形プロースを注入 (JSON ダンプではない)。
   emit(
-    "直前 checkpoint からの自動復元 (graphrag)。以下を compact 要約や探索より優先せよ。\n" +
-    "最初の一手 (ask / brief の再実行や広い探索から再開しない):\n" +
+    "Automatic restore from the last graphrag checkpoint. Prioritize this over any compact summary or exploration.\n" +
+    "First action (do NOT restart from ask / brief re-runs or broad exploration):\n" +
     `→ ${entry.first_action}\n\n` +
-    "--- 作業状態 (checkpoint 時点) ---\n" +
+    "--- work state (as of checkpoint) ---\n" +
     `${entry.work_state}\n` +
     "---\n" +
-    `出所: Investigation ${entry.investigation_id} (深い生ログ・関連知識が要る時だけ ask で辿る)`
+    `Source: Investigation ${entry.investigation_id} (trace via ask only when you need deep raw logs or related knowledge)`
   );
 }
 

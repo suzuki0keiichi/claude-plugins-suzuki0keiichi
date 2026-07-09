@@ -1,5 +1,6 @@
 ---
 name: graphrag-vault-init
+version: 1.1.0
 description: vault (ナレッジグラフ) の初期構築。system vault (コード/プロダクト知識) と project vault (時限イニシアチブ) の両方に対応。「vault を作りたい」「初期構築したい」「新しいプロジェクトを管理したい」「リポジトリを索引したい」で発火。
 ---
 
@@ -95,20 +96,20 @@ Initial construction has three distinct cognitive tasks. Use the right model for
 
 | Phase | Task | Model | Why |
 |---|---|---|---|
-| **3a. Node extraction** | Extract nodes from information sources (Confluence, Jira, Slack, etc.) | **Sonnet** (subagent) | Pattern recognition / information extraction. High volume, lower abstraction. |
-| **3b. Edge modeling** | Wire `has_premise`, `risks_in`, `depends_on`, cross-vault ref edges between nodes | **Opus** (self) | Conceptual modeling. Requires reverse reasoning ("what depends on this assumption?"). |
-| **3c. Theme extraction** | Identify cross-vault themes and wire `encompasses` edges | **Opus** (self) | Highest abstraction. Requires seeing patterns across multiple vaults simultaneously. |
-| **3d. Gap reification** | Materialize implicit concepts mentioned in Themes/descriptions but not yet nodes | **Opus** (self) | Themes often name shared bottlenecks that Sonnet didn't extract as Resource/Constraint nodes. Ask: "What compute, personnel, facilities, or budget does this Theme's activities consume?" |
+| **3a. Node extraction** | Extract nodes from information sources (Confluence, Jira, Slack, etc.) | **extraction model** — a fast, cheaper tier (e.g. Sonnet), as subagent | Pattern recognition / information extraction. High volume, lower abstraction. |
+| **3b. Edge modeling** | Wire `has_premise`, `risks_in`, `depends_on`, cross-vault ref edges between nodes | **modeling model** — the strongest available tier (self) | Conceptual modeling. Requires reverse reasoning ("what depends on this assumption?"). |
+| **3c. Theme extraction** | Identify cross-vault themes and wire `encompasses` edges | **modeling model** (self) | Highest abstraction. Requires seeing patterns across multiple vaults simultaneously. |
+| **3d. Gap reification** | Materialize implicit concepts mentioned in Themes/descriptions but not yet nodes | **modeling model** (self) | Themes often name shared bottlenecks that the extraction pass didn't extract as Resource/Constraint nodes. Ask: "What compute, personnel, facilities, or budget does this Theme's activities consume?" |
 
-**Recommended flow** (from a single Opus session):
+**Recommended flow** (from a single session on the strongest available model):
 
 ```
 1. Create directory structure + VAULT.md (Steps 1-2 above)
-2. Dispatch Sonnet subagent(s) for node extraction:
+2. Dispatch extraction subagent(s) for node extraction:
    - Provide information sources (URLs, page IDs, documents)
-   - Sonnet extracts Goal/Stakeholder/Milestone/Risk/Assumption/Agreement/Constraint/Task/Source nodes
-   - Sonnet writes via commit-mutation
-3. Review Sonnet's output, then self (Opus) perform:
+   - The subagent extracts Goal/Stakeholder/Milestone/Risk/Assumption/Agreement/Constraint/Task/Source nodes
+   - The subagent writes via commit-mutation
+3. Review the extraction output, then perform yourself (modeling model):
    - has_premise edges (which Goals/Decisions depend on which Assumptions?)
    - cross-vault ref edges (which Tasks require which system vault Deliverables?)
    - risks_in edges (which Risks threaten which Tasks/Goals/Milestones?)
@@ -124,19 +125,19 @@ Initial construction has three distinct cognitive tasks. Use the right model for
      partner capacity) that source documents mention as activities but never name as resources
 ```
 
-**Why not Sonnet for edges?** Extracting "what this document says" (nodes) is different from reasoning "what conceptual dependency exists between these two nodes" (edges). Sonnet excels at the former but tends to miss reverse-direction implications (e.g., "this Goal has_premise that Assumption" requires understanding that if the Assumption breaks, the Goal is at risk).
+**Why not the extraction model for edges?** Extracting "what this document says" (nodes) is different from reasoning "what conceptual dependency exists between these two nodes" (edges). A fast extraction model excels at the former but tends to miss reverse-direction implications (e.g., "this Goal has_premise that Assumption" requires understanding that if the Assumption breaks, the Goal is at risk).
 
-**Sonnet delegation: what it CAN and CANNOT do:**
+**Extraction-model delegation: what it CAN and CANNOT do:**
 
-| Sonnet handles well | Sonnet misses (supplement in later steps) |
+| Handles well | Misses (supplement in later steps) |
 |---|---|
 | Node extraction from source docs | Resource nodes (source docs describe activities, not underlying resources) |
 | Extraction-type edges: `achieves`, `targets`, `responsible_for`, `documented_by` | Inference-type edges: `has_premise`, `risks_in` (requires reverse reasoning) |
 | Cross-vault ref matching (if given the full ID list) | Cross-vault ref discovery (cannot infer which Deliverables are needed) |
 | `certainty` assignment on Assumptions (if given the 4-level definition) | Theme extraction (requires cross-vault abstraction) |
 
-**Sonnet prompt tips:**
-- Include a complete mutation plan example (project vault version) — Sonnet's accuracy jumps with concrete examples
+**Extraction-subagent prompt tips:**
+- Include a complete mutation plan example (project vault version) — extraction accuracy jumps with concrete examples
 - Provide the cross-vault Deliverable ID list from Step 0 system vaults
 - Include the certainty 4-level definition: Established (confirmed fact) / Expected (high confidence from evidence) / Assumed (unverified premise) / Speculative (hope or guess)
 - For Agreements with source backing: use `raw_content` + `raw_content_status: copied_from_summary` when `derived_from` type pairs don't allow direct linking
@@ -154,7 +155,7 @@ Collect from Confluence, Jira, Slack, Google Slides, meetings, etc.:
 7. **Constraint**: Immutable conditions (regulations, deadlines, budget caps)
 8. **Cross-vault Deliverable**: Which system vault Deliverables does this project depend on?
 
-### Step 4: Populate Initial Nodes (Sonnet subagent phase)
+### Step 4: Populate Initial Nodes (extraction-subagent phase)
 
 Use `commit-mutation` for batch creation. All distilled nodes (Decision/RejectedOption/Risk/OK/Agreement) require a `derived_from` edge to a Source or Investigation with `raw_content`.
 

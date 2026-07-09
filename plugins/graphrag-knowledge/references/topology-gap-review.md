@@ -1,12 +1,12 @@
-# Topology Gap Review (不具合・見落とし発見時のグラフ構造自省)
+# Topology Gap Review (graph-structure self-reflection on bug / oversight discovery)
 
-不具合や考慮漏れが見つかった時、次の問いを自問する:
+When a bug or an overlooked case is found, ask yourself:
 
-1. **これはグラフに適切な構造があれば回避できたか?** — 本来あるべき Concern/Component やエッジが存在していれば、`ask` でその Constraint/Risk が引っ張れて防げた不具合か。
-2. **あるべきノードが存在しない状態か?** — 既にある Constraint/Decision が別の操作経路に届いていないだけ (エッジの穴) か、そもそも横断的な関心 (Concern/Component) が構造化されていないか。
+1. **Could this have been avoided if the graph had the right structure?** — If the Concern/Component or edge that ought to exist had been there, would `ask` have pulled that Constraint/Risk and prevented the bug?
+2. **Is a node that should exist missing?** — Is an existing Constraint/Decision simply not reaching another operation path (an edge hole), or is the crosscutting concern (Concern/Component) not structured in the first place?
 
-**穴のパターン**: 操作 A に Constraint C が正しく適用されているが、同じリソース R を触る操作 B への C→R→B の経路がグラフに無い。原因は R を表す Concern/Component の不在、またはそこへのエッジ欠損。
+**Hole pattern**: Constraint C is correctly applied to operation A, but the graph has no C→R→B path to operation B, which touches the same resource R. The cause is the absence of a Concern/Component representing R, or a missing edge into it.
 
-**該当した場合**: 不足している構造 (Concern/Component + エッジ) を `commit-mutation` で補い、同種の考慮漏れを将来の `ask` で防げるようにする。このフィードバックがグラフの学習ループを閉じる — 検索精度の改善ではなく、グラフのトポロジー自体を育てる行為。
+**When it applies**: fill the missing structure (Concern/Component + edges) via `commit-mutation` so that future `ask` prevents the same kind of oversight. This feedback closes the graph's learning loop — not improving search precision, but cultivating the graph's topology itself.
 
-**タイミング**: 不具合修正・レビュー指摘対応・「なぜグラフから引けなかったのか」とユーザーに問われた時。Drift Reconciliation と似ているが、こちらは「グラフに書いてある内容の古さ」ではなく「グラフに書かれるべき構造の不在」を扱う。
+**Timing**: on bug fixes, addressing review comments, or when the user asks "why couldn't this be pulled from the graph?" Similar to Drift Reconciliation, but this deals with "the absence of structure that should be written into the graph" rather than "the staleness of content written in the graph."

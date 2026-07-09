@@ -1,550 +1,624 @@
-# 概念 carving 品質ルール
+# Concept carving quality rules
 
-`conceptual-pass.md` が「何を」「どのエッジで繋ぐか」を規定するのに対し、本ファイルは
-「どう切るか」「どう仕上げるか」の品質ガードを規定する。Component / Concern / Layer を
-mutation する全ての conceptual-pass で本ルールを満たすこと。違反は `validateGraph` を
-通っても carving 不良で、retrieval 品質と将来の追従性を直接傷つける。
+Whereas `conceptual-pass.md` specifies *what* to carve and *which edge* to connect it with,
+this file specifies the quality guards for *how to carve* and *how to finish*. Every
+conceptual-pass that mutates a Component / Concern / Layer must satisfy these rules. A
+violation is a carving defect even if it passes `validateGraph`, and directly harms retrieval
+quality and future followability.
 
-> 軸2(横断構造)のノード型は **Component = 局所に凝集した構造的まとまり**
-> (alias: Component)、**Layer = 水平に積もるアーキ層** (alias: Layer)、
-> **Concern = 層を貫いて走る横断的関心** (alias: Concern) が canonical。
-> 地質メタファー名は alias として互換に残る。本ファイルは canonical 名で記述する。
+> The axis-2 (crosscut structure) node types are canonically **Component = a locally cohesive
+> structural cluster** (alias: Component), **Layer = a horizontally stacked architectural
+> layer** (alias: Layer), **Concern = a crosscutting concern that runs through the layers**
+> (alias: Concern). The geology-metaphor names remain as aliases for compatibility. This file
+> is written with the canonical names.
 
-## なぜ品質ルールが要るか(設計判断の背景)
+## Why quality rules are needed (design rationale)
 
-`docs/history/indexer-redesign-notes.md` (historical) の最終結論: retrieval 品質の天井はモデル能力ではなく
-「解釈ガイダンス + グラフ信号 (role) の活用」だった。同じことが carving にも当てはまる。
-indexer が出す候補(依存コミュニティ・トポロジ深さ・命名)は決定論的足場で、最終的に
-何を Component / Concern / Layer と命名するかは LLM の判断。判断軸が無いと、
+Final conclusion of `docs/history/indexer-redesign-notes.md` (historical): the ceiling on
+retrieval quality was not model capability but "interpretation guidance + use of the graph
+signal (role)." The same applies to carving. The candidates the indexer emits (dependency
+community, topology depth, naming) are a deterministic scaffold; what ultimately gets named a
+Component / Concern / Layer is the LLM's judgment. Without a judgment axis:
 
-- 関連語が引きずられて mega-component(38ファイルが1つ等)が生まれる。
-- 横断意図と局所責務が同じ概念で二重表現される(`Component` と `Concern` の重複)。
-- 番号採番が残って意味スラグが付かない(`c1`〜`c9` 採番、欠番事故)。
-- 新規ディレクトリ追加時に追従漏れが起きる(`core/backup/` などの孤児化)。
+- Related terms get dragged along and a mega-component is born (e.g. 38 files in one).
+- Crosscut intent and local responsibility get double-represented under the same concept
+  (a `Component` and `Concern` overlap).
+- Numeric numbering lingers and no meaningful slug is attached (`c1`–`c9` numbering,
+  missing-number accidents).
+- Follow-up is missed when a new directory is added (orphaning of `core/backup/` etc.).
 
-これらは事後で見つけても、再 carving しないと直らない。carving 段階で品質ゲートに
-通すのが最も安価。
+Even if found after the fact, these cannot be fixed without re-carving. Passing them through a
+quality gate at the carving stage is the cheapest.
 
 ## Component carving
 
-### 同ディレクトリ原則(default)
+### Same-directory principle (default)
 
-候補 Component のメンバー File が同一ディレクトリから集まっている場合は、原則そのまま
-1 Component として確定する。`evidenced_by` の根拠もディレクトリ単位で揃う。
+When the member Files of a candidate Component are gathered from the same directory, by default
+confirm them as-is as one Component. The `evidenced_by` grounding also lines up per directory.
 
-異なるディレクトリの File を同じ Component にまとめる場合、Component の `summary` に
-**「なぜ束ねるか」の justification を 1 文必ず入れる**:
+When bundling Files from different directories into the same Component, always put **a
+one-sentence justification of "why bundle them" into the Component's `summary`**:
 
-- 良い例: 「`core/cloud/` の I/O 群と `server/routes/network` の HTTP 受け口を共に
-  Web.Auto への外向き接続として束ねる」。
-- 悪い例: justification 無しで `core/cloud/` と `core/pipeline/` と `core/scanner/` を
-  「I/O 系」とまとめる(=異なる責務を一括りにしている兆候)。
+- Good: 「`core/cloud/` の I/O 群と `server/routes/network` の HTTP 受け口を共に Web.Auto への
+  外向き接続として束ねる」.
+- Bad: bundling `core/cloud/`, `core/pipeline/`, and `core/scanner/` as 「I/O 系」 with no
+  justification (= a sign of lumping different responsibilities together).
 
-justification を書こうとして詰まる場合は、それは束ねるべきでない兆候。割る。
+If you get stuck trying to write the justification, that is a sign they should not be bundled.
+Split them.
 
-### 粒度ガード
+### Granularity guard
 
-| 状況 | 対応 |
+| Situation | Response |
 |---|---|
-| 4 ファイル未満 | ほぼ「箱」状態。Concern との二重表現や、より大きい Component に吸収できないか再評価 |
-| 4〜20 ファイル | 標準粒度。そのまま確定 |
-| 20 ファイル超 (テスト含む) | 責務が複数混入している可能性。機能軸で分割の検討必須 |
-| 30 ファイル超 | ほぼ確実に複数 Component の合成。分割しないなら `summary` に強い justification |
+| Under 4 files | Almost a "box" state. Re-evaluate for double representation with a Concern, or whether it can be absorbed into a larger Component |
+| 4–20 files | Standard granularity. Confirm as-is |
+| Over 20 files (including tests) | Possibly multiple responsibilities mixed in. Splitting along functional lines is mandatory to consider |
+| Over 30 files | Almost certainly a composite of multiple Components. If not splitting, a strong justification in `summary` |
 
-粒度は「ファイル数」ではなく「責務の凝集」で判断する。ファイル数はあくまで再評価の
-トリガー閾値。
+Judge granularity by "cohesion of responsibility," not "file count." File count is merely a
+trigger threshold for re-evaluation.
 
-### 異物検査(必須)
+### Foreign-body inspection (required)
 
-Component の `title` / `summary` が示す責務に対し、メンバー File の **path / ファイル名から
-明らかに無関係なもの**を混ぜない。検査手順:
+Do not mix in member Files that are **clearly unrelated by path / filename** to the
+responsibility indicated by the Component's `title` / `summary`. Inspection procedure:
 
-1. Component の `title` を読む。
-2. 各メンバー File の path 第 1〜2 階層を見る(例: `core/pipeline/`, `core/scanner/`)。
-3. その path が `title` が示すドメインから外れているなら、別 Component へ移す。
-4. 「`core/` 直下の `logger.ts` / `utils.ts`」のような汎用ファイルは、どの Component にも
-   属さないものとして allowed-orphan 扱い(網羅性ゲートで除外、後述)。
+1. Read the Component's `title`.
+2. Look at the 1st–2nd path level of each member File (e.g. `core/pipeline/`, `core/scanner/`).
+3. If that path falls outside the domain indicated by the `title`, move it to a different
+   Component.
+4. Generic files like `logger.ts` / `utils.ts` directly under `core/` are treated as
+   allowed-orphan, belonging to no Component (excluded by the coverage gate; see below).
 
-良い例: `title=「クラウド I/O」` のメンバーが `core/cloud/*`, `server/cloud-endpoints.ts`,
-`server/routes/network.ts`, `server/routes/settings.ts` で揃っている。
+Good: the members of `title=「クラウド I/O」` line up as `core/cloud/*`,
+`server/cloud-endpoints.ts`, `server/routes/network.ts`, `server/routes/settings.ts`.
 
-悪い例: 同じ Component に `core/pipeline/compress-worker.ts` や `core/scanner/rosbag-info.ts`
-が混入。これらは path から明らかに別ドメイン。
+Bad: `core/pipeline/compress-worker.ts` and `core/scanner/rosbag-info.ts` mixed into the same
+Component. These are clearly a different domain by path.
 
-### 1 file 責務の扱い (吸収 / 1-file Component / allowed-orphan の判定フロー)
+### Handling single-file responsibilities (absorb / 1-file Component / allowed-orphan decision flow)
 
-「同ディレクトリに 1 file しか無い責務」 や 「孤立した汎用/定数/型 file」 が出てきた時の判定。
-**乱造防止のため、 上から順に試して**、 早く決まった段で確定する。 LLM は step 4 を
-回避しようとして「とりあえず作る」 をしないこと (= 強い意志で止める)。
+The decision when "a responsibility with only 1 file in its directory" or "an isolated
+generic/constant/type file" appears. **To prevent overproduction, try from the top in order**
+and settle at the earliest stage that decides. The LLM must not "just create one" to avoid
+step 4 (= stop with strong will).
 
 ```
-1. 既存 Component に「同ドメイン narrative」 で吸収できるか?
-   = 既存 Component の title/summary を書き換えずに、 この file を含めても整合するか?
-   YES → 既存 Component に `evidenced_by` 追加 (吸収)。 【最優先】
+1. Can it be absorbed into an existing Component under a "same-domain narrative"?
+   = Does including this file stay consistent without rewriting the existing Component's title/summary?
+   YES → add `evidenced_by` to the existing Component (absorb). 【top priority】
 
-   例: `core/backup/backup-manager.ts` 1 file は、 既存 `device-pipeline` Component の
-       narrative (「device 検出 → scan → backup/compress/upload pipeline」) に整合する
-       なら吸収する。 単独で 1-file Component を切る前に必ず試す。
+   Example: the single file `core/backup/backup-manager.ts` — if it is consistent with the
+       narrative of the existing `device-pipeline` Component
+       (「device 検出 → scan → backup/compress/upload pipeline」), absorb it. Always try this
+       before carving a standalone 1-file Component.
 
-2. 1 file でも独自の **ドメイン narrative が書けるか?**
-   = title + summary を「この file は何の責務を持つか」 で 1 文で書け、
-     既存 Component と重複せず、 将来同ドメインの file が追加されたらここに集まると言えるか?
-   YES → 1-file Component を新規作成して良い。 (= 網羅性のため 1 file Component を許す)
+2. Even for 1 file, can you write its own **domain narrative?**
+   = Can you write title + summary in one sentence as "what responsibility this file holds,"
+     without overlapping an existing Component, and can you say that future same-domain files
+     will gather here?
+   YES → you may create a new 1-file Component. (= allow a 1-file Component for coverage)
 
-   良い例: `luks-manager.ts` 1 file → title=「LUKS パーティションのアンロック管理」、
-           将来 `unlock-luks` 系拡張があればここに集まる、 narrative 成立。
-   悪い例: `string-helper.ts` 1 file → title=「文字列 helper」 で narrative 弱い
-           → 1-file Component にせず step 3 へ。
+   Good: single file `luks-manager.ts` → title=「LUKS パーティションのアンロック管理」,
+           if there is future `unlock-luks`-family expansion it gathers here; narrative holds.
+   Bad: single file `string-helper.ts` → title=「文字列 helper」 has a weak narrative
+           → do not make it a 1-file Component; go to step 3.
 
-3. 上記いずれも当たらない共通インフラ (constants / types / composition root /
-   汎用 utility) または、 それらの test か?
-   YES → **allowed-orphan として残すことを許可** (orphan で構わない)。
-         ただし、 「step 1 で吸収できるなら吸収優先」 の原則は変わらない。
-         allowed-orphan は「orphan のまま許す」 であって「強制 orphan」 ではない。
+3. Is it common infrastructure that none of the above fits (constants / types / composition
+   root / generic utility), or a test for those?
+   YES → **permitted to leave as allowed-orphan** (orphan is fine).
+         But the principle "if step 1 can absorb it, prefer absorption" is unchanged.
+         allowed-orphan means "allow it to stay orphan," not "force orphan."
 
-   例: `server/index.ts` は composition root だが、 narrative が「Express サーバと
-       API ルート」 Component に整合するなら吸収 (step 1) を選んで良い。
-       逆に narrative が複数 Component を跨ぐ束ね役なら allowed-orphan で残す。
+   Example: `server/index.ts` is a composition root, but if its narrative is consistent with
+       an 「Express サーバと API ルート」 Component, you may choose absorption (step 1).
+       Conversely, if its narrative is a bundler spanning multiple Components, leave it as
+       allowed-orphan.
 
-4. どれも当たらない / 迷う
-   → **STOP**。 新規作成しない。 user に判断を上げる。
-     「これは Component ではない」 と「新規 Component 化が妥当」 の判断は user 側で
-     強い意志を持って決める。 LLM は「迷ったら作る」 にならないように止める。
+4. None fit / unsure
+   → **STOP**. Do not create a new one. Escalate the decision to the user.
+     The judgment between "this is not a Component" and "making it a new Component is
+     warranted" is decided on the user side with strong will. The LLM stops so it does not
+     become "when unsure, create."
 ```
 
-### 定数 file の取り扱い (思想)
+### Handling constant files (philosophy)
 
-`constants.ts` / `enums.ts` のような **定数だけを集める file は新規作成を避ける**。
-定数は使用する domain file 内に直接書くこと (= ドメイン凝集を優先)。
+**Avoid creating files that collect only constants**, like `constants.ts` / `enums.ts`. Write
+constants directly inside the domain file that uses them (= prioritize domain cohesion).
 
-歴史的 / 共有目的の理由で既に存在する `shared/constants.ts` 等は allowed-orphan で
-許容するが、 これらは「やむを得ない fallback」 であって望ましい状態ではない。
-新規追加コードで定数 file を作ろうとしたら、 まず「ドメイン file 内に書けないか」 を
-検討する。
+Files like `shared/constants.ts` that already exist for historical / sharing reasons are
+tolerated as allowed-orphan, but these are an "unavoidable fallback," not a desirable state. If
+you are about to create a constants file in newly added code, first consider "whether it can be
+written inside a domain file."
 
-### 意味ある命名 必須(Component / Layer / Concern 共通・プレースホルダ禁止)
+### Meaningful naming required (common to Component / Layer / Concern; no placeholders)
 
-**この規則は3つの crosscut 型すべて(Component / Layer / Concern)に等しく適用する。** indexer は
-候補に機械プレースホルダの id・title・summary を付ける(`component:<sys>:c1` /
-`layer:<sys>:band0` / title `"Layer band 0/3 (41 files)"` / `"Component candidate c1"` 等)。
-これらは**メンバーの構成要素(束ねた File 群・依存深さ帯・連番)であって意味ではない**(§0 大原則)。
-carve とは、この機械名を**「そのノードが何を担うか」の意味命名に置き換える**こと。
+**This rule applies equally to all three crosscut types (Component / Layer / Concern).** The
+indexer attaches machine-placeholder id / title / summary to candidates
+(`component:<sys>:c1` / `layer:<sys>:band0` / title `"Layer band 0/3 (41 files)"` /
+`"Component candidate c1"` etc.). These are **constituents of the members (the bundled Files,
+the dependency-depth band, the sequential number), not meaning** (§0 grand principle). Carving
+is **replacing these machine names with meaningful naming of "what that node is responsible
+for."**
 
-**id slug — 必ず意味の kebab-case。**
-- 良い: `component:<sys>:cloud-io` / `layer:<sys>:foundation` / `layer:<sys>:domain-logic` /
+**id slug — always meaningful kebab-case.**
+- Good: `component:<sys>:cloud-io` / `layer:<sys>:foundation` / `layer:<sys>:domain-logic` /
   `concern:<sys>:auth-access`
-- 禁止: `c1` / `c2` …(Component 連番)、`band0` / `band1` …(Layer 連番)。indexer の機械 ID は
-  永続化前に必ず意味 slug にリネームする。
+- Forbidden: `c1` / `c2` … (Component sequential numbers), `band0` / `band1` … (Layer sequential
+  numbers). Always rename the indexer's machine IDs to meaningful slugs before persisting.
 
-**title — 必ず意味の語。機械プレースホルダの痕跡を残さない。**
-- 良い (Layer): `基盤層 — 設定・データ・共有型の土台` / `入口・合成層 — 起動とルーティング合成`
-- 良い (Component): `サーバ中核(設定/DB/認証/WS)` / `共有UI部品`
-- **禁止(そのまま確定させない)**: `Layer band 0/3 (41 files)` / `Component candidate c1` /
-  `(7 files)` のような **依存深さ帯・候補連番・ファイル数を含む title**。ファイル数や band 番号は
-  構成要素であって、その層/塊が「何を担うか」を一切表さない。
+**title — always meaningful words. Leave no trace of the machine placeholder.**
+- Good (Layer): `基盤層 — 設定・データ・共有型の土台` / `入口・合成層 — 起動とルーティング合成`
+- Good (Component): `サーバ中核(設定/DB/認証/WS)` / `共有UI部品`
+- **Forbidden (do not confirm as-is)**: titles containing **a dependency-depth band, candidate
+  sequence number, or file count**, like `Layer band 0/3 (41 files)` / `Component candidate c1` /
+  `(7 files)`. File count and band number are constituents; they express nothing about "what"
+  that layer/cluster is responsible for.
 
-理由: 連番は将来の追加・削除で欠番事故(`c6` だけ消えて意味不明)を起こす。ファイル数・band
-番号入りの名前は retrieval で意味の手掛かりにならず、メンバーが1つ増減しただけで名前が嘘になる。
-意味命名なら衝突せず、削除しても履歴上意味が残り、検索でも効く。
+Rationale: sequential numbers cause missing-number accidents on future addition/deletion (`c6`
+alone is deleted and it becomes meaningless). Names carrying a file count or band number are no
+semantic clue in retrieval, and the name becomes a lie the moment members increase or decrease
+by one. Meaningful naming does not collide, retains meaning in history even when deleted, and
+works in search.
 
-**ゲートで強制**: `carving-check` は candidate:true 残存を `candidate-uncarved` ERROR、title の
-プレースホルダ痕跡(`band N/M` / `(N files)` / `candidate cN`)を `placeholder-title` ERROR で
-止める。連番 slug は `meaningful-slug` WARN。**carve 完了 = これらが 0 になった状態**。
+**Enforced at the gate**: `carving-check` stops residual candidate:true with a
+`candidate-uncarved` ERROR, and placeholder traces in the title (`band N/M` / `(N files)` /
+`candidate cN`) with a `placeholder-title` ERROR. A sequential slug is a `meaningful-slug` WARN.
+**Carving complete = the state where these are 0.**
 
-### Constraint の Decision ロンダリング禁止
+### No laundering a Constraint as a Decision
 
-広域スコープの不変条件を Decision として書いて `sets_policy_for` で横断に張る偽装
-(= Constraint の Decision ロンダリング)をしない。横断高度の constrains は文法に無い。
-高度が無い場合は File 列挙 + 範囲を summary に明記する。
+Do not disguise a broad-scope invariant by writing it as a Decision and wiring it crosscut with
+`sets_policy_for` (= laundering a Constraint as a Decision). A crosscut-altitude constrains does
+not exist in the grammar. When there is no altitude, enumerate the Files + state the scope
+explicitly in the summary.
 
-理由: Constraint は「破ってはならない不変条件」、Decision は「選んだ判断(supersede 可能)」で
-意味論が違う。型を偽装すると、retrieval で「守るべき制約」を引いた時に漏れ、方針転換レシピ
-(supersede)の対象に誤って乗る。命名と同じく、型もそのノードの**意味**を担う。
+Rationale: a Constraint is "an invariant that must not be broken," a Decision is "a chosen
+judgment (supersede-able)" — different semantics. Disguising the type means it is missed when
+you retrieve "constraints to uphold," and it wrongly rides on the target of the policy-reversal
+recipe (supersede). Like naming, the type too carries the node's **meaning**.
 
-### 廃止と命名安定性
+### Retirement and naming stability
 
-確定した slug は削除して空けない。廃止する Component は
+Do not delete a confirmed slug to free it up. A Component being retired:
 
-- `op:"delete"` で消すなら、後継 Component の `summary` に「`<旧 slug>` を吸収」と書く。
-- 名前を変えるだけなら、新規作成 + 旧 `op:"delete"` ではなく、可能な限り `op:"update"`
-  で `title` / `summary` のみ patch する(slug 含む id は immutable のため、命名変更が
-  本当に必要なら新規作成 + 旧削除になるが、その場合は履歴を summary に残す)。
+- If deleting with `op:"delete"`, write 「`<旧 slug>` を吸収」 in the successor Component's
+  `summary`.
+- If only renaming, prefer `op:"update"` patching only `title` / `summary` rather than new
+  creation + old `op:"delete"` (since the id including the slug is immutable, if a naming change
+  is truly needed it becomes new creation + old deletion, in which case leave the history in the
+  summary).
 
-**知識ノード(Decision / OperationalKnowledge)の廃止は削除でなく state**(`state:"superseded"`)。
-方針転換レシピ(新 Decision 作成 → `refines` 新→旧 → 旧を superseded)の正本は `mutation-templates.md`「方針転換」。
+**Retirement of a knowledge node (Decision / OperationalKnowledge) is state, not deletion**
+(`state:"superseded"`). The source of truth for the policy-reversal recipe (create new Decision
+→ `refines` new→old → mark old superseded) is `mutation-templates.md` "policy reversal."
 
 ## Concern carving
 
-### Component / Layer との質的違い
+### Qualitative difference from Component / Layer
 
-Component は依存コミュニティ、Layer はトポロジ深さ帯 — どちらも indexer が決定論で
-候補を出し、LLM は命名と意味付けを担う。候補を処理すれば結果が出る。
+Component is a dependency community, Layer is a topology-depth band — for both, the indexer
+emits candidates deterministically and the LLM handles naming and meaning-assignment. Process
+the candidates and a result comes out.
 
-**Concern にはこの足場が無い。** 認証・観測性・エラー処理・暗号化・i18n・自動更新 —
-これらは import グラフの中に「横断関心クラスタ」として浮かんでこない。Concern の
-発見と定義は **LLM が概念的にモデリングする行為が主役**であり、carving 全体の
-中で最も創発的な理解力が問われるステップ。Component / Layer と同じ感覚で
-「候補を処理して名前を付ける」アプローチでは、本来あるべき横断関心の多くを
-見落とす。
+**Concern has no such scaffold.** Authentication, observability, error handling, encryption,
+i18n, auto-update — these do not surface within the import graph as a "crosscutting-concern
+cluster." Discovering and defining a Concern **has the LLM's conceptual modeling as the
+protagonist**, the step demanding the most emergent understanding in all of carving. An
+approach of "process candidates and name them," in the same spirit as Component / Layer,
+overlooks many of the crosscutting concerns that should exist.
 
-Concern carving は以下の順序で行う: まず LLM が全体像から横断関心をモデリングし、
-次に機械シグナルで盲点を補い、最後に品質ルールで仕上げる。
+Perform Concern carving in this order: first the LLM models crosscutting concerns from the
+whole picture, then machine signals fill in blind spots, and finally quality rules finish it.
 
-### LLM によるモデリング（主）
+### LLM modeling (primary)
 
-Component / Layer で構造が見えた段階で、コードベース全体を俯瞰し次の問いを立てる:
+Once structure is visible via Component / Layer, survey the whole codebase and pose these
+questions:
 
-- **このシステムの性質から、どのような横断的な関心が走っているか。**
-  ドメイン固有の横断関心 (金融なら監査証跡、医療なら PHI アクセス制御 等) と、
-  ソフトウェア一般の横断パターン (認証/認可・観測性・エラーハンドリング・設定管理・
-  暗号化・i18n・自動更新 等) の両面から見る。
-- **既存の Component / Layer の間を貫いている共通の動機は何か。**
-  複数の Component に同じ「なぜ」が散らばっている場合、それは Concern。
-- **特定の技術スタックに偏らず、機能的な意味で横断しているものは何か。**
-  例: LUKS は TypeScript / Express / React / Bash / systemd / udev と 6 技術
-  スタックを跨ぐ — import グラフにも embedding 近接にも現れないが、
-  「データ暗号化」という動機で横断している。path / ファイル名のテーマ語が手掛かり。
+- **Given the nature of this system, what crosscutting concerns run through it?**
+  Look from both sides: domain-specific crosscutting concerns (audit trails for finance, PHI
+  access control for healthcare, etc.) and general software crosscutting patterns
+  (authentication/authorization, observability, error handling, configuration management,
+  encryption, i18n, auto-update, etc.).
+- **What common motive runs through the existing Components / Layers?**
+  When the same "why" is scattered across multiple Components, that is a Concern.
+- **What crosscuts in a functional sense, not biased toward a particular tech stack?**
+  Example: LUKS spans 6 tech stacks — TypeScript / Express / React / Bash / systemd / udev —
+  appearing in neither the import graph nor embedding proximity, yet it crosscuts under the
+  motive of "data encryption." Theme words in the path / filename are the clue.
 
-### 機械ヒントでの盲点チェック（補助）
+### Blind-spot check via machine hints (supplementary)
 
-LLM のモデリング後、下記の機械シグナルと突き合わせて見落としを拾う。
-**これらは起点ではなく検算**。機械が出さなかった横断関心が存在しないとは限らない。
+After LLM modeling, cross-check against the machine signals below to pick up oversights.
+**These are a verification, not a starting point.** A crosscutting concern the machine did not
+emit is not necessarily nonexistent.
 
-**`concern-hint`（embedding 近接クラスタリング）**: 各 File の embedding で k-NN graph
-を構築し、異 Component 所属の意味的近接ファイル群を Union-Find でクラスタ化。
-各クラスタを candidate JSON (member_files / spanning_components / theme_words)
-として提示する。LLM のモデリングに含まれていない candidate があれば再考する。
-推奨パラメータ: `--threshold 0.92 --knn 1 --min-cluster 3 --min-span 2`
-(giant component 抑制のため k-NN graph を採用、threshold が低いと連結爆発する)。
+**`concern-hint` (embedding-proximity clustering)**: builds a k-NN graph from each File's
+embedding and clusters semantically proximate file groups belonging to different Components via
+Union-Find. Presents each cluster as candidate JSON (member_files / spanning_components /
+theme_words). Reconsider if there is a candidate not included in the LLM modeling. Recommended
+parameters: `--threshold 0.92 --knn 1 --min-cluster 3 --min-span 2` (adopts a k-NN graph to
+suppress a giant component; a low threshold causes a connectivity explosion).
 
-**`cross_component_in_degree`（構造シグナル）**: 各 File に「自分を import して
-いる distinct Component の数」が付与される。2 以上のファイルは縦串が走っている可能性。
-例: `core/logger.ts` が 4 Component から import → 観測性 Concern の縦串。ただし
-共通型 (`shared/types.ts`) や composition root も高 in-degree になるので、
-機械シグナルだけで Concern と決めつけない。
+**`cross_component_in_degree` (structural signal)**: each File is annotated with "the number of
+distinct Components that import it." A file with 2 or more may have a crosscut running through
+it. Example: `core/logger.ts` imported from 4 Components → the crosscut of an observability
+Concern. But shared types (`shared/types.ts`) and composition roots also get a high in-degree,
+so do not decide it is a Concern from the machine signal alone.
 
-### 横断条件 (≧2 Component)
+### Crosscut condition (≥2 Components)
 
-`Concern` は **2 つ以上の Component にまたがって File を持つ**ものだけを立てる。
+Only establish a `Concern` that **holds Files spanning two or more Components**.
 
-1 Component 内で完結する責務は Concern にしない。その Component の責務として吸収する。
+A responsibility complete within 1 Component is not made a Concern. Absorb it as that
+Component's responsibility.
 
-判定手順:
+Decision procedure:
 
-1. 候補 Concern のメンバー File を取る。
-2. それぞれが所属する Component を集計する。
-3. Component が 1 つだけ → Concern にせず、その Component の `summary` で言及する。
-4. Component が 2 つ以上 → 横断意図として Concern に昇格。
+1. Take the member Files of the candidate Concern.
+2. Tally the Component each belongs to.
+3. Only 1 Component → do not make it a Concern; mention it in that Component's `summary`.
+4. Two or more Components → promote to a Concern as crosscut intent.
 
-例: 「i18n の React 辞書 (`src/ui/i18n/*`)」だけなら UI 系 Component の責務。
-Windows installer 側 (`packaging/windows-installer/workflow/install-messages.ps1`,
-`msi-maintenance-notice.vbs`) まで横断するなら Concern。前者だけで Concern + Component
-の二重表現にしない。
+Example: "a React dictionary for i18n (`src/ui/i18n/*`)" alone is a UI-family Component's
+responsibility. If it crosscuts to the Windows installer side
+(`packaging/windows-installer/workflow/install-messages.ps1`, `msi-maintenance-notice.vbs`),
+it is a Concern. Do not double-represent as a Concern + Component with the former alone.
 
-### Concern の命名指針 (1 段抽象)
+### Concern naming guideline (one level of abstraction)
 
-機能名そのまま (例: `luks-encryption`) ではなく **1 段抽象化した概念名**を優先する。
+Prefer **a concept name abstracted one level up**, not the feature name as-is (e.g.
+`luks-encryption`).
 
-- 良い例: `data-encryption` (LUKS と config crypto を統合)、`auto-update` (MSI と
-  WSL distro 更新を統合)、`observability` (log + sentry + ui-trace)
-- 悪い例: `luks-management`、`msi-self-update` (具象に張り付いて将来の追加で再命名が要る)
+- Good: `data-encryption` (unifies LUKS and config crypto), `auto-update` (unifies MSI and WSL
+  distro updates), `observability` (log + sentry + ui-trace)
+- Bad: `luks-management`, `msi-self-update` (stuck to the concrete; future additions require
+  renaming)
 
-理由: Concern は「動機」を表すノードで、特定実装の名前を背負うと、別実装の同動機
-ファイル (例: AES 暗号化が追加された時、LUKS Concern には入らない) が浮く。
-抽象語にしておけば「同じ動機の新規実装」を後から吸収できる。
+Rationale: a Concern is a node expressing "motive," and if it carries a specific
+implementation's name, same-motive files of another implementation float free (e.g. when AES
+encryption is added, it does not fit into a LUKS Concern). Keeping it an abstract word lets you
+later absorb "a new implementation of the same motive."
 
-ただし過度な抽象 (`security`, `infrastructure` 等) は単一動機原則 を破る (security の
-中に秘匿・暗号化・検証・権限が混入) のでダメ。**1 段抽象**が目安。
+However, excessive abstraction (`security`, `infrastructure`, etc.) breaks the single-motive
+principle (secrecy, encryption, validation, and permissions get mixed into "security"), so it
+is no good. **One level of abstraction** is the guide.
 
-### 単一動機原則
+### Single-motive principle
 
-**1 Concern = 1 動機**。複数の動機を束ねた "セキュリティ" / "信頼性" 等の総称 Concern は
-作らない。動機を辿るときに混線する。
+**1 Concern = 1 motive.** Do not create a catch-all Concern like "security" / "reliability"
+that bundles multiple motives. It crosses wires when tracing motives.
 
-悪い例: `concern:<sys>:secrets-and-validation`(= 秘匿マスク + 入力検証 + 永続化 を 1 つに)。
-動機が3つ混在し、Risk や Decision の参照経路が分かりにくくなる。
+Bad: `concern:<sys>:secrets-and-validation` (= secret masking + input validation + persistence
+in one). Three motives are mixed, making the reference paths of Risk and Decision hard to
+follow.
 
-良い例: 分割する。
+Good: split it.
 
-- `concern:<sys>:secrets-handling`(動機: 秘匿情報の漏洩防止)
-- `concern:<sys>:input-validation`(動機: 入力経路からの不正値抑止)
+- `concern:<sys>:secrets-handling` (motive: preventing leakage of secret information)
+- `concern:<sys>:input-validation` (motive: suppressing invalid values from input paths)
 
-### Component との二重表現禁止
+### No double representation with a Component
 
-ある責務領域を **Concern として立てたなら、同じファイル群を持つ Component を作らない**。
-逆も同様。同じ概念を 2 種類のノード型で表すと、片方を更新したとき他方が陳腐化する。
+**If you have established a responsibility area as a Concern, do not create a Component holding
+the same file group.** And vice versa. Representing the same concept with two node types makes
+one go stale when you update the other.
 
-判定手順: 新規 Concern のメンバー File 集合 ∩ 任意の Component のメンバー File 集合 が
-ほぼ一致するなら、二重表現の疑い。どちらか一方に寄せる:
+Decision procedure: if the new Concern's member File set ∩ any Component's member File set nearly
+matches, suspect double representation. Consolidate to one side:
 
-- 横断するなら Concern を残し Component を廃止。
-- 局所責務なら Component を残し Concern を取り下げる。
+- If it crosscuts, keep the Concern and retire the Component.
+- If it is local responsibility, keep the Component and withdraw the Concern.
 
 ## Layer carving
 
-### 命名(依存ピラミッドの縦位置を「意味」で名付ける)
+### Naming (name the vertical position in the dependency pyramid by meaning)
 
-band は「最も依存される土台 (0)」→「入口・最上位 (大)」の順。各帯が実際に何の集まりかをメンバー File の役割(`role`/summary)から読み、その帯を貫く**共通の縦位置の意味**を title/slug にする(例 `基盤層 — 設定・データ・共有型の土台` / `foundation`。サーバ系と web 系の同居は正常 — Layer は depth 軸)。
-命名規則(意味 slug・プレースホルダ禁止・ゲート強制)は「意味ある命名 必須」節が正本。
+The band goes in order from "the most-depended-upon foundation (0)" → "entry point / topmost
+(large)." Read what each band is actually a collection of from the member Files' roles
+(`role`/summary), and make the **common vertical-position meaning** running through that band
+the title/slug (e.g. `基盤層 — 設定・データ・共有型の土台` / `foundation`. Server-family and
+web-family coexisting is normal — Layer is the depth axis). The source of truth for the naming
+rules (meaningful slug, no placeholders, gate-enforced) is the "Meaningful naming required"
+section.
 
-### 対象範囲(実行依存があるものだけ)
+### Scope (only things with runtime dependencies)
 
-Layer は **依存ピラミッドの縦位置**を表す。対象に含む(= Layer メンバーにしてよい)のは:
+A Layer expresses **the vertical position in the dependency pyramid**. What is in scope (= may
+be made a Layer member):
 
-- 実装ソース(`src/`, `core/`, `server/`, `ui/` 等)
-- 設定ファイル(`*.env`, `config/`, build profile, 設定スクリプト)
-- パッケージング・配布物(`packaging/` 配下のインストーラ・WSL イメージ・systemd 等)
-- 動作に必要な doc(`README`, `USER_MANUAL`, `INSTALL` 等。コードが参照する設計図含む)
+- Implementation source (`src/`, `core/`, `server/`, `ui/`, etc.)
+- Configuration files (`*.env`, `config/`, build profiles, configuration scripts)
+- Packaging / distributables (installers, WSL images, systemd, etc. under `packaging/`)
+- Docs required for operation (`README`, `USER_MANUAL`, `INSTALL`, etc., including blueprints
+  that code references)
 
-**「含めてよい」と「網羅性で必須」は別。** 設定ファイル(`package.json` / `tsconfig*.json` /
-`*.env*` / lock / workspace / `.claude/settings.json` 等のルート・例・雛形)や README は、依存
-バンディングで自然に最下層に入るなら Layer メンバーにしてよいが、**網羅性ゲートでは
-allowed-orphan 扱い**で所属を強制しない(正本は builtin 汎用パターン +
-`.graphrag/carving.json`。「allowed-orphan の正本」節)。
-これらは依存関係を持たない単独 config が多く、層への割り当てを必須化するとノイズになるため。
-**必須**なのは、allowed-orphan を除く実装ファイル(`role=source/test/config`)が Component に、
-src/packaging 配下の File が Layer に所属すること(`check-carving` の component-coverage /
-layer-coverage ゲートが対象とする範囲)。
+**"May be included" and "required by coverage" are different.** Configuration files (roots,
+examples, templates such as `package.json` / `tsconfig*.json` / `*.env*` / lock / workspace /
+`.claude/settings.json`) and README may be made Layer members if they naturally fall into the
+bottom band through dependency bundling, but **the coverage gate treats them as allowed-orphan**
+and does not force membership (source of truth is builtin generic patterns +
+`.graphrag/carving.json`; the "Source of truth for allowed-orphan" section). This is because
+these are often standalone configs with no dependencies, and forcing layer assignment would be
+noise. What is **required** is that implementation files excluding allowed-orphan
+(`role=source/test/config`) belong to a Component, and Files under src/packaging belong to a
+Layer (the scope covered by `check-carving`'s component-coverage / layer-coverage gates).
 
-### 除外規則(Layer に入れない)
+### Exclusion rules (do not put in a Layer)
 
-下記は Layer に入れない。これらは Layer 階層の意味を曖昧にする。
+The following are not put in a Layer. They blur the meaning of the Layer hierarchy.
 
-- **plans / 引継書 / 過去調査 HTML**(`plans/*.html`, `plans/*.md`, `plans/backlog*/**`):
-  Investigation ノードの `raw_content` で扱う。Layer の依存対象ではない。
-- **knowhow / 後知恵 doc**(`docs/knowhow/`): 過去事例集で、コードからの参照は無い。
-  OperationalKnowledge ノードの `documented_by` 出所として扱う。
-- **設計議論 / 採用判断 doc**: Decision ノードの `documented_by` 出所として扱う。
-  Layer メンバーにしない。
-- **生成物 / 一時ファイル**(`generated/`, `dist/`, `node_modules/`, `release/`): 索引対象外。
+- **plans / handover documents / past-investigation HTML** (`plans/*.html`, `plans/*.md`,
+  `plans/backlog*/**`): handled in an Investigation node's `raw_content`. Not a dependency
+  target of a Layer.
+- **knowhow / hindsight docs** (`docs/knowhow/`): a collection of past cases, not referenced
+  from code. Handled as the `documented_by` source of an OperationalKnowledge node.
+- **design-discussion / adoption-decision docs**: handled as the `documented_by` source of a
+  Decision node. Not made a Layer member.
+- **generated artifacts / temporary files** (`generated/`, `dist/`, `node_modules/`,
+  `release/`): not indexed.
 
-### テストの位置(規則統一)
+### Placement of tests (uniform rule)
 
-テストファイル(`tests/`, `*.test.ts`)は **実装と同じ Layer に置く**。
+Place test files (`tests/`, `*.test.ts`) in **the same Layer as the implementation**.
 
-「テスト専用 Layer を作る」「コンポジション層に上げる」等のバリエーションは取らない。
-規則がぶれると、横断クエリ時にテストが期待 Layer に居ないことで欠落する。
+Do not take variations like "create a test-only Layer" or "raise them to the composition
+layer." If the rule wavers, tests are missed at crosscut-query time by not being in the expected
+Layer.
 
-### 網羅性 (Layer 側)
+### Coverage (Layer side)
 
-src / packaging 配下の全 File は **少なくとも 1 つの Layer に所属**すること。属さない File は
-網羅性ゲート(後述)で orphan として報告する。
+Every File under src / packaging must **belong to at least one Layer**. A File that does not is
+reported as an orphan by the coverage gate (see below).
 
-## 網羅性回帰ゲート
+## Coverage regression gate
 
-conceptual-pass のマージ前に必ず通す品質ゲート。`validateGraph` 0 失敗は通過条件、
-本ゲートはその次。
+A quality gate that must be passed before merging a conceptual-pass. `validateGraph` 0 failures
+is a pass condition; this gate comes next.
 
-### Component 網羅性
+### Component coverage
 
-`src/` + `packaging/scripts/` 配下の **実装ソースファイル**は、少なくとも 1 つの Component に
-所属していること。例外として allowed-orphan は明示的に許容する。正本は二層
-(「allowed-orphan の正本」節):
+**Implementation source files** under `src/` + `packaging/scripts/` must belong to at least one
+Component. As an exception, allowed-orphan is explicitly tolerated. The source of truth is two
+layers (the "Source of truth for allowed-orphan" section):
 
-- builtin 汎用パターン(composition root / 汎用 utility / 共有定義 / lock・manifest 類)
-- `.graphrag/carving.json` のエントリ(プロジェクト固有・人間所有、user 承認済みのみ)
+- builtin generic patterns (composition root / generic utility / shared definitions / locks and
+  manifests)
+- entries in `.graphrag/carving.json` (project-specific, human-owned, user-approved only)
 
-これら以外の `src/` 配下 File が Component 未所属なら **carving 不良として再評価**。
+If any other File under `src/` is unassigned to a Component, **re-evaluate as a carving defect**.
 
-### Layer 網羅性
+### Layer coverage
 
-`src/` + `packaging/` 配下の全 File(テスト含む)は少なくとも 1 つの Layer に所属する
-こと。除外規則(plans / knowhow 等)に該当しない File が Layer 未所属なら carving 不良。
+Every File under `src/` + `packaging/` (including tests) must belong to at least one Layer. A
+File that does not fall under the exclusion rules (plans / knowhow, etc.) but is unassigned to a
+Layer is a carving defect.
 
-### orphan 報告
+### Orphan reporting
 
-ゲートを通った後、未所属 File を残す場合は **mutation plan の `reason` フィールドに
-allowed-orphan 一覧を残す**(レビュアー / 後任 LLM が意図的な除外と判別できるように)。
+After passing the gate, if you leave unassigned Files, **leave the allowed-orphan list in the
+mutation plan's `reason` field** (so a reviewer / successor LLM can distinguish it as
+intentional exclusion).
 
-## 増分追従(changed / new File)
+## Incremental follow-up (changed / new File)
 
-`node graphrag/cli.ts index` の `change_status: new|changed|unchanged` を尊重する:
+Respect the `change_status: new|changed|unchanged` of `node graphrag/cli.ts index`:
 
-| change_status | 必須アクション |
+| change_status | Required action |
 |---|---|
-| `unchanged` | conceptual-pass 不要。既存のまま |
-| `changed` | File summary を再生成(`interpretation-guidance.md` 準拠)。所属 Component / Concern / Layer は原則変えないが、ファイル名やパスが変わったら carving 再評価 |
-| `new` | **必ず carving を再評価**。下記フロー参照 |
+| `unchanged` | No conceptual-pass needed. Leave as existing |
+| `changed` | Regenerate the File summary (per `interpretation-guidance.md`). Do not change the assigned Component / Concern / Layer as a rule, but re-evaluate carving if the filename or path changed |
+| `new` | **Always re-evaluate carving.** See the flow below |
 
-### new File が来たときのフロー
+### Flow when a new File arrives
 
-1. ファイルの path 第 1〜2 階層を見る。
-2. 既存 Component のいずれかに「同ディレクトリ原則」で吸収できるか確認。
-3. 吸収できる: 既存 Component に `evidenced_by` を追加するだけ。
-4. 吸収できない(=新規ディレクトリ): 新 Component を carving。「粒度ガード」「意味 slug」
-   「異物検査」を満たすこと。
+1. Look at the file's 1st–2nd path level.
+2. Check whether it can be absorbed into some existing Component under the "same-directory
+   principle."
+3. Can absorb: just add `evidenced_by` to the existing Component.
+4. Cannot absorb (= new directory): carve a new Component. Satisfy the "Granularity guard,"
+   "meaningful slug," and "Foreign-body inspection."
 
-### 新規ディレクトリ追加時
+### When a new directory is added
 
-`core/backup/` のような新ディレクトリが出現したら、その配下に複数 File が居る場合は
-**新 Component の carving を必須化**(`backup-manager.ts` 1 ファイルだけなら既存 Component
-に吸収検討)。ディレクトリ単位で Component を切る default 原則と整合させる。
+When a new directory like `core/backup/` appears, if multiple Files live under it, **make
+carving a new Component mandatory** (if only the single file `backup-manager.ts`, consider
+absorbing it into an existing Component). Keep it consistent with the default principle of
+carving Components per directory.
 
-### 大量変動時
+### On large-scale change
 
-既存 Component のメンバー File が **半数以上変動**したら、Component の `title` / `summary` /
-粒度を再評価する。古い title が現在のメンバーを正しく説明しているかをチェック。
+If **half or more** of an existing Component's member Files change, re-evaluate the Component's
+`title` / `summary` / granularity. Check whether the old title correctly describes the current
+members.
 
-## 自動検証コマンド (carving 提出前チェックの大半を機械化)
+## Automated verification command (mechanizes most of the pre-submission carving check)
 
-`node graphrag/cli.ts carving-check --graph <path>` で本ファイルのルール大半を機械検証する。
-ERROR は必ず解消、WARN は意図ある場合は justification 必須。下記項目を判定:
+`node graphrag/cli.ts carving-check --graph <path>` mechanically verifies most of this file's
+rules. ERRORs must be resolved; WARNs require a justification when intentional. It judges the
+following items:
 
-1. **意味slug**: `^c\d+$` / `^band\d+$` のような連番 ID は警告 (Component / Layer 両方)
-2. **Layer から doc 除外**: `role === "documentation"` の File が Layer に居れば警告
-   (構造判定: indexer の role 分類を信じる。ホワイトリスト維持不要)
-3. **Component 網羅性**: `role ∈ {source, test, config}` で Component 未所属、かつ
-   allowed-orphan (builtin 汎用パターン / `.graphrag/carving.json` エントリ。
-   「allowed-orphan の正本」節) に該当しないファイルは ERROR
-4. **Layer 網羅性**: 上記同様 (documentation / generated は除外)
-5. **Component-Concern Jaccard**: 実装ファイル基準で Jaccard ≥ 0.4 なら二重表現警告
-   (テストは Component と Concern の両方に含まれて分母を膨らませるので除外して比較)
-6. **Concern の主 Component 占有率**: ≥ 70% なら「横断条件は形式的成立だが実質単一寄り」警告
-7. **indexer シグナル**: `cross_component_in_degree` が全 File で空なら、indexer 再 index
-   + signal-only mutation 必要 (情報)
-8. **多重 Concern 所属**: 1 ファイルが ≥3 Concern に属する → 単一動機原則違反疑い
-9. **knowledge-impl-binding-missing**: Decision / OperationalKnowledge / Risk のうち、実装
-   ファイルへの `sets_policy_for` または `documented_by` の紐付けが無いものを警告。
-   knowhow / plans / design-decisions doc 経由しか紐付かない knowledge は「この決定/
-   知見がどのコードを動かしているか」が graph 上から辿れない。`node graphrag/cli.ts edge-suggest-policy`
-   で候補を機械抽出 → LLM 確認 → `sets_policy_for` mutation の流れで補完する。
-   **Constraint への拡張 (`constraint-binding-missing`)**: Constraint は `constrains` エッジ
-   (宛先不問) が 1 本も無ければ WARN。既存 D/OK/R の判定は不変。`add-constraint --constrains <id,...>`
-   は必須 ≥1 なので typed-add 経由なら自然に満たされる (commit-mutation で constrains 無しの
-   Constraint を作った時に引っかかる)。
-10. **node-duplicate-suspect**: 同型ノード間の embedding cosine similarity が threshold
-    (default 0.92) 以上のペアを警告。対象型は書き込み時重複ゲートと同じ単一正本
-    (schema の duplicateCheck 対象 = File / ConversationChunk 以外の知識・横断ノード全型) —
-    監査とゲートの基準が割れないようにする。worktree マージで「同概念別命名」(例: `auto-update`
-    と `auto-updater`) が発生した時の表記揺れ重複を機械検出。`--vector-index` 指定時のみ
-    実行 (省略すると INFO で skip)。LLM 確認の上、片方削除 + edge 張り替えで統合。
-11. **免除会計**: allowed-orphan 免除の内訳を text / JSON 出力に常時印字する。各免除の
-    根拠種別 `builtin:<name>` / `role:<role>` / `config:<path>`、config 由来件数、
-    実装 File に占める免除比率。比率 > 15% で WARN (免除で網羅性ゲートが形骸化している
-    兆候)。builtin と重複する config エントリも WARN。carving.json の不正エントリ
-    (glob / regex 文字、`reason` / `added` 欠落) と graph に存在しない path
-    (stale-exemption) は ERROR
-12. **knowledge-floor**: Goal が 0 件なら WARN `knowledge-floor-goal-missing`
-    (design-review の scope-creep / roadmap 観点が無効な状態。conceptual-pass の
-    知識軸シーディングを実施せよ)。Constraint 0 件も同形 WARN
-13. **superseded-premise**: 終端 state (superseded / abandoned / closed) でないノードが、
-    終端 state のノードへ `has_premise` している組を WARN (死んだ前提の検出。後継ノード
-    への張り替えか、前提が本当にまだ生きているかの確認を促す。除外はしない = 可視化のみ)
-14. **knowledge-description-missing**: Decision / RejectedOption / Constraint / Goal / Risk /
-    OperationalKnowledge のうち `description` が欠落しているノードを WARN で列挙
-    (embedding の意味担体が薄い、と message に理由を付す)。summary だけだと埋め込みが痩せて
-    retrieval で引かれにくくなるため、原則どのノードにも意味の description を書く
-    (`conceptual-pass.md` §0 大原則 / SKILL.md Mutation Plan の summary vs description 書き分け)。
-    typed-add からは `--description "..."` で指定する。
-15. **superseded-no-successor**: `state: superseded` なのに後継からの `refines` が 1 本も
-    無いノードを WARN (方針転換レシピの張り忘れ検出。「superseded — 後継を確認」の
-    state_note が行き止まりになる)。後継 Decision から `refines` を張るか、supersede が
-    誤りなら state を取り下げる。
+1. **meaningful slug**: sequential IDs like `^c\d+$` / `^band\d+$` are warned (both Component /
+   Layer)
+2. **exclude docs from Layer**: a File with `role === "documentation"` in a Layer is warned
+   (structural judgment: trust the indexer's role classification; no whitelist maintenance
+   needed)
+3. **Component coverage**: a file with `role ∈ {source, test, config}` unassigned to a Component
+   and not matching allowed-orphan (builtin generic patterns / `.graphrag/carving.json` entries;
+   the "Source of truth for allowed-orphan" section) is an ERROR
+4. **Layer coverage**: same as above (documentation / generated excluded)
+5. **Component-Concern Jaccard**: on an implementation-file basis, Jaccard ≥ 0.4 is a
+   double-representation warning (tests are excluded from the comparison because they belong to
+   both Component and Concern and inflate the denominator)
+6. **Concern's dominant-Component share**: ≥ 70% is a "crosscut condition formally holds but is
+   substantively single-leaning" warning
+7. **indexer signal**: if `cross_component_in_degree` is empty for all Files, a re-index of the
+   indexer + a signal-only mutation is needed (info)
+8. **multiple Concern membership**: a file belonging to ≥3 Concerns → suspected
+   single-motive-principle violation
+9. **knowledge-impl-binding-missing**: warns a Decision / OperationalKnowledge / Risk that has
+   no `sets_policy_for` or `documented_by` binding to an implementation file. Knowledge bound
+   only via knowhow / plans / design-decisions docs cannot be traced on the graph for "which
+   code this decision/insight drives." Fill it in via the flow: mechanically extract candidates
+   with `node graphrag/cli.ts edge-suggest-policy` → LLM confirmation → `sets_policy_for`
+   mutation. **Extension to Constraint (`constraint-binding-missing`)**: a Constraint is WARNed
+   if it has not a single `constrains` edge (any target). The judgment for existing D/OK/R is
+   unchanged. `add-constraint --constrains <id,...>` requires ≥1, so it is naturally satisfied
+   via typed-add (it trips when you create a Constraint with no constrains via commit-mutation).
+10. **node-duplicate-suspect**: warns pairs whose embedding cosine similarity between same-type
+    nodes is ≥ threshold (default 0.92). The target types are the same single source of truth as
+    the write-time duplicate gate (schema's duplicateCheck targets = all knowledge / crosscut
+    node types except File / ConversationChunk) — so the audit and gate criteria do not diverge.
+    Mechanically detects notation-variance duplicates when "same concept, different naming"
+    (e.g. `auto-update` vs `auto-updater`) arises from a worktree merge. Runs only when
+    `--vector-index` is specified (skipped as INFO if omitted). After LLM confirmation, unify by
+    deleting one + rewiring edges.
+11. **exemption accounting**: always prints the breakdown of allowed-orphan exemptions to the
+    text / JSON output. Each exemption's grounding kind `builtin:<name>` / `role:<role>` /
+    `config:<path>`, the config-derived count, and the exemption ratio among implementation
+    Files. Ratio > 15% is a WARN (a sign the coverage gate is hollowed out by exemptions). A
+    config entry duplicating a builtin is also a WARN. Invalid carving.json entries (glob / regex
+    characters, missing `reason` / `added`) and paths not present in the graph (stale-exemption)
+    are ERRORs
+12. **knowledge-floor**: if there are 0 Goals, WARN `knowledge-floor-goal-missing` (design-review's
+    scope-creep / roadmap perspective is in a disabled state; perform the conceptual-pass
+    knowledge-axis seeding). 0 Constraints is the same-shape WARN
+13. **superseded-premise**: WARNs a pair where a node not in a terminal state (superseded /
+    abandoned / closed) `has_premise` to a node in a terminal state (detection of a dead premise;
+    prompts either rewiring to the successor node, or confirming whether the premise is really
+    still alive; does not exclude = visualization only)
+14. **knowledge-description-missing**: lists as WARN the Decision / RejectedOption / Constraint /
+    Goal / Risk / OperationalKnowledge nodes missing a `description` (the message notes the
+    reason: the embedding's semantic carrier is thin). Because summary alone thins the embedding
+    and makes it harder to retrieve, write a meaningful description on every node as a rule
+    (`conceptual-pass.md` §0 grand principle / the summary-vs-description split in SKILL.md's
+    Mutation Plan). From typed-add, specify it with `--description "..."`.
+15. **superseded-no-successor**: WARNs a node that is `state: superseded` yet has not a single
+    `refines` from a successor (detection of a forgotten wiring in the policy-reversal recipe;
+    the "superseded — check successor" state_note becomes a dead end). Either wire a `refines`
+    from the successor Decision, or, if the supersede is wrong, withdraw the state.
 
-なお **summary-provisional** ERROR (要約が機械テンプレのまま。conceptual-pass.md §0) は
-packaging / generated / lockfile 類の File を免除する (embedding から除外済みで意味要約の
-強制対象外 — ERROR でなく INFO 件数として報告。書き換えは任意)。
+Note: the **summary-provisional** ERROR (the summary remains a machine template;
+conceptual-pass.md §0) exempts packaging / generated / lockfile Files (already excluded from
+embedding and not subject to the meaningful-summary requirement — reported as an INFO count, not
+an ERROR; rewriting is optional).
 
-### 閾値の根拠
+### Rationale for thresholds
 
-- Jaccard 0.4: 実装 2 ファイル中 2 が一致 + Component 側にテスト 2 (実装外) で `2/(2+2)=0.5`
-  あたりが「ほぼ同じ」の境界。テスト除外後の閾値はもう 1 段下げて 0.4 (= ファイル 3 中 1
-  だけ別の状態) を「二重表現疑い」境界とする
-- 主 Component 占有率 70%: 「8 ファイル中 6 が単一 Component」が 0.75 で警告対象。
-  これより緩いと「機能セット型 Concern」(本来 1 Layer に集中するもの) を不当に弾く
+- Jaccard 0.4: with 2 of 2 implementation files matching + 2 tests (non-implementation) on the
+  Component side, around `2/(2+2)=0.5` is the "nearly the same" boundary. After excluding tests,
+  lower the threshold one more step to 0.4 (= the state where only 1 of 3 files differs) as the
+  "suspected double representation" boundary
+- Dominant-Component share 70%: "6 of 8 files in a single Component" is 0.75 and subject to
+  warning. Looser than this would unfairly reject a "feature-set-type Concern" (one that should
+  properly concentrate in 1 Layer)
 
-### allowed-orphan の正本 (builtin 汎用パターン + .graphrag/carving.json)
+### Source of truth for allowed-orphan (builtin generic patterns + .graphrag/carving.json)
 
-Component 未所属でも警告しない免除 (= 「1 file 責務の判定フロー」 step 3 に該当する
-共通インフラ) の正本は二層。 ただしどちらの層でも、 step 1 (= 既存 Component への吸収) が
-narrative 的に成立するなら、 allowed-orphan に残さず吸収を選んで良い。
+The source of truth for exemptions that are not warned even when unassigned to a Component (=
+common infrastructure matching step 3 of the "single-file responsibility decision flow") is two
+layers. But in either layer, if step 1 (= absorption into an existing Component) holds
+narratively, you may choose absorption rather than leaving it allowed-orphan.
 
-**第1層: builtin 汎用パターン (コード内蔵)** — 「どのプロジェクトでも構造的に Component に
-属さないもの」 だけを残す (基準はコードコメントに明文化):
+**Layer 1: builtin generic patterns (built into the code)** — keep only "things that
+structurally belong to no Component in any project" (the criteria are made explicit in code
+comments):
 
-- composition root (`services.ts` / `App.tsx` / `main.tsx` / `server/index.ts` 等の束ね役)
-- 汎用 utility (`logger.ts` / `utils.ts`)
-- 共有定義 (`shared/types.ts` / `shared/constants.ts`)
-- lock・manifest 類
+- composition root (bundlers like `services.ts` / `App.tsx` / `main.tsx` / `server/index.ts`)
+- generic utility (`logger.ts` / `utils.ts`)
+- shared definitions (`shared/types.ts` / `shared/constants.ts`)
+- locks and manifests
 
-特定プロジェクト出自のパターン (旧ハードコードに居た windows-shell / winsw /
-`*.utf8.bat` / `ui/index.css` 等) は builtin から削除済み。 そうした免除が必要なら
-第2層の carving.json に書く。 role による免除は明確に非実装の閉集合 (documentation /
-generated) のみ。 config / entrypoint 系 role は builtin 汎用パターンとの AND でのみ免除する
-(role 単独では免除しない)。
+Patterns of specific-project origin (windows-shell / winsw / `*.utf8.bat` / `ui/index.css` etc.
+that were in the old hardcoding) have been removed from builtin. If such an exemption is needed,
+write it in the layer-2 carving.json. Exemption by role is only the clearly non-implementation
+closed set (documentation / generated). config / entrypoint-family roles are exempted only in
+AND with a builtin generic pattern (not exempted by role alone).
 
-**第2層: `.graphrag/carving.json` (プロジェクト固有・人間所有)**:
+**Layer 2: `.graphrag/carving.json` (project-specific, human-owned)**:
 
 ```json
-{ "allowed_orphans": [ { "path": "<literal path>", "reason": "<必須>", "added": "YYYY-MM-DD" } ] }
+{ "allowed_orphans": [ { "path": "<literal path>", "reason": "<required>", "added": "YYYY-MM-DD" } ] }
 ```
 
-- literal path のみ。 glob / regex 文字 (`*` `?` `[`) を含むエントリは ERROR。
-- graph に存在しない path のエントリは ERROR (stale-exemption。 掃除を強制)。
-- `reason` / `added` 欠落も ERROR。
-- `carving-check` は `--config <path>` または graph パスからの規約解決
-  (`.graphrag/carving.json`) で読む。
+- literal path only. An entry containing glob / regex characters (`*` `?` `[`) is an ERROR.
+- an entry with a path not present in the graph is an ERROR (stale-exemption; forces cleanup).
+- missing `reason` / `added` is also an ERROR.
+- `carving-check` reads it via `--config <path>` or convention-resolution from the graph path
+  (`.graphrag/carving.json`).
 
-**carving.json は Layer / Concern / Component と同格の「人間所有の概念層」**。 LLM は提案のみ可、
-追記は user 承認後。 **carving.json への追記は 1-file 責務判定フロー step 4 (STOP / user 判断)
-の代替にならない** — step 4 に達したら user 判断を取り、 user が免除を承認した時に初めて
-追記する。 diff に carving.json の変更が含まれるレビューでは、 免除追加を findings に昇格して
-人間裁定する (`graph-review-method.md` 参照)。
+**carving.json is a "human-owned conceptual layer" on par with Layer / Concern / Component.**
+The LLM may only propose; additions come after user approval. **An addition to carving.json is
+not a substitute for step 4 (STOP / user judgment) of the single-file responsibility decision
+flow** — on reaching step 4, take the user's judgment, and only add when the user approves the
+exemption. In a review where the diff includes a carving.json change, promote the exemption
+addition to findings for human adjudication (see `graph-review-method.md`).
 
-編集は `carving-allow` verb で行う (vault-lock を共用した原子書き。 git repo 内なら
-git add+commit を試み、 失敗は非致命で出力に注記):
+Edit via the `carving-allow` verb (an atomic write sharing the vault-lock; inside a git repo it
+attempts git add+commit, failure being non-fatal and noted in the output):
 
 ```sh
 node graphrag/cli.ts carving-allow add --path <p> --reason <r>
 node graphrag/cli.ts carving-allow remove --path <p>
 node graphrag/cli.ts carving-allow list
-# 削除された旧 builtin パターンに該当する graph 内 File を config エントリ案として出力
+# output graph Files matching the removed old builtin patterns as proposed config entries
 node graphrag/cli.ts carving-allow migrate --graph <path>
 ```
 
-**test 連動則**: 上記 (builtin / config) で allowed-orphan な実装 file の test (`*.test.ts` /
-`*.test.tsx`) も同じく allowed-orphan として扱う。 例: `logger.ts` が allowed-orphan なら
-`tests/unit/core/logger.test.ts` も allowed-orphan。 これは「test は実装と同じ Component
-に属する」 規則 (Layer carving 節) の自然な拡張。
+**test-linkage rule**: the test (`*.test.ts` / `*.test.tsx`) of an implementation file that is
+allowed-orphan under the above (builtin / config) is likewise treated as allowed-orphan.
+Example: if `logger.ts` is allowed-orphan, `tests/unit/core/logger.test.ts` is also
+allowed-orphan. This is a natural extension of the "tests belong to the same Component as the
+implementation" rule (Layer carving section).
 
-これ以外で Component に属さない実装ファイルが残ったら ERROR (= 「1 file 責務の判定
-フロー」 step 4 で user 判断にエスカレーション)。
+If any other implementation file not belonging to a Component remains, it is an ERROR (=
+escalate to user judgment at step 4 of the "single-file responsibility decision flow").
 
-## carving 提出前チェックリスト
+## Pre-submission carving checklist
 
-mutation plan を `node graphrag/cli.ts commit-mutation <plan.json>` で apply する前に、carving 不良で
-ないことを確認する(`commit-mutation` は vault writer 経由で正本の vault に書く):
+Before applying a mutation plan with `node graphrag/cli.ts commit-mutation <plan.json>`, confirm
+it is not a carving defect (`commit-mutation` writes to the canonical vault via the vault
+writer):
 
 **Component**
-- [ ] 各 Component の id は意味ある slug(連番でない)
-- [ ] 各 Component のメンバー File 数は標準粒度 4〜20、 または 1-file Component として
-  独自のドメイン narrative が書ける状態 (「1 file 責務の判定フロー」 step 2)
-- [ ] 各 Component の `title` / `summary` が示す責務と、メンバー File の path が整合
-  (path から明らかに別ドメインの異物が無い)
-- [ ] 異ディレクトリの File を束ねる場合、`summary` に justification 1 文あり
-- [ ] 1 file 責務の追加時、 判定フロー step 1 (既存吸収) → 2 (1-file Component) →
-  3 (allowed-orphan) → 4 (stop / user 判断) の順で評価済み、 step 4 に達したものは
-  user 判断を取った上で確定 (LLM 単独判断で新規 Component を作らない)
+- [ ] Each Component's id is a meaningful slug (not sequential)
+- [ ] Each Component's member File count is standard granularity 4–20, or is in a state where
+  its own domain narrative can be written as a 1-file Component (step 2 of the "single-file
+  responsibility decision flow")
+- [ ] The responsibility indicated by each Component's `title` / `summary` is consistent with
+  the member Files' paths (no foreign body clearly of a different domain by path)
+- [ ] When bundling Files from different directories, a one-sentence justification is in the
+  `summary`
+- [ ] When adding a single-file responsibility, evaluated in the decision-flow order step 1
+  (absorb into existing) → 2 (1-file Component) → 3 (allowed-orphan) → 4 (stop / user judgment),
+  and anything reaching step 4 is confirmed only after taking the user's judgment (do not create
+  a new Component on the LLM's sole judgment)
 
 **Concern**
-- [ ] 各 Concern のメンバー File が ≧2 Component を横断
-- [ ] 各 Concern は 1 動機のみ(複数動機が束ねられていない)
-- [ ] 同じファイル集合の Component が並列していない
+- [ ] Each Concern's member Files crosscut ≥2 Components
+- [ ] Each Concern has only 1 motive (no bundling of multiple motives)
+- [ ] No Component with the same file set exists in parallel
 
 **Layer**
-- [ ] plans / knowhow / 設計議論 doc が含まれていない
-- [ ] テストが実装と同じ Layer にある
-- [ ] `dist/` / `node_modules/` / `generated/` が含まれていない
+- [ ] No plans / knowhow / design-discussion docs are included
+- [ ] Tests are in the same Layer as the implementation
+- [ ] No `dist/` / `node_modules/` / `generated/` are included
 
-**網羅性**
-- [ ] `src/` 配下 File は allowed-orphan を除き全て Component に所属
-- [ ] `src/` + `packaging/` 配下 File は除外規則該当を除き全て Layer に所属
-- [ ] allowed-orphan は mutation plan の `reason` に明記
-- [ ] `.graphrag/carving.json` への免除追加は user 承認済み (LLM は提案のみ。
-  step 4 STOP の代替にしない)
+**Coverage**
+- [ ] All Files under `src/` belong to a Component except allowed-orphan
+- [ ] All Files under `src/` + `packaging/` belong to a Layer except those matching the
+  exclusion rules
+- [ ] allowed-orphan is stated explicitly in the mutation plan's `reason`
+- [ ] Exemption additions to `.graphrag/carving.json` are user-approved (LLM proposes only; not
+  a substitute for step 4 STOP)
 
-**増分**
-- [ ] `change_status: new` の File は carving 再評価済み
-- [ ] 新規ディレクトリ追加時の新 Component carving 完了 or 既存吸収理由を `reason` に明記
+**Incremental**
+- [ ] Files with `change_status: new` have been re-evaluated for carving
+- [ ] On adding a new directory, new-Component carving is complete, or the reason for
+  existing-absorption is stated explicitly in `reason`
 
-チェックリスト全項目 OK で初めて apply する。1 項目でも違反があれば再 carving。
+Apply only once all checklist items are OK. If even one item is violated, re-carve.

@@ -1,55 +1,55 @@
 ---
 name: graphrag-review-doc
-version: 1.4.0
+version: 1.5.0
 description: 人間が PR レビューするための、概念レベルの説明資料(視覚的な HTML 文書)をグラフ（プロジェクトの永続知識）を背骨に生成する。「この PR のレビュー資料を作って」「概念レベルで説明する文書がほしい」「レビュアー向けに分かりやすく説明して」と、人間レビュアーに渡す資料を求められた時に使う。AI が所見を返すレビュー本体は graphrag-pr-review（本 skill は成果物が HTML 文書である時に選ぶ）。スラッシュ: /graphrag-knowledge:graphrag-review-doc
 ---
 
-# 人間用 PR レビュー資料（explanation-first / HTML）
+# Human-facing PR Review Doc (explanation-first / HTML)
 
-人間レビュアーに渡す概念レベルの説明資料を作る。**ファイル差分＋概要だけのレビューは儀式化する**ので、
-グラフを背骨に「概念高度の地図」を組む。第一成果物は違反リストでなく**説明**（method §0 の explanation-first）。
+Produce a concept-level explanation doc to hand to human reviewers. **Review with only file diffs + a summary becomes a ritual**, so
+build a "concept-altitude map" with the graph as backbone. The first deliverable is not a violation list but an **explanation** (explanation-first, method §0).
 
-共通の土台・逆引きの骨格・指示文↔スキーマ対応は
-**`${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md` を必ず先に読む**こと。逆引き手順は pr-review と共通。
+For the shared foundation, the reverse-lookup skeleton, and the instruction-text↔schema mapping,
+**you must first read `${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md`**. The reverse-lookup procedure is shared with pr-review.
 
-## 入力
+## Input
 
-`$ARGUMENTS` に base/head があればそれを、無ければ現在の作業差分を対象にする。
+If `$ARGUMENTS` carries a base/head, use it; otherwise target the current working diff.
 
-## 手順（method §1.5 → §2 → §2.5 → §3 をそのまま実行）
+## Procedure (execute method §1.5 → §2 → §2.5 → §3 verbatim)
 
-0. **鮮度プリチェック** — method §1.5 そのまま実行。グラフに無い File は「索引が古い」を**文書の冒頭**に盲点として明記する（隠さない）。
-1. **逆引きで枠を組む** — method §2 そのまま実行（pr-review と同じパイプライン。`ask` / `evidence` で引く、grep しない）。
-2. **順引きで影響圏を突き合わせる** — method §2.5 そのまま実行。候補は**裏取り必須 — 候補 File と diff を実際に読む**（グラフ内だけで結論づけない）。文書の「どこをいじったか」に伝播経路＋読んだ上での判定付きで併記する。
-3. **概念デルタを拾う** — method §3 そのまま実行。**文書はこれらを別リストでなく該当セクション内の注釈として出す**。
-4. **HTML 文書を組む**。視覚的に分かりやすく。グラフ由来の情報を網羅して芯を食った説明にする。
+0. **Freshness precheck** — execute method §1.5 verbatim. For Files absent from the graph, state "stale index" as a blind spot at **the top of the doc** (do not hide it).
+1. **Build the frame by reverse lookup** — execute method §2 verbatim (same pipeline as pr-review; pull with `ask` / `evidence`, do not grep).
+2. **Match against the impact zone by forward expansion** — execute method §2.5 verbatim. Candidates **require corroboration — actually read the candidate Files and the diff** (do not conclude from within the graph alone). Note them alongside in the doc's "what was touched", with propagation path + a judgment made after reading.
+3. **Pick up concept deltas** — execute method §3 verbatim. **The doc emits these not as a separate list but as annotations within the relevant section**.
+4. **Assemble the HTML doc**. Visually clear. Cover the graph-derived information and make the explanation hit the core.
 
-## 文書の構成（グラフを背骨に）
+## Doc structure (graph as backbone)
 
-ユーザーの実運用レビュー指示（vault: `ask "グラフを使った PR レビュー層"` の出所 ConversationChunk）を製品化したもの:
+Productized from the user's real-world review instruction (the ConversationChunk that is the source of vault: `ask "グラフを使った PR レビュー層"`):
 
-- **概要**: この PR が概念として何を変えるか（1, 2 段落）。
-- **影響を受ける構造**（横断軸）: 触れた **Layer / Component / Concern** を列挙し、
-  各々が何で、この PR がそれをどう変えるか。各ノードの summary（= 規範・設計意図）を引用。
-- **各構造の課題・方針・罠・経緯**（知識軸、セクション内に織り込む）:
-  - 課題 = その領域に `risks_in` する Risk / 緊張中 Constraint / 未達 Goal
-  - 方針 = 統べる Decision / Constraint（**変更がこれを満たすか**を問う形で。例: 「この領域は『エラーはユーザーに出す』に統べられる。本変更は満たすか?」）
-  - 罠 = Risk / OperationalKnowledge
-  - 過去経緯 = RejectedOption / supersedes 連鎖
-- **概念デルタ注釈**: 手順3 で拾った乖離を、該当セクション内に目立つ callout として埋める
-  （ACK 必須 = 赤バナー「要確認」、advisory = 補足の黄色 callout）。
-- **どこをいじったか**: 変更 File を、上の構造（Layer/Component/Concern）に紐付けて示す。
-  **同じ構造に属するのに触れていない File**（手順2 の触り残し候補）も伝播経路付きで併記する
-  （例: 「この脈の 3 File 中 2 File に触れている。残り1つを読んだ — 旧エラー処理のままでリトライ未対応、変更後の規範と不整合。追従が要る可能性が高い」）。
-  読まずに「影響の有無を要確認」とだけ書くのは禁止（method §2.5-3 裏取り）。該当なしは会計（展開数・裏取り数）付きで「無し」と明示。
-  触り残しが規範・制約を破る（実害が出る）と判断したものは赤バナー「要確認」扱い（method §3 格上げ規則）。
+- **Overview**: what this PR changes conceptually (1–2 paragraphs).
+- **Affected structures** (crosscut axis): enumerate the **Layer / Component / Concern** touched,
+  what each is, and how this PR changes it. Quote each node's summary (= norm / design intent).
+- **Each structure's issues / policy / traps / history** (knowledge axis, woven into the section):
+  - Issues = Risks that `risks_in` that area / Constraints in tension / unmet Goals
+  - Policy = the governing Decision / Constraint (framed as **does the change satisfy this?**; e.g. "this area is governed by 'errors are shown to the user'. Does this change satisfy it?")
+  - Traps = Risk / OperationalKnowledge
+  - Past history = RejectedOption / supersedes chain
+- **Concept-delta annotations**: embed the divergences picked up in step 3 as prominent callouts within the relevant section
+  (ACK-required = red banner "needs checking", advisory = supplementary yellow callout).
+- **What was touched**: show the changed Files tied to the structures above (Layer/Component/Concern).
+  **Files that belong to the same structure but were not touched** (missed-sibling candidates from step 2) are noted alongside with their propagation path
+  (e.g. "2 of the 3 Files in this Concern are touched. I read the remaining one — still on the old error handling with no retry support, inconsistent with the post-change norm. Follow-up is likely needed").
+  Writing only "impact needs checking" without reading is forbidden (method §2.5-3 corroboration). For nothing applicable, state "none" explicitly with accounting (number expanded / number corroborated).
+  Missed siblings judged to break a norm/constraint (real harm results) are treated as a red banner "needs checking" (method §3 escalation rule).
 
-## 不変条件（method §0）
+## Invariants (method §0)
 
-- **traceable**: 文書中の方針・経緯の主張は、必ず人間承認済み知識ノードに辿れること。各記述に根拠ノード id（または vault リンク）を添える。AI の自由作文に裁可印を押させない。
-- **枠の自己点検**（method §4）: 統べる方針が引けない領域があれば、文書に「この領域は graph 上に方針の紐付けが無い（binding 漏れの疑い・レビュー精度が落ちる箇所）」と正直に明記する。隠さない。
-- これは助言資料であって判定ではない。fix 方向（コードを直すか方針を更新するか）の裁定は人間レビュアーに委ねる書き方にする。
+- **traceable**: every policy/history claim in the doc must trace to a human-approved knowledge node. Attach a supporting node id (or vault link) to each statement. Do not let AI free-composition get an approval stamp.
+- **Frame self-check** (method §4): if there is an area where no governing policy can be pulled, honestly state in the doc "this area has no policy binding in the graph (suspected binding gap; a spot where review accuracy drops)". Do not hide it.
+- This is an advisory document, not a verdict. Write it so that the fix-direction ruling (fix the code or update the policy) is left to the human reviewer.
 
-## 出力先
+## Output location
 
-HTML を1ファイルに書き出す（既定名: 作業ディレクトリの `review-doc-<branch>.html`。pr-review の findings 出力と取り違えない名前にする）。出力パスをユーザーに伝える。
+Write the HTML to a single file (default name: `review-doc-<branch>.html` in the working directory; a name not to be confused with pr-review's findings output). Tell the user the output path.

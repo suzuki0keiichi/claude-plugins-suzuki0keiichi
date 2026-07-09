@@ -166,7 +166,7 @@ test("clear + cwd が symlink 経由で表記違い: 実体パス一致なら復
     });
     const out = runHook({ source: "clear", cwd: root }); // 未解決表記で渡す
     const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
-    assert.match(ctx, /自動復元/, "表記違いでも実体が同じなら復元される");
+    assert.match(ctx, /Automatic restore/, "表記違いでも実体が同じなら復元される");
     const onDisk = JSON.parse(readFileSync(fp, "utf8"));
     assert.ok(!(CHECKPOINT_KEY in onDisk), "消費される");
   } finally {
@@ -183,8 +183,8 @@ test("clear + 失効 (60分超): 理由一行を注入しキーを消費", () =>
     });
     const out = runHook({ source: "clear", cwd: root });
     const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
-    assert.match(ctx, /復元しなかった/);
-    assert.match(ctx, /失効窓/);
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /freshness window/);
     const onDisk = JSON.parse(readFileSync(fp, "utf8"));
     assert.ok(!(CHECKPOINT_KEY in onDisk), "失効でも one-shot 消費される");
   } finally {
@@ -200,8 +200,8 @@ test("clear + cwd 不一致: 理由一行を注入しキーを消費", () => {
     });
     const out = runHook({ source: "clear", cwd: root });
     const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
-    assert.match(ctx, /復元しなかった/);
-    assert.match(ctx, /別ディレクトリ/);
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /different directory/);
     assert.match(ctx, /\/somewhere\/else/);
     const onDisk = JSON.parse(readFileSync(fp, "utf8"));
     assert.ok(!(CHECKPOINT_KEY in onDisk), "cwd 不一致でも one-shot 消費される");

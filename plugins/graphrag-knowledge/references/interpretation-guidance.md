@@ -1,54 +1,29 @@
-# File 解釈ガイダンス(汎用・検索識別性 重視)
+# File interpretation guidance (universal; retrieval distinctiveness first)
 
-任意のコードベースに通用する一般原則。特定リポジトリ/特定クエリに依存しない。
-各ファイルの実内容を読み、意味検索で正しく該当ファイルが1位になる自然言語
-Japanese summary を書く。これは embedding に乗る唯一の意味テキスト。識別性が命。
+General principles that apply to any codebase. Not tied to a specific repo or a specific query. Read each file's actual contents and write a natural-language **Japanese summary** such that semantic search correctly ranks that file first. This is the only semantic text that enters the embedding. Distinctiveness is everything.
 
-## 構成(必ずこの順)
+**The summary text itself is written in natural Japanese** (the vault content language) — the instructions here are in English, but what you write into the `summary` is Japanese prose. **The general Japanese search terms a user would actually type must appear in the summary.**
 
-1. 先頭に山括弧の**種別タグ**1個。そのファイルの本質に合うものを選ぶ:
+## Structure (always in this order)
+
+1. At the very front, one angle-bracket **type tag**. Choose the one that fits the file's essence:
    〈ロジック〉〈APIルート〉〈UI〉〈管理UI〉〈データアクセス〉〈定数定義〉
-   〈設定〉〈ユーティリティ〉〈型定義〉〈テスト〉〈ドキュメント〉〈スクリプト〉等。
-2. 直後に**このファイル固有の識別機能を1文**。同種・同ドメインの兄弟ファイルと
-   「何が違うか」を最初に書く。共有カテゴリ語から始めない/それで締めない。
-3. 必要なら behavior を1〜2文。
+   〈設定〉〈ユーティリティ〉〈型定義〉〈テスト〉〈ドキュメント〉〈スクリプト〉 etc.
+2. Immediately after, **one sentence on this file's distinguishing function**. Lead with "what is different" from sibling files of the same kind / same domain. Do not start with, or close on, the shared category word.
+3. If needed, 1–2 sentences of behavior.
 
-## 一般ルール
+## General rules
 
-- **識別軸を冒頭に**: 同種ファイルが複数ありうる前提で、その1ファイルだけの核
-  (扱う対象・手段・入出力・境界)を真っ先に出す。総称的なまとめ語で始めない・
-  締めない。読み手が summary だけで兄弟と区別できること。
-- **利用者の検索語を前面に**: 開発者/利用者が日本語で探す一般語を先頭側に入れる。
-  コード内が内部コードネーム・比喩・製品固有の愛称で機能を呼んでいても、
-  **まず一般的な機能名で書き**、内部呼称は補足に回す。内部名だけにしない。
-- **自ファイルの主要概念を必ず含める(欠落禁止)**: そのファイル自身の中心概念 ──
-  ファイル名/パスの語幹と主要 export 名が表すもの ── を summary 本文に必ず一般語で
-  入れる。内部の比喩・人格名・コードネームでそれを置き換えて省略しない。ファイルの
-  名前が示す機能でそのファイルが検索 1 位になれること。
-- **パス概念を全語そろえる**: ファイル名/ディレクトリが複合概念なら、その**全ての
-  構成語**を一般的な日本語で summary に出す。例の形式: パスが `<A>-<B>` や
-  `<A>/<B>` で A と B が別概念なら、A の語と B の語を両方入れる(片方だけにしない)。
-  内部呼称が一方しか言わなくても、パスが示す概念は省略せず日本語で補う。利用者は
-  パスの概念語で探すので、欠けると検索に出ない。
-- **エントリポイントは「委譲する受け口」と書く**: ルート/ハンドラ/CLI 入口/
-  ファサード等の薄い層は、業務動詞(検証する・計算する・生成する等)を自分が
-  実装したかのように書かない。「〈APIルート〉…の受け口。本体は呼び出し先ロジックへ
-  委譲」のように、実装の主体はロジック側だと明示する。これで「処理/ロジックはどこ」
-  系クエリが薄い入口でなく本体に当たる。
-- **集約系は列挙を完全禁止(厳守)**: 定数・設定・index/barrel・**広域ドキュメント
-  /仕様/要件**など、多数の領域に薄く触れるファイルは中の領域・項目を一切列挙
-  しない。役割を1句(~12語以内)で述べて終える。例の形式:「〈定数定義〉アプリ
-  全体の各種設定値を一元管理」「〈ドキュメント〉実装範囲を規定する要件文書」。
-  列挙すると全クエリに弱マッチして実装本体を押しのける。違反は不可。
-- **UI と非UIロジックを明確に分離**: 操作画面・表示の入口は〈UI〉/〈管理UI〉と
-  明示し「操作・表示の入口」と書く。判定・計算・生成・永続化の本体は
-  〈ロジック〉〈データアクセス〉等と明示。同一機能名でも「処理本体」か
-  「操作UI」かが summary だけで判別できること。
-- 長さは 1〜3 文、最大 ~220 字。冗長な前置き(長い背景・設定文)を先頭に置かない。
-  識別機能を先、付随詳細は後ろで短く。
-- 推測で機能を盛らない。実内容に忠実に。一般原則のみで判断し、外部の評価・テスト・
-  期待解は推測も参照もしない。
+- **Put the distinguishing axis up front**: assume multiple files of the same kind may exist, and lead with the core that belongs to this one file alone (what it handles, its means, its inputs/outputs, its boundary). Do not start or close with a generic summarizing word. The reader must be able to tell it apart from siblings by the summary alone.
+- **Foreground the user's search terms**: put the general Japanese words a developer/user would search for toward the front. Even if the code calls the feature by an internal codename, metaphor, or product-specific pet name, **write the general feature name first** and relegate the internal label to a supplement. Never use only the internal name.
+- **Always include the file's own core concept (omission prohibited)**: the file's central concept — what the file-name/path stem and the main export names denote — must appear in the summary body in general terms. Do not replace it with, or drop it in favor of, an internal metaphor, persona name, or codename. The file must be able to rank first for the feature its name denotes.
+- **Cover every word of the path concept**: if the file name/directory is a compound concept, surface **all of its constituent words** in general Japanese in the summary. Format of the example: if the path is `<A>-<B>` or `<A>/<B>` and A and B are separate concepts, include both the A word and the B word (do not include only one). Even if the internal label names only one of them, do not omit the concept the path indicates — supply it in Japanese. Users search by the path's concept words, so a missing one won't surface in search.
+- **Write entry points as "a receiving surface that delegates"**: thin layers such as routes/handlers/CLI entry points/facades should not be written as if they themselves implement the business verb (validate, compute, generate, etc.). Write it like "〈APIルート〉… receiving surface. The body delegates to the callee logic," making explicit that the implementation lives on the logic side. This makes "where is the processing/logic" queries hit the body, not the thin entry point.
+- **Aggregate types: enumeration is strictly forbidden (adhere)**: files that touch many areas thinly — constants, config, index/barrel, **broad documents/specs/requirements**, etc. — must not enumerate any of the areas/items inside. State the role in one phrase (~12 words max) and stop. Format of the example: 「〈定数定義〉アプリ全体の各種設定値を一元管理」「〈ドキュメント〉実装範囲を規定する要件文書」. Enumerating weakly matches every query and crowds out the implementation body. Violations not allowed.
+- **Cleanly separate UI from non-UI logic**: for operation-screen / display entry points, mark 〈UI〉/〈管理UI〉 explicitly and write "operation/display entry point." For the body that judges, computes, generates, or persists, mark 〈ロジック〉〈データアクセス〉 etc. explicitly. Even under the same feature name, "processing body" vs. "operation UI" must be distinguishable from the summary alone.
+- Length is 1–3 sentences, at most ~220 chars. Do not put a verbose preamble (long background/setup sentences) at the front. Distinguishing function first, incidental detail short and at the back.
+- Do not pad with speculated functionality. Stay faithful to the actual contents. Judge on general principles only; do not speculate on or reference external evaluations, tests, or expected answers.
 
-## 出力
+## Output
 
-入力の各 path につき {"path","summary"} を1件、入力と同じ path 文字列で。
+For each input path, one `{"path","summary"}` entry, using the same path string as the input.

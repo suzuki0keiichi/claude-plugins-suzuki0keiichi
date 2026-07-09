@@ -1,92 +1,113 @@
-# carving 根拠(なぜこのスキーマか)
+# Carving rationale (why this schema)
 
-このスキーマの価値は型の列挙ではなく、切り分けの判断とそれを支える不変条件にある。
-書き起こさないと暗黙喪失するため、ここに残す。出自は gestalty の確定 Decision 群。
+The value of this schema lies not in the enumeration of types but in the carving judgments and the
+invariants that support them. Because it is implicitly lost if not written down, it is kept here.
+Its origin is the confirmed Decisions of gestalty.
 
-## ノード型(13)とそれぞれの存在理由
+## The node types (13) and why each exists
 
-> 執筆時点では 12 型。v3.4 で **Deliverable** (リリース成果物。project vault からの
-> cross-vault 参照の宛先) が加わり現在 13 型。Deliverable の詳細は `schema-quickref-system.md`。
+> At the time of writing there were 12 types. In v3.4 **Deliverable** (a released artifact; the
+> destination of cross-vault references from a project vault) was added, making 13 today. Details of
+> Deliverable are in `schema-quickref-system.md`.
 
-`graphrag/schema.ts` の `NODE_TYPES`。軸2(横断構造)は Layer/Concern/Component で命名する。
-地質メタファー名 (Stratum/Vein/Pocket) は alias として残し `canonicalType` が Layer/Concern/Component に正規化する。
+`NODE_TYPES` in `graphrag/schema.ts`. Axis 2 (crosscutting structure) is named with Layer/Concern/Component.
+The geological-metaphor names (Stratum/Vein/Pocket) remain as aliases, and `canonicalType` normalizes them to
+Layer/Concern/Component.
 
-### 構造系 (File)
+### Structural (File)
 
-- root ノード型 (System / Product / Project / Business) は **v3.3 で撤去**。scope は vault 境界
-  自体が担い (vault=scope)、所属は id 規約 `<typeSlug>:<system>:<slug>` が持つ。グラフ内の
-  root ノードは scope の二重表現だった。vault の種別は将来 vault メタ層 (自己紹介の属性) で持つ。
-- **File**: 構造の最小単位。embedding の主担体。シンボル/依存は配列フィールドで持つ
-  (Symbol を独立ノードにしない、を下記で説明)。
+- The root node types (System / Product / Project / Business) were **removed in v3.3**. Scope is carried by
+  the vault boundary itself (vault=scope), and membership by the id convention `<typeSlug>:<system>:<slug>`.
+  A root node in the graph was a double representation of scope. The vault's kind will be carried in a future
+  vault meta layer (a self-introduction attribute).
+- **File**: the minimal structural unit. The main embedding carrier. Symbols/dependencies are held in array
+  fields (Symbol is not an independent node — explained below).
 
-### 知識系(蒸留知識)
+### Knowledge (distilled knowledge)
 
-- **Decision**: 採用した設計判断。`supersedes` で却下案を、`refines` で旧 Decision を継ぐ。
-- **RejectedOption**: 却下した選択肢を**一級市民**にする。多くの ADR 的試みが "note" や
-  "decision" に潰す所。「なぜ採らなかったか」はチームが最も失う情報なので独立させる。
-  `rejected_in`(調査での却下)、`supersedes`(Decision が却下案を上書き)で接続。
-- **Constraint**: 守るべき制約。`constrains` で Decision/File/OperationalKnowledge を縛る。
-- **Goal**: システムの目的因・到達点 (要件 = 目的因 = 到達点)。v2 の Requirement を吸収。
-  `refines` で上位 Goal を細分化、`has_premise` の前提・`derived_from` で出所に接地。
-- **Risk**: 再利用されるリスク。`risks_in` で対象を、`reduces_risk` で緩和 Decision を結ぶ。
-- **OperationalKnowledge**: 再利用される運用知見・ワークアラウンド。
-- **Investigation**: 進行中/完了の調査。focus 継続の主語。`led_to` で Decision を生む。
-- **ConversationChunk**: 出所となる会話メモ。蒸留知識の `derived_from` 先(出所必須)。
+- **Decision**: an adopted design judgment. `supersedes` carries over a rejected option, `refines` an old
+  Decision.
+- **RejectedOption**: makes a discarded option a **first-class citizen**. Where many ADR-like attempts
+  collapse it into a "note" or "decision," "why it was not adopted" is the information a team most loses, so
+  it is made independent. Connected via `rejected_in` (rejected in an investigation) and `supersedes` (a
+  Decision overrides a rejected option).
+- **Constraint**: a constraint to uphold. `constrains` binds Decision/File/OperationalKnowledge.
+- **Goal**: the system's final cause / end state (requirement = final cause = end state). Absorbs v2's
+  Requirement. `refines` subdivides an upper Goal; grounded to its source via `has_premise` premises and
+  `derived_from`.
+- **Risk**: a reused risk. `risks_in` ties the target, `reduces_risk` ties a mitigating Decision.
+- **OperationalKnowledge**: reused operational insight / workaround.
+- **Investigation**: an ongoing/completed investigation. The subject of focus continuity. `led_to` gives rise
+  to a Decision.
+- **ConversationChunk**: a source conversation memo. The `derived_from` destination of distilled knowledge
+  (source required).
 
-### 横断系(crosscut)
+### Crosscut
 
-File 構造から独立に生き残るべき構造を3種に分ける:
+Divides the structure that must survive independently of File structure into 3 kinds:
 
-- **Layer** (alias: Stratum): 水平に積もる層 = アーキテクチャ層。「どの層か」(縦の位置)。
-- **Component** (alias: Pocket): 局所に凝集した塊 = 構造的まとまり(パッケージ/モジュール根)。「どこにあるか」(構造)。
-- **Concern** (alias: Vein): 層や塊を貫いて走る筋 = 横断的関心事。File 構造とも層とも独立に生きるアーキ意図。
-- 3種はいずれも `evidenced_by` で File を指す。File 移動で意図が消えないための分離。
+- **Layer** (alias: Stratum): a horizontally accumulated layer = architecture layer. "Which layer" (vertical
+  position).
+- **Component** (alias: Pocket): a locally cohesive cluster = a structural unit (package/module root).
+  "Where it is" (structure).
+- **Concern** (alias: Vein): a thread running through layers and clusters = a crosscutting concern. An
+  architectural intent that lives independently of both File structure and layer.
+- All 3 kinds point to File via `evidenced_by`. The separation is so that intent does not vanish when Files
+  move.
 
-## なぜ RejectedOption を一級にするか
+## Why make RejectedOption first-class
 
-「却下」を Decision の付帯情報にすると、後から「なぜその案を採らなかったか」を辿れ
-なくなる。`supersedes` / `rejected_in` を持つ独立ノードにすることで、再検討時に同じ
-議論を繰り返さない。これは情報の冗長ではなく、最も腐りやすい情報の保全。
+Making "rejection" an incidental attribute of a Decision means you can no longer trace "why that option was
+not adopted" later. By making it an independent node with `supersedes` / `rejected_in`, you avoid repeating
+the same argument on reconsideration. This is not redundancy of information but preservation of the most
+perishable information.
 
-## なぜ Layer ≠ Concern ≠ Component か
+## Why Layer ≠ Concern ≠ Component
 
-3つの直交する軸がそのまま切り分けの根拠になる:
+Three orthogonal axes are directly the basis for carving:
 
-- **Component** は「どこにあるか」(構造)。局所に凝集した塊。
-- **Layer** は「どの層か」(縦の位置)。水平に積もる層。
-- **Concern** は「何を横断的に気にしているか」(構造にも層にも縛られない意図)。層や塊を貫いて走る。
-- これらを1種に潰すと、ファイル移動・リファクタでアーキ意図が構造と心中する。
-- 3種を分け、確定は決め打ちせず LLM フレンドリ層に `judgment_input` を渡して委ねる
-  (規則スコアで候補化 → LLM 最終判定)。指標は移植先ごとに変わるので規則を同梱しない。
+- **Component** is "where it is" (structure). A locally cohesive cluster.
+- **Layer** is "which layer" (vertical position). A horizontally accumulated layer.
+- **Concern** is "what it cares about crosscuttingly" (intent bound to neither structure nor layer). It runs
+  through layers and clusters.
+- Collapsing these into one kind means architectural intent dies together with structure on file move /
+  refactor.
+- Separate the 3 kinds, and rather than hard-coding the determination, pass `judgment_input` to the
+  LLM-friendly layer and delegate (candidate via rule score → LLM final judgment). The metrics change per
+  port target, so no rules are bundled.
 
-## なぜ Symbol を独立ノードにしないか
+## Why Symbol is not an independent node
 
-シンボル/呼び出しグラフを独立ノード+エッジにすると、任意リポジトリでノード数が爆発し、
-AST 無しの軽量インデクサでは精度も担保できない。現スキーマはシンボル/import を File の
-配列フィールドに持たせ、embedding summary に織り込む(意味の担体は File 1枚)。
-Symbol ノード型・call/参照エッジは現スコープ外の意図的な非対応。将来必要なら別途
-スキーマ拡張の合意を経る(`NODE_TYPES`/`EDGE_TYPES` を勝手に増やさない)。
+Making the symbol/call graph independent nodes + edges would explode the node count on any repository, and a
+lightweight indexer without an AST cannot guarantee precision either. The current schema holds symbols/imports
+in File array fields and weaves them into the embedding summary (the meaning carrier is a single File). The
+Symbol node type and call/reference edges are an intentional non-support out of current scope. If needed in
+future, go through agreement on a separate schema extension (do not add to `NODE_TYPES`/`EDGE_TYPES` on your
+own).
 
-## エッジ文法(型ペア規則)の論理
+## The logic of the edge grammar (type-pair rules)
 
-`graphrag/schema.ts` の `EDGE_TYPE_RULES` が「何が何に繋がってよいか」を強制する。
-これがグラフのスープ化を防ぐ一貫性契約。主な意図:
+`EDGE_TYPE_RULES` in `graphrag/schema.ts` enforces "what may connect to what." This is the consistency
+contract that keeps the graph from turning to soup. Main intents:
 
-- `derived_from`: 蒸留知識 → ConversationChunk/Investigation のみ。**出所必須コントラクト**
-  (知識ノードは raw_content を持つ合格出所へ辿れること)を構造で担保。
-- `evidenced_by`: crosscut(Layer/Concern/Component) → File のみ。意図は必ず実体に接地。
-- `contains` は **v3.3 で撤去** (唯一の「整理エッジ」だった)。所属情報は vault の存在と
-  id 規約が既に持つため冗長。グラフに残すエッジは意味関係のみ。
-- `supersedes`: Decision/OperationalKnowledge → RejectedOption。上書きの方向を固定。
-- `led_to`: Investigation → Decision。調査が判断を生む流れを残す。
+- `derived_from`: distilled knowledge → ConversationChunk/Investigation only. Structurally guarantees the
+  **source-required contract** (a knowledge node must be traceable to a passing source that holds
+  raw_content).
+- `evidenced_by`: crosscut (Layer/Concern/Component) → File only. Intent must always be grounded to substance.
+- `contains` was **removed in v3.3** (it was the only "organizing edge"). Membership information is already
+  held by the vault's existence and the id convention, so it was redundant. The edges that remain in the graph
+  are meaning relations only.
+- `supersedes`: Decision/OperationalKnowledge → RejectedOption. Fixes the direction of override.
+- `led_to`: Investigation → Decision. Preserves the flow of an investigation giving rise to a judgment.
 
-型ペアを破る変更は `validateGraph` が落とす。これは構造強制が runtime 非依存で
-書かれた仕様であり、移植先でそのまま効く(スキーマ定義の中核価値)。
+A change that breaks a type pair is dropped by `validateGraph`. This is a structural enforcement written
+runtime-independently as a spec, and it works as-is on the port target (the core value of the schema
+definition).
 
-## 不変条件(スキーマ定義に含まれる契約)
+## Invariants (contracts contained in the schema definition)
 
-- 出所必須: 蒸留知識は raw_content を持つ合格出所へ辿れること。
-- 再利用知識のみ永続: session 限定メモ・未完ギャップ・推測は永続しない。
-- focus 単位スコープ: session 単位挿入を禁止(重複・断片化の原因)。
-- 新規より skip/update/supersede/review を優先。
-- これらは「スキーマ定義」の一部。型表だけ移しても価値は移らない。
+- Source required: distilled knowledge must be traceable to a passing source that holds raw_content.
+- Only reused knowledge persists: session-only memos, incomplete gaps, and speculation do not persist.
+- Focus-unit scope: session-unit insertion is prohibited (a cause of duplication / fragmentation).
+- Prefer skip/update/supersede/review over new creation.
+- These are part of the "schema definition." Moving only the type table does not move the value.
