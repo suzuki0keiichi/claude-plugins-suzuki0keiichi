@@ -194,7 +194,7 @@ Do not delete a confirmed slug to free it up. A Component being retired:
 
 **Retirement of a knowledge node (Decision / OperationalKnowledge) is state, not deletion**
 (`state:"superseded"`). The source of truth for the policy-reversal recipe (create new Decision
-→ `refines` new→old → mark old superseded) is `mutation-templates.md` "policy reversal."
+→ `refines` new→old → mark old superseded) is `mutation-templates.md` "Policy reversal."
 
 ## Concern carving
 

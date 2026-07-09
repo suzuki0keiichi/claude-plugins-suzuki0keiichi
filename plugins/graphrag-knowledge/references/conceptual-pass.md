@@ -57,7 +57,7 @@ the naming of Component / Layer / Concern). Every step satisfies it.
 - Reject meaningless clusters with accept=false (remove the node and its incident edges).
 - Do not change the structure (membership is decided by the dependency graph).
 - Strictly follow carving-rules.md "Meaningful naming required", "Component carving", "Layer
-  carving" for naming / granularity / foreign-matter inspection / meaning slug / Layer exclusion
+  carving" for naming / granularity / foreign-body inspection / meaning slug / Layer exclusion
   rules (items: meaning title/slug, placeholder prohibition / same-directory principle / granularity
   guard / Layer covers only runtime-dependency targets / tests in the same Layer as the
   implementation). carving-rules.md is canonical for criteria and thresholds; this file does not

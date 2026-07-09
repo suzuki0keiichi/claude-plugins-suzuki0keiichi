@@ -36,7 +36,7 @@ The design proposal / approach / plan under review. If `$ARGUMENTS` carries a de
    - **roadmap affinity**: relative to where we are headed (Goals whose status is planned/active), is it a detour/regression, or in a withdrawal direction (abandoned)?
    - **proportionality (magnitude)**: is the change excessive/insufficient relative to the target system's posture (lifespan/importance/maturity)? posture acts as a global gain that recalibrates the weight of every perspective.
    - **scope creep**: is the proposal untied to any Goal?
-3. **When no frame can be drawn**: if no knowledge node governing the area surfaces, per `references/graph-review-method.md` §4
+3. **When no frame can be drawn**: if no knowledge node governing the area surfaces, per method §4
    state in the findings the "suspected frame not bound to the area" (point to `edge-suggest-policy`). Do not silently call it "no policy".
 
 ## Output

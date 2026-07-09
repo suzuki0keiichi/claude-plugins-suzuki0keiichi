@@ -111,7 +111,7 @@ Design rationale and intentional non-support are in `references/carving-rational
 
 ## Bundled references (carving-related)
 
-- `references/carving-rationale.md`: why these 12 node types / this edge grammar / RejectedOption first-class /
+- `references/carving-rationale.md`: why these 13 node types / this edge grammar / RejectedOption first-class /
   Layer≠Concern≠Component / Symbol not a node. The core value of the schema definition.
 - `references/interpretation-guidance.md`: **general guidance for File interpretation summaries** (the LLM
   follows; repo/query independent). The primary lever for retrieval quality.
