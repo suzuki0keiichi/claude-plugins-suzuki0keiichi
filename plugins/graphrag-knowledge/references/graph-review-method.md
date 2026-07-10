@@ -23,7 +23,7 @@ These follow the design recorded in the vault (retrievable via `ask "グラフ�
 
 1. **The goal is controllability, not QA.** AI beats humans at bug detection at the diff level, so hunting for bugs is not the main aim here. The aim is "delegate the broad strokes, but don't cross the frame" — checking that the code has not broken the intent of the concept layer the human owns (knowledge axis + crosscut axis Layer/Concern/Component).
 2. **Never hard reject.** A machine cannot decide whether a graph-vs-code divergence means the graph is stale or the code is wrong. So **visualize rather than reject**. The responsibility for fixing (the fix-direction ruling) belongs to the human.
-3. **explanation-first.** The first job is not a "violation list" but a "concept-altitude explanation." Violations are surfaced as concept-delta annotations inside the explanation doc.
+3. **explanation-first.** A finding is written as an explanation — name the concept, quote the norm, show the delta — never as a bare violation line. review-doc goes further: its whole deliverable is the explanation, with violations as annotations inside it. (Gathering the ACK band at the top (§5) does not contradict this: what is gathered there is still explanations, only with higher prominence.)
 4. **traceable.** Every finding / claim must trace back to a human-approved knowledge node (with source backing). Do not let AI free-writing be stamped with authorization. Always attach the id of the supporting node to a finding.
 5. **Never grep.** "What concepts / history / traps / policies exist" is retrieved via `ask` / `evidence`. Do not read `vault/*.md` or `graphrag/*.ts` directly (conforming to SKILL.md's Anti-patterns).
    This is about the **knowledge-retrieval path**, whereas **reading the code under review (the diff, candidate Files) is in fact an obligation** (§2.5-3).
@@ -61,10 +61,10 @@ every subsequent step silently misses. So **before anything else**, anchor each 
 1. Per changed File: `evidence --request "<path of changed File>" --types File --limit 1 --neighbors 2`.
    **Keep each result** — its depth-1/2 graph_context is the raw material of the frame (§2) and of the impact zone (§2.5-1). One call serves all three sections; re-firing it per section is waste, skipping a section because "the call was already made" is the opposite failure.
 2. **Confirm the anchor is real**: the returned direct_evidence node's `path` must equal the changed File's path. A fuzzy near-miss (a different File) counts as "not on the graph" — do not adopt a wrong File's neighborhood as this File's frame.
-3. **If there is a File not present on the graph**: surface at the **head of the findings** — "the graph does not know this diff (the index is stale). Either run an incremental index / carve first, or explicitly note this File set as a review blind spot at the top." Do not silently skip.
+3. **If there is a File not present on the graph**: surface at the **head of the findings** — "the graph does not know this diff (the index is stale). Either bring the index up to date first (the `carve` chain: `index` → rewrite provisional summaries → vector index), or explicitly note this File set as a review blind spot at the top." Do not silently skip.
 
 The cause differs from the binding gap in §4: §4 is "the File is on the graph but no governing policy is bound" (binding gap →
-the prescription is bind completion via `edge-suggest-policy`); here it is "the File itself is not on the graph" (index lag → the prescription is incremental index/carve).
+the prescription is bind completion via `edge-suggest-policy`); here it is "the File itself is not on the graph" (index lag → the prescription is the `carve` chain).
 Conflating them routes the wrong prescription.
 
 ---
@@ -73,7 +73,8 @@ Conflating them routes the wrong prescription.
 
 Taking the changed File set as input, assemble the "frame" from the graph. Steps 2–4 are **read off the §1.5 anchor results** (the depth-1/2 graph_context already in hand) — the only new retrieval in this section is the single area-level `ask` of step 4:
 
-1. **Take the changed Files**: `git diff --name-only <base>...<head>` (or the current working diff).
+1. **Take the changed Files — and read the diff itself**: `git diff --name-only <base>...<head>` for the File list, then the actual diff content (or the current working diff).
+   Every later step presupposes the diff has been read: the digests (§2.3), the interrogation (§3) and the corroboration (§2.5-3) are judgments against hunks, not against file names.
 2. **Landing point** (crosscut axis): from each anchor's depth-1 `evidenced_by` inflows, read which **Layer (レイヤー) / Component (コンポーネント) / Concern (脈)** the changed File belongs to.
    - Routing signals like "a change entered the UI Layer" surface here (changed File → interface/screen Layer or UI Component).
 3. **Governance** (knowledge axis): read the **Decision / Constraint / Risk / OperationalKnowledge that governs** the File and its crosscut parents —
@@ -120,7 +121,9 @@ So after §2, sweep **from the content of the change itself**:
 
 1. **Distill two digests from the diff you have read** (1–2 lines each, following the parent skill graphrag-knowledge's query formula `<NL topic> + <1–2 code identifiers>`):
    - **mechanism digest** — what mechanism / approach the change introduces or alters (e.g. "retry with exponential backoff in the sync client, hand-rolled queue in `syncQueue`").
-   - **intent digest** — what the change is trying to achieve (e.g. "make background sync survive flaky networks").
+   - **intent digest** — what the change is trying to achieve (e.g. "make background sync survive flaky networks"). When a commit range is given, fold in the author's **stated** intent
+     (`git log --format='%s%n%b' <base>..<head>`, and the PR description if available). A divergence between stated intent and observed mechanism is itself review material
+     (scope creep / "does more than it says") — carry it into §3 rather than silently reconciling the two.
 2. **Guard sweep** (what must not be tripped):
    `evidence --request "<mechanism digest>" --types RejectedOption,OperationalKnowledge,Constraint,Risk --limit 8 --neighbors 1`
    Decision is deliberately absent from the list: it is the best-bound type (§2's main catch) and would crowd the ranked slots the sweep reserves for the types reverse lookup structurally misses.
@@ -204,6 +207,9 @@ do not conclude "the impact zone is empty" — first suspect the possibility of 
 The frame (§2 ∪ §2.3 ∪ §2.5) is not a backdrop. **Every node in it gets interrogated with its type's questions below, against the diff hunks you actually read**
 (graph summaries alone are not judgment material — the same reading obligation as §2.5-3). A node may be dropped as irrelevant only with a one-line reason in the accounting (§4).
 Checking the crosscut boundary and stopping is the failure mode this section exists to prevent: **the boundary checks are one entry in this list, not the list.**
+When the frame is large, the subagent delegation clause of §2.5 applies to this interrogation too — same payload discipline (full hunk text + the node's summary + the type's question verbatim),
+same rule that the judgment and finding-integration stay in the main context. If a frame edge leaves the vault (`vault:` ref, surfaced inline as `cross_vault_resolved`),
+read the inline-resolved title/summary first and follow the pointer (`ask "<question>" --vault <path>`) only when that is not enough.
 
 Questions per type (default tier in brackets; the escalation rules below apply on top):
 
@@ -272,7 +278,7 @@ The review ends with an accounting that makes under-use of the graph visible, an
 
 1. **Binding gap** — the knowledge exists but is not wired to the implementation it governs (= `carving-check` #9 knowledge-impl-binding-missing).
    Signature: **the §2.3 sweep hits a node that §2's reverse lookup missed** (the sweep is binding-independent, so the discrepancy localizes the missing edge).
-   Prescription: state in the finding "this area has no governing policy bound on the graph (suspected binding gap). Retrieve candidates via `edge-suggest-policy` and bind the policy so it is picked up next time," and carry the (node, changed File) pair into the write-back (§5).
+   Prescription: state in the finding "this area has no governing policy bound on the graph (suspected binding gap). Retrieve candidates via `edge-suggest-policy` (`--missing-only --changed-files <changed paths>` narrows it to this diff) and bind the policy so it is picked up next time," and carry the (node, changed File) pair into the write-back (§5).
    Do not silently conclude "no policy." A silent binding gap is exactly the essence of why a policy regression slipped through in the past (see the regression case in the vault record: `ask "エラー可視化の退行"`).
 2. **Retrieval gap** — the digest's vocabulary missed it. The one reworded retry (§2.3-4) is the only permitted retry; past that, state the residual blind spot honestly instead of re-firing.
 3. **Genuine absence** — the vault has never recorded this type for this area. That is itself reviewable information: if the area plainly deserves a guard of that type
@@ -286,8 +292,9 @@ The review ends with an accounting that makes under-use of the graph visible, an
 - **Always attach the supporting node id to a finding** (traceable principle). Example: `⚠ [advisory] suspected regression of the error-visibility policy (constraint:...:errors-surface-to-user)`.
 - **Vary the prominence by tier**: ACK-required goes gathered at the top and made prominent; advisory is attached at the relevant location.
 - **Emit the knowledge-utilization accounting (§4) as its own section** (pr-review / review-doc; design-review's per-type accounting is the same obligation in its own output shape), alongside the §2.5 coverage-check section.
+- **Date the reference point when it matters**: a supporting node written long before heavy churn in its area is a weaker reference — say so in the finding ("last verified before this area churned"; `staleness-check` machine-lists such candidates, read-only) instead of presenting old policy as fresh. This keeps §0-2 honest: whether the graph went stale or the code went wrong is exactly the call that belongs to the human.
 - **A non-assertive ruling**: leave the fix-direction choice to the human — "possibly crossing the frame. Whether to fix the code, or to update the policy (graph) side and approve the intent change, is for the human to decide."
-- **Write-back of the resolution (preventing review alarm fatigue)**: when a human resolves an ACK-required finding by "approving the intent change,"
+- **Write-back of the resolution (preventing review alarm fatigue)**: when a human resolves a finding — ACK-required or advisory — by "approving the intent change,"
   propose the approved intent change as a mutation — an update to the Decision (state update etc.), the policy-reversal recipe
   (create a new Decision, wire it to the old via `refines`, update the old to state superseded. If the option discarded by the reversal could re-tempt, also attach a
   RejectedOption), or a new RejectedOption — and connect it to the write-back of the graphrag-knowledge skill. The same channel also carries the review's other harvest:

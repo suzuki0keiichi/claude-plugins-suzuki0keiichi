@@ -1,6 +1,6 @@
 ---
 name: graphrag-design-review
-version: 1.3.0
+version: 1.3.1
 description: 設計案や approach を、コードを書く前にグラフ（プロジェクトの永続知識）と照合してレビューする AI 設計レビュー。過去の Decision・Constraint・却下案 (RejectedOption)・運用知識 (OperationalKnowledge)・Risk・Goal・進行中 Investigation の全知見タイプに proposal を尋問する。「実装前にこの方針でいい?」「この設計どう思う」「この approach を見て」と、実装に入る前の設計・計画の是非や、過去判断・制約との整合・roadmap との親和性を確認したい時に使う。実装後の diff レビューは graphrag-pr-review、人間向けの説明資料は graphrag-review-doc。スラッシュ: /graphrag-knowledge:graphrag-design-review
 ---
 
@@ -37,6 +37,7 @@ The design proposal / approach / plan under review. If `$ARGUMENTS` carries a de
    active Investigation = collides with or settles an open question / has_premise reverse = which live nodes survive with a broken premise if the proposal supersedes a Decision).
    Perspectives specific to this pre-implementation face, on top of §3:
    - **proportionality (magnitude)**: is the change excessive/insufficient relative to the target system's posture (lifespan/importance/maturity)? posture acts as a global gain that recalibrates the weight of every perspective.
+     Pull posture from what the vault records (VAULT.md self-introduction / top-level Goals); when the vault does not record it, state the posture you assumed in the accounting instead of silently guessing.
 4. **Accounting + gap diagnosis** — method §4 in this skill's output shape: per knowledge type, record "pulled N (ask / sweep) / interrogated M / findings K".
    **"Nothing applicable" may be written only with accounting attached** (structurally blocking writing "none" with zero pulling work).
    For a 0-pulled type, state the three-way diagnosis (binding gap → point to `edge-suggest-policy` / retrieval gap / genuine absence). Do not silently call it "no policy".

@@ -1,6 +1,6 @@
 ---
 name: graphrag-pr-review
-version: 1.6.0
+version: 1.6.1
 description: PR や diff を、AI 自身がグラフ（プロジェクトの永続知識）と照合して概念レベルでレビューし、所見(findings)を返す。境界 (Layer/Concern/Component) の確認だけでなく、Constraint 違反・却下案 (RejectedOption) の再導入・運用知識 (OperationalKnowledge) の再踏襲・Risk の再開・Goal との整合・進行中 Investigation との衝突まで、全知見タイプに diff を尋問する。「この PR をレビューして」「この差分をグラフ的に見て」「概念が崩れてない?」「方針に反してない?」と、実装後の変更の是非を問われた時に使う（行レベルのバグ探しが主目的ではない）。人間に渡す説明資料(HTML)が欲しい時は graphrag-review-doc、実装前の設計レビューは graphrag-design-review、変更の記録は graphrag-knowledge。スラッシュ: /graphrag-knowledge:graphrag-pr-review
 ---
 
@@ -21,7 +21,7 @@ If `$ARGUMENTS` carries a base/head (e.g. `main...HEAD`), use it; otherwise targ
 ## Procedure (execute method §1.5 → §2 → §2.3 → §2.5 → §3 → §4 verbatim)
 
 0. **Anchor pass (freshness precheck)** — execute method §1.5 verbatim: one `evidence --types File --limit 1 --neighbors 2` per changed File, **results kept for reuse** (§2 reads the frame off them, §2.5 the impact zone — no re-firing). For Files absent from the graph, surface "stale index" at **the top of the findings** (its cause and prescription differ from the binding gap in §4).
-1. **Get the changed Files**: `git diff --name-only <base>...<head>` (the current working diff if no range is given).
+1. **Get the changed Files and read the diff** — method §2-1: the file list (`git diff --name-only <base>...<head>`) *and* the diff content itself (the current working diff if no range is given). The digests, the interrogation and the corroboration all judge hunks, not file names.
 2. **Build the frame by reverse lookup** — execute method §2 verbatim: read landing point / governance / history off the anchor results; the only new retrieval is one area-level `ask` (plus at most one or two single-node deep-dives). **Build the frame at live leaves** (do not anchor on a state-superseded Decision).
 3. **Semantic sweep** — execute method §2.3 verbatim: read the diff, distill the **mechanism digest** and the **intent digest**, then fire the guard sweep
    (`--types RejectedOption,OperationalKnowledge,Constraint,Risk`) and the direction sweep (`--types Goal,Investigation`) once each.
@@ -46,7 +46,7 @@ If `$ARGUMENTS` carries a base/head (e.g. `main...HEAD`), use it; otherwise targ
 - **Emit the knowledge-utilization accounting as its own section** (method §4): one line per type, with the three-way diagnosis stated for every empty row. This is what proves the review used the whole vault, not just the boundaries.
 - **Attach advisory to the relevant spot**. Attach **a supporting node id to every finding without exception** (traceable).
 - Cast each finding in the form "possible frame crossing; whether to fix the code or update the policy (graph) side to approve the intent change is for the human to decide", leaving the fix-direction ruling to the human.
-- **Resolution write-back** (method §5): once a human resolves an ACK-required finding by "approving the intent change", propose the approved intent change as a mutation
+- **Resolution write-back** (method §5): once a human resolves a finding (ACK-required or advisory) by "approving the intent change", propose the approved intent change as a mutation
   (Decision update / policy-reversal recipe / new RejectedOption) and connect it to the graphrag-knowledge skill's write-back. The same channel carries the review's other harvest:
   binding proposals for §4-diagnosed gaps, closing an active Investigation the diff settled, and new knowledge surfaced in a genuinely-absent area.
   Without updating the graph, the same finding recurs next time (alarm fatigue in review).
