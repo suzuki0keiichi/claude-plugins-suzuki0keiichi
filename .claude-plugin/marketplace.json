@@ -5,24 +5,9 @@
   },
   "plugins": [
     {
-      "name": "project-coordinator",
-      "description": "A Claude agent that coordinates multi-step projects by maintaining purpose, plans, and research logs, ensuring steady progress without owning scope, budget, or decisions.",
-      "source": "./plugins/project-coordinator"
-    },
-    {
-      "name": "product-concept-guardian",
-      "description": "Enforces alignment between all product decisions and the product’s declared concept, preventing vision erosion caused by convenience, politics, or technical shortcuts.",
-      "source": "./plugins/product-concept-guardian"
-    },
-    {
       "name": "ssh-operator",
-      "description": "Operate remote machines via SSH through a subagent. Maintains security by keeping authentication local-only while enabling full remote operations (file read/write/edit, command execution, log inspection) with token-efficient output limiting.",
+      "description": "Operate remote machines via SSH from local Claude Code. Keeps credentials local-only and stabilizes permission patterns via a project-local helper script with token-efficient output limiting.",
       "source": "./plugins/ssh-operator"
-    },
-    {
-      "name": "tailored-reviewer",
-      "description": "Generate project-tailored AI review skills by collecting system-specific knowledge. Complements pr-review-toolkit with project-specific review perspectives that detect both short-term bugs and long-term detriments.",
-      "source": "./plugins/tailored-reviewer"
     },
     {
       "name": "graphrag-knowledge",
