@@ -13,7 +13,6 @@
 ```
 ssh-operator/
 ├── .claude-plugin/plugin.json     # マニフェスト
-├── hooks/hooks.json               # SessionStartフック（スクリプトコピー）
 ├── scripts/ssh-op.sh              # SSHヘルパー
 └── skills/ssh-operator/
     └── SKILL.md                   # スキル本体（/ssh-operator コマンド兼用）
@@ -23,11 +22,10 @@ ssh-operator/
 
 | 層 | ファイル | 役割 |
 |----|---------|------|
-| Hook | `hooks/hooks.json` | SessionStart時に `scripts/ssh-op.sh` → `.claude/ssh-operator/ssh-op.sh` へ自動コピー |
-| Skill | `skills/ssh-operator/SKILL.md` | `/ssh-operator <host> [task]` のエントリーポイント。メインエージェントに SSH 操作手順を注入 |
+| Skill | `skills/ssh-operator/SKILL.md` | `/ssh-operator <host> [task]` のエントリーポイント。Step 0 でヘルパーを `.claude/ssh-operator/` へ差分コピーし、メインエージェントに SSH 操作手順を注入 |
 | Script | `scripts/ssh-op.sh` | SSH接続・出力制限(200行)・チルダ展開修正・エラー報告 |
 
-SessionStart フックが `${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh` をプロジェクト内の `.claude/ssh-operator/ssh-op.sh` に自動コピーする。
+スキルの Step 0 が `${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh` をプロジェクト内の `.claude/ssh-operator/ssh-op.sh` に差分コピーする（内容一致ならスキップ、プラグイン更新後は自動更新）。
 スキルとメインエージェントはプロジェクト内パスのみを参照し、直接リモート操作を行う。
 プロジェクト内パスを使うことで「Always allow」のパーミッションパターンが安定する。
 
@@ -55,9 +53,13 @@ EOF
 | 操作範囲 | ローカル同等 | Read/Write/Edit/Grep/Glob/Bash相当をSSH越しで |
 | トークン削減 | 出力200行制限 | 大出力によるトークン浪費を防止 |
 | SSH接続 | ~/.ssh/config依存 | プラグインに接続情報を持たない |
-| パス解決 | SessionStart フックで `.claude/ssh-operator/ssh-op.sh` に自動コピー | キャッシュパスはプロジェクト外のため Always allow が効かない ([#11380](https://github.com/anthropics/claude-code/issues/11380))。フックなら `${CLAUDE_PLUGIN_ROOT}` が確実に展開される |
+| パス解決 | スキル Step 0 で `.claude/ssh-operator/ssh-op.sh` に差分コピー | キャッシュパスはプロジェクト外のため Always allow が効かない ([#11380](https://github.com/anthropics/claude-code/issues/11380))。スキル本文の `${CLAUDE_PLUGIN_ROOT}` はメインエージェントでは確実に展開される |
 
-### サブエージェント方式を廃止した経緯
+### SessionStart フック方式を廃止した経緯 (v0.4.0)
+
+v0.3.x では SessionStart フックが毎セッション無条件にスクリプトをコピーしていたが、SSH を使わないプロジェクトにも `.claude/ssh-operator/` が散布される副作用があった。スキル起動時の差分コピー（Step 0）に置き換え、フックを廃止。当時フックを選んだ理由は「サブエージェント環境で `${CLAUDE_PLUGIN_ROOT}` が未展開」だったが、メインエージェント実行に移行済みの現構成ではスキル本文で問題なく展開される。
+
+### サブエージェント方式を廃止した経緯 (v0.3.0)
 
 v0.2.0まではサブエージェントで実行していたが、以下の問題が解決困難だった:
 

@@ -4,83 +4,80 @@ description: >
   This skill should be used when the user asks to "operate a remote machine",
   "SSH into a server", "check remote files", "edit files on remote",
   "run commands on remote", "check server status", "look at server logs",
-  "restart a service", "deploy to the server", "investigate a server issue",
+  "restart a service on the server", "deploy to the server",
+  "investigate a server issue",
   "サーバーを調べて", "リモートで操作して", "リモートのファイルを見て",
-  "ログを確認して", "サービスを再起動して",
+  "サーバーのログを確認して", "リモートのサービスを再起動して",
   or needs to perform any operation on a remote machine via SSH.
-  If CLAUDE.md or project memory contains host names or server information,
-  use that to determine the target host without asking the user.
 argument-hint: <host> [task description]
 ---
 
 # SSH Operator
 
-Operate a remote machine via SSH.
+Operate a remote machine via SSH through the project-local helper script.
+
+## Step 0: Ensure the helper script (once per session)
+
+Run from the project root:
+
+```bash
+mkdir -p .claude/ssh-operator
+if ! cmp -s "${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" .claude/ssh-operator/ssh-op.sh; then
+  cp "${CLAUDE_PLUGIN_ROOT}/scripts/ssh-op.sh" .claude/ssh-operator/ssh-op.sh
+fi
+chmod +x .claude/ssh-operator/ssh-op.sh
+```
+
+This copies the script into the project on first use and refreshes it after plugin updates. The project-local path keeps "Always allow" permission patterns stable across plugin updates.
 
 ## Input
 
-Parse the user's input:
-- **Host**: First argument — SSH host name from `~/.ssh/config`
-- **Task**: Remaining arguments — what to do on the remote machine
+- **Host**: first argument — an SSH host name from `~/.ssh/config`
+- **Task**: remaining arguments — what to do on the remote machine
 
 If no host: check CLAUDE.md / project memory for server info, otherwise ask.
 If no task: ask.
 
 ## CRITICAL: Local vs Remote
 
-Your Bash tool runs **locally**. The **only** way to run commands on the remote host is the helper script.
-
-- Do NOT run raw commands like `ls /var/log` or `cat /etc/nginx/nginx.conf` — these read your **local** filesystem
-- Do NOT run `ssh` directly — always use the helper script
+The Bash tool — like Read, Edit, and every other tool — runs **locally**. The **only** way to reach the remote host is the helper script. Never run raw `ssh`, and never run bare commands like `cat /etc/nginx/nginx.conf` expecting remote output — they read the local filesystem.
 
 ## Usage
 
 ```
-.claude/ssh-operator/ssh-op.sh HOST [line-limit] command...
+.claude/ssh-operator/ssh-op.sh HOST [line-limit] 'command...'
 ```
 
-- Default output limit: 200 lines. Pass a number as 2nd arg to override (e.g. `HOST 500 journalctl ...`).
-- The script handles connection timeouts, tilde expansion, and error reporting.
-
-## Examples
+**Pass the remote command as ONE quoted string.** ssh joins bare arguments with spaces and your local shell strips quotes first, so pipes, `&&`, redirects, and multi-word arguments otherwise run locally or arrive mangled:
 
 ```bash
-# Read file
-.claude/ssh-operator/ssh-op.sh HOST cat -n /path/to/file
-
-# Read lines 50-100
-.claude/ssh-operator/ssh-op.sh HOST sed -n '50,100p' /path/to/file
-
-# Search
-.claude/ssh-operator/ssh-op.sh HOST grep -rn 'pattern' /path/
-
-# Find files
-.claude/ssh-operator/ssh-op.sh HOST find /path -name '*.conf' -type f
-
-# List directory
-.claude/ssh-operator/ssh-op.sh HOST ls -la /path/
-
-# Edit file
-.claude/ssh-operator/ssh-op.sh HOST sed -i 's|old|new|g' /path/to/file
-
-# Run command
-.claude/ssh-operator/ssh-op.sh HOST systemctl status nginx
-
-# With sudo
-.claude/ssh-operator/ssh-op.sh HOST sudo systemctl restart nginx
+# WRONG: tail runs locally on already-truncated output
+.claude/ssh-operator/ssh-op.sh HOST journalctl -u app | tail -50
+# RIGHT: the pipe runs on the remote
+.claude/ssh-operator/ssh-op.sh HOST 'journalctl -u app | tail -50'
 ```
 
-**Write file**:
+**The script always exits 0.** Remote failures appear as a trailing `[exit: N]` line in the output — check for that line; never chain `&&` on the script's exit code.
+
+Output is truncated to 200 lines by default; pass a number before the command to raise it (e.g. `HOST 500 'journalctl -u app'`). Prefer narrowing with grep/sed/tail (inside the quoted command) over raising the limit. The script sets a 10s connection timeout and BatchMode.
+
 ```bash
-.claude/ssh-operator/ssh-op.sh HOST tee /path/to/file <<'REMOTE_EOF'
+# Read / search / inspect
+.claude/ssh-operator/ssh-op.sh HOST 'cat -n /path/to/file'
+.claude/ssh-operator/ssh-op.sh HOST 'grep -rn "pattern" /var/log/'
+.claude/ssh-operator/ssh-op.sh HOST 'sudo systemctl status nginx'
+
+# Edit in place
+.claude/ssh-operator/ssh-op.sh HOST 'sed -i "s|old|new|g" /path/to/file'
+
+# Write a file
+.claude/ssh-operator/ssh-op.sh HOST 'tee /path/to/file' <<'REMOTE_EOF'
 content here
 REMOTE_EOF
 ```
 
 ## Rules
 
-1. **Always use the helper script** — never raw `ssh`
-2. **Fetch only what you need** — use grep/sed/head/tail to narrow output
-3. **Verify edits** — after writing/editing, read back to confirm
-4. **Report clearly** — summarize findings and changes
-5. **Be cautious with destructive ops** — confirm before deleting files or stopping services
+1. **Always go through the helper script** — never raw `ssh`
+2. **Verify remote edits by reading back** — there is no Edit-tool safety net over SSH; `sed -i` exits 0 even when its pattern matched nothing (and the helper masks exit codes anyway)
+3. **Confirm with the user before destructive operations** — deleting files, stopping or restarting services
