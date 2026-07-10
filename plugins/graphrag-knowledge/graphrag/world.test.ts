@@ -220,7 +220,7 @@ test("introHint fires only when VAULT.md is older than 45 days", () => {
   assert.equal(introHint(mtime, "2026-02-15T00:00:00.000Z"), null); // ちょうど 45 日
   assert.equal(
     introHint(mtime, "2026-03-02T00:00:00.000Z"), // 60 日
-    "VAULT.md が 60日前から未更新。蓄積に対して自己紹介が古い可能性"
+    "VAULT.md unchanged for 60 days. Self-introduction may be stale relative to the accumulation"
   );
   assert.equal(introHint(null, "2026-03-02T00:00:00.000Z"), null); // mtime 不明は判定しない
 });
@@ -236,7 +236,7 @@ test("buildWorldRefreshReport includes mtime/node_count and attaches intro_hint 
     const payStale = stale.vaults.find((v) => v.vault_path === path.resolve(vaultDirs.pay))!;
     assert.equal(payStale.node_count, 1);
     assert.equal(payStale.profile_mtime, cache.entries.find((e) => e.vault_path === payStale.vault_path)!.profile_mtime);
-    assert.match(payStale.intro_hint ?? "", /VAULT\.md が \d+日前から未更新。蓄積に対して自己紹介が古い可能性/);
+    assert.match(payStale.intro_hint ?? "", /VAULT\.md unchanged for \d+ days\. Self-introduction may be stale relative to the accumulation/);
     // 今の now では新鮮 → intro_hint は付かない (ノイズを足さない)
     const fresh = buildWorldRefreshReport(worldDir, cache);
     assert.ok(fresh.vaults.every((v) => !("intro_hint" in v)));

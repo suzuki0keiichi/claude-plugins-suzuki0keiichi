@@ -150,13 +150,13 @@ export async function loadRequiredVectorIndex(
   if (vaultDir && await shouldRebuildVectorIndex(vaultDir, readPath)) {
     try {
       const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
-      process.stderr.write(`[auto] vector index が無いか古い → 自動構築: ${writePath}\n`);
+      process.stderr.write(`[auto] vector index missing or stale → auto-building: ${writePath}\n`);
       await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir });
-      process.stderr.write(`[auto]   → 構築完了\n`);
+      process.stderr.write(`[auto]   → build complete\n`);
       readPath = writePath;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      process.stderr.write(`[auto]   → 自動構築失敗 (embedding endpoint 不達等): ${msg}\n`);
+      process.stderr.write(`[auto]   → auto-build failed (embedding endpoint unreachable, etc.): ${msg}\n`);
     }
   }
 
@@ -222,10 +222,10 @@ const TYPE_BOOST_TYPES = new Set(["Decision", "Constraint", "OperationalKnowledg
 
 const TERMINAL_STATE_PENALTY = 0.6;
 export const TERMINAL_STATE_NOTES: Record<string, string> = {
-  superseded: "superseded — refines 逆引きで後継を確認",
-  closed: "closed — 終結済み Investigation。再開するなら state を active に戻す",
-  abandoned: "abandoned — 放棄済み Goal。再採用なら新 Goal を refines で繋ぐ",
-  achieved: "achieved — 達成済み Goal。現役の方針はここから refines を辿る"
+  superseded: "superseded — check refines reverse for successor",
+  closed: "closed — settled Investigation. To reopen, set state back to active",
+  abandoned: "abandoned — abandoned Goal. To re-adopt, wire a new Goal to it via refines",
+  achieved: "achieved — achieved Goal. Trace refines from here to reach the live policy"
 };
 
 export function searchGraph(graph, query, options: any = {}) {

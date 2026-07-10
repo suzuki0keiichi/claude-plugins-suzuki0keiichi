@@ -56,8 +56,8 @@ function defaultConfigPath(flags: Record<string, string | true>): string {
   const stateDir = process.env.GRAPHRAG_STATE_DIR ?? discoverStateDir();
   if (!stateDir) {
     throw new Error(
-      "carving.json の置き場所を解決できない: cwd から上位に .graphrag が無い。" +
-      "--config <path> を渡すか、プロジェクト root (.graphrag のある場所) で実行する。"
+      "Cannot resolve where to put carving.json: no .graphrag found above cwd. " +
+      "Pass --config <path>, or run from the project root (where .graphrag lives)."
     );
   }
   return path.join(stateDir, CARVING_CONFIG_BASENAME);
@@ -97,7 +97,7 @@ function tryGitCommit(configPath: string, message: string): GitResult {
 function loadForWrite(configPath: string): CarvingConfig {
   const loaded = loadCarvingConfig(configPath);
   if (loaded.exists && loaded.errors.length > 0) {
-    throw new Error(`既存の carving.json が不正: ${loaded.errors.join("; ")}`);
+    throw new Error(`Existing carving.json is invalid: ${loaded.errors.join("; ")}`);
   }
   return loaded.config ?? { allowed_orphans: [] };
 }
@@ -106,7 +106,7 @@ async function runAdd(flags: Record<string, string | true>): Promise<any> {
   const configPath = defaultConfigPath(flags);
   const p = requireString(flags, "path");
   const reason = requireString(flags, "reason");
-  if (hasGlobChars(p)) throw new Error(`--path に glob/regex 文字 (* ? [) は不可。literal path のみ: ${p}`);
+  if (hasGlobChars(p)) throw new Error(`--path must not contain glob/regex chars (* ? [); literal path only: ${p}`);
   const entry = { path: p, reason, added: todayISO() };
   // carving.json は追跡設定なので stateDir 直下のまま、lock (機械ローカル) は cache/ に置く (E1)。
   const lockDir = cacheDirUnder(path.dirname(configPath));
@@ -114,7 +114,7 @@ async function runAdd(flags: Record<string, string | true>): Promise<any> {
   await withVaultLock(lockDir, () => {
     const config = loadForWrite(configPath);
     if (config.allowed_orphans.some((e) => e.path === p)) {
-      throw new Error(`既に免除済み: ${p} (更新は carving-allow remove → add)`);
+      throw new Error(`Already exempted: ${p} (to update, carving-allow remove then add)`);
     }
     config.allowed_orphans.push(entry);
     writeConfigAtomic(configPath, config);
@@ -132,7 +132,7 @@ async function runRemove(flags: Record<string, string | true>): Promise<any> {
   await withVaultLock(lockDir, () => {
     const config = loadForWrite(configPath);
     removed = config.allowed_orphans.find((e) => e.path === p) ?? null;
-    if (!removed) throw new Error(`免除エントリが見つからない: ${p}`);
+    if (!removed) throw new Error(`Exemption entry not found: ${p}`);
     config.allowed_orphans = config.allowed_orphans.filter((e) => e.path !== p);
     writeConfigAtomic(configPath, config);
   });
@@ -164,7 +164,7 @@ function runMigrate(flags: Record<string, string | true>): any {
     if (!hit) continue;
     candidates.push({
       path: n.path,
-      reason: `旧 builtin パターン '${hit.name}' 由来の免除 (移行時に妥当性を再確認すること)`,
+      reason: `exemption migrated from removed builtin pattern '${hit.name}' (re-verify validity)`,
       added: todayISO(),
       from_builtin: hit.name,
     });
@@ -172,7 +172,7 @@ function runMigrate(flags: Record<string, string | true>): any {
   return {
     action: "migrate",
     graph: graphPath,
-    note: "candidate のみ・書き込みなし。妥当なものだけ carving-allow add --path <p> --reason <r> で確定する。",
+    note: "Candidates only, no writes. Confirm the valid ones with carving-allow add --path <p> --reason <r>.",
     candidates,
   };
 }

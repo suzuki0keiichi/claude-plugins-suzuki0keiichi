@@ -144,7 +144,7 @@ test("ノード不在で hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "investigation:s:missing", "--vault", vaultDir]),
-      /investigation:s:missing.*存在しない/s
+      /investigation:s:missing.*does not exist/s
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -158,7 +158,7 @@ test("Investigation でない type で hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "decision:s:d", "--vault", vaultDir]),
-      /Investigation ではない/
+      /not Investigation/
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -172,7 +172,7 @@ test("active でない Investigation で hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "investigation:s:done", "--vault", vaultDir]),
-      /active でない/
+      /not active/
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -186,7 +186,7 @@ test("raw_content が空で hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "investigation:s:live", "--vault", vaultDir]),
-      /raw_content が空/
+      /empty raw_content/
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -201,7 +201,7 @@ test("next: 行が無いと hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "investigation:s:live", "--vault", vaultDir]),
-      /"next:" 行が無い/
+      /no "next:" line/
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -217,7 +217,7 @@ test("first_action が空で hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "investigation:s:live", "--vault", vaultDir]),
-      /最初の一手が空/
+      /first action is empty/
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -233,7 +233,7 @@ test("raw_content が 8KB 超で hard-error", async () => {
   try {
     await assert.rejects(
       () => runCheckpointMark(["--investigation", "investigation:s:live", "--vault", vaultDir]),
-      /8KB.*超|超.*8KB|ConversationChunk/s
+      /8KB|ConversationChunk/s
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -55,32 +55,32 @@ export function parseCarvingConfig(raw: string): { config: CarvingConfig | null;
   try {
     data = JSON.parse(raw);
   } catch (e: any) {
-    return { config: null, errors: [`JSON として読めない: ${e?.message ?? e}`] };
+    return { config: null, errors: [`Not valid JSON: ${e?.message ?? e}`] };
   }
   if (typeof data !== "object" || data === null || !Array.isArray(data.allowed_orphans)) {
-    return { config: null, errors: [`形が不正: { "allowed_orphans": [ { path, reason, added } ] } であるべき`] };
+    return { config: null, errors: [`Malformed shape: expected { "allowed_orphans": [ { path, reason, added } ] }`] };
   }
   const entries: CarvingAllowedOrphan[] = [];
   const seen = new Set<string>();
   data.allowed_orphans.forEach((entry: any, i: number) => {
     const where = `allowed_orphans[${i}]`;
     if (typeof entry !== "object" || entry === null) {
-      errors.push(`${where}: オブジェクトでない`);
+      errors.push(`${where}: not an object`);
       return;
     }
     const p = entry.path;
     if (typeof p !== "string" || p.length === 0) {
-      errors.push(`${where}: path 必須`);
+      errors.push(`${where}: path required`);
       return;
     }
-    if (hasGlobChars(p)) errors.push(`${where} (${p}): glob/regex 文字 (* ? [) は不可。literal path のみ`);
+    if (hasGlobChars(p)) errors.push(`${where} (${p}): glob/regex chars (* ? [) not allowed; literal path only`);
     if (typeof entry.reason !== "string" || entry.reason.trim().length === 0) {
-      errors.push(`${where} (${p}): reason 必須`);
+      errors.push(`${where} (${p}): reason required`);
     }
     if (typeof entry.added !== "string" || entry.added.trim().length === 0) {
-      errors.push(`${where} (${p}): added (YYYY-MM-DD) 必須`);
+      errors.push(`${where} (${p}): added (YYYY-MM-DD) required`);
     }
-    if (seen.has(p)) errors.push(`${where} (${p}): path 重複`);
+    if (seen.has(p)) errors.push(`${where} (${p}): duplicate path`);
     seen.add(p);
     entries.push({ path: p, reason: String(entry.reason ?? ""), added: String(entry.added ?? "") });
   });

@@ -26,7 +26,7 @@ export async function buildVectorIndex(args, deps: any = {}) {
   // 黙って壊れた delta を出さず明示エラーにする (no-silent-failure)。
   if (args.vault && args.base) {
     throw new Error(
-      "vault + base 併用は未対応: vault からの差分 (base delta) ビルドは v3.x。--vault と --base を同時指定しないでください。"
+      "vault + base combination not supported: base-delta build from a vault is v3.x. Do not specify --vault and --base together."
     );
   }
   // deps.graphObject はテスト/DI がグラフを直渡しするためのフック (loadGraph を迂回)。
@@ -59,8 +59,8 @@ export async function buildVectorIndex(args, deps: any = {}) {
   const provisionalCount = nodes.filter((n: any) => n.summary_provisional === true).length;
   if (provisionalCount > 0) {
     console.error(
-      `[warn] 要約がテンプレのまま (summary_provisional): ${provisionalCount}件 (File / Component / Layer 等)。` +
-      `embedding からは除外したが、意味の要約に書き換えないと検索・concern-hint の品質が落ちる。`
+      `[warn] summaries still template-only (summary_provisional): ${provisionalCount} node(s) (File / Component / Layer, etc.). ` +
+      `Excluded from embedding, but until rewritten into meaningful summaries, search / concern-hint quality drops.`
     );
   }
   const rows = await embedNodesIncremental(nodes, provider, previousRows, documentPrefix);

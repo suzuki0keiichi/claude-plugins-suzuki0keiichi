@@ -176,7 +176,7 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
   // v3: typed-add goes through vault writer (not FalkorDB). Vault is the single source of truth.
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) {
-    throw new Error("typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
+    throw new Error("typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (must be provided via .env)");
   }
 
   // vault isolation check: 外部 vault でローカル mode が無い or readonly なら書き込みを拒否
@@ -553,8 +553,8 @@ export async function runAsk(argv: string[]) {
     call_number: callNumber,
     final_stage: finalStage,
     next_action_hint: shouldEscalate(lastOutcome)
-      ? "別キーワードを 1 度試す → それでも空ならコード/doc 直読みに切り替える (excessive 検出は launcher が --call-number を構造的に加算しているので過信せず)"
-      : `${finalStage} 結果で十分。LLM はここから判断を進めてよい`,
+      ? "Try one different keyword → if still empty, switch to reading code/docs directly (the launcher increments --call-number structurally — do not over-trust the excessive signal)"
+      : `${finalStage} result is sufficient — proceed to judgment from here`,
     ...(askSchema?.llmReference ? { schema_summary: { id: askSchema.id, reference: askSchema.llmReference } } : {}),
     ...(worldHints !== undefined ? { world_hints: worldHints } : {}),
     stages
@@ -570,7 +570,7 @@ async function runCommitMutation(argv: string[]) {
   // lock → OCC → import → normalize/validate → writeVaultDelta → index(non-fatal) → git commit
   // are all handled by applyMutationToVault.
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
-  if (!vaultDir) throw new Error("commit-mutation: GRAPHRAG_VAULT_DIR env not set (.env で必須指定)");
+  if (!vaultDir) throw new Error("commit-mutation: GRAPHRAG_VAULT_DIR env not set (must be provided via .env)");
 
   // typed-add と同じ単一ゲート: readonly / 外部 vault のローカル mode 未設定は書かせない。
   assertVaultWriteAllowed({ vaultDir });
@@ -637,7 +637,7 @@ async function runCarve(argv: string[]) {
   let vectorIndexReady = existsSync(vectorIndexPath);
   let vectorIndexSkipNote: string | null = null;
   if (!vectorIndexReady) {
-    process.stderr.write(`[carve] vector index not found at ${vectorIndexPath} → 自動構築を試みる\n`);
+    process.stderr.write(`[carve] vector index not found at ${vectorIndexPath} → attempting auto-build\n`);
     try {
       await buildAndWriteVectorIndex({ out: vectorIndexWritePath }, { graphObject: indexed });
       vectorIndexPath = vectorIndexWritePath;
@@ -645,7 +645,7 @@ async function runCarve(argv: string[]) {
       process.stderr.write(`[carve]   → built ${vectorIndexPath}\n`);
     } catch (error) {
       vectorIndexSkipNote = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`[carve]   → 自動構築 FAILED (embedding endpoint 不達 等): ${vectorIndexSkipNote}\n`);
+      process.stderr.write(`[carve]   → auto-build FAILED (embedding endpoint unreachable, etc.): ${vectorIndexSkipNote}\n`);
     }
   }
 
@@ -657,7 +657,7 @@ async function runCarve(argv: string[]) {
     runEdgeSuggestPolicy(["--graph", indexOutPath, "--vector-index", vectorIndexPath, "--missing-only"]);
   } else {
     process.stderr.write(`[carve] stage 2/3: SKIPPED (vector index unavailable: ${vectorIndexSkipNote ?? "not found"}). `);
-    process.stderr.write(`embedding endpoint を立ててから carve を再実行すると concern-hint + policy edge suggestions まで通る。\n`);
+    process.stderr.write(`Stand up an embedding endpoint, then re-run carve to get through concern-hint + policy edge suggestions.\n`);
   }
 
   process.stderr.write(`[carve] stage 3/3: carving-check\n`);
@@ -667,9 +667,9 @@ async function runCarve(argv: string[]) {
   runCarvingCheck(checkArgs);
 
   process.stderr.write(`\n[carve] done. next:\n`);
-  process.stderr.write(`  1. concern-hint + policy edge 候補を見て mutation plan を組み立てる (LLM)\n`);
-  process.stderr.write(`  2. node graphrag/cli.ts commit-mutation <plan.json> で vault に適用 (OCC/validate/索引/git commit)\n`);
-  process.stderr.write(`  3. 必要なら carve を再実行して carving-check の error をゼロにしてから完了とする\n`);
+  process.stderr.write(`  1. Review concern-hint + policy edge candidates and assemble a mutation plan (LLM)\n`);
+  process.stderr.write(`  2. Apply to the vault with node graphrag/cli.ts commit-mutation <plan.json> (OCC/validate/index/git commit)\n`);
+  process.stderr.write(`  3. If needed, re-run carve and drive carving-check errors to zero before calling it done\n`);
 }
 
 async function runAddRejectedOption(argv: string[]) {
@@ -755,7 +755,7 @@ async function runInspect(_argv: string[]) {
   // Absent vault / read failure is non-fatal: output null + reason honestly (never drop inspect).
   let bindingDebt: { count: number | null; reason?: string };
   if (!vaultDir) {
-    bindingDebt = { count: null, reason: "GRAPHRAG_VAULT_DIR 未設定" };
+    bindingDebt = { count: null, reason: "GRAPHRAG_VAULT_DIR not set" };
   } else {
     try {
       const graph = await loadGraph(vaultDir);

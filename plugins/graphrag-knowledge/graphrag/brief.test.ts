@@ -91,8 +91,8 @@ test("resume reports legacy stateless Investigations instead of silently returni
   assert.equal(resume.active_count, 0, "state==='active' フィルタは維持 (旧データを active 扱いしない)");
   assert.equal(resume.primary, null);
   assert.equal(resume.legacy_stateless_investigations, 2);
-  assert.match(resume.legacy_note, /state 無し/);
-  assert.match(resume.legacy_note, /2 件/);
+  assert.match(resume.legacy_note, /stateless/i);
+  assert.match(resume.legacy_note, /2 stateless Investigation/i);
 });
 
 test("resume omits the legacy notice when an active Investigation exists", () => {
@@ -137,7 +137,7 @@ test("resume adds stocktake_hint when stateless Investigations coexist", () => {
   };
   const resume = buildResumeBrief(graph, nodesById(graph));
   assert.match(resume.stocktake_hint, /stocktake/);
-  assert.match(resume.stocktake_hint, /state無し Investigation が 1 件/);
+  assert.match(resume.stocktake_hint, /1 stateless Investigation/);
 });
 
 test("resume adds stocktake_hint when active piles up (>= 3)", () => {
@@ -150,7 +150,7 @@ test("resume adds stocktake_hint when active piles up (>= 3)", () => {
     edges: []
   };
   const resume = buildResumeBrief(graph, nodesById(graph));
-  assert.match(resume.stocktake_hint, /active が 3 件/);
+  assert.match(resume.stocktake_hint, /3 active/);
 });
 
 test("resume omits stocktake_hint when healthy (1-2 active, no stateless)", () => {

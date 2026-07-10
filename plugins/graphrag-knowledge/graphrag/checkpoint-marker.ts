@@ -40,8 +40,8 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
 
   if (!flags.investigation) {
     throw new Error(
-      "checkpoint-mark requires --investigation <id>: A ステップで更新した active Investigation の " +
-      "id を渡せ。この id のノードから work_state を検証し復元内容を組む。"
+      "checkpoint-mark requires --investigation <id>: pass the id of the active Investigation you " +
+      "updated in step A (of the graphrag-checkpoint skill). work_state is verified from this node and the restore payload built from it."
     );
   }
   const vaultDir = flags.vault ?? process.env.GRAPHRAG_VAULT_DIR;
@@ -57,57 +57,57 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
   const node = (graph.nodes ?? []).find((n: any) => n.id === flags.investigation);
   if (!node) {
     throw new Error(
-      `checkpoint-mark: Investigation "${flags.investigation}" が vault に存在しない。` +
-      "A ステップで更新した Investigation の実 id を渡せ (typo か未 commit の可能性)。"
+      `checkpoint-mark: Investigation "${flags.investigation}" does not exist in the vault. ` +
+      "Pass the real id of the Investigation you updated in step A (of the graphrag-checkpoint skill) (possible typo or uncommitted)."
     );
   }
   if (node.type !== "Investigation") {
     throw new Error(
-      `checkpoint-mark: "${flags.investigation}" は type=${node.type} であり Investigation ではない。` +
-      "work_state を載せる active Investigation の id を渡せ。"
+      `checkpoint-mark: "${flags.investigation}" has type=${node.type}, not Investigation. ` +
+      "Pass the id of the active Investigation to carry work_state."
     );
   }
   if (node.state !== "active") {
     throw new Error(
-      `checkpoint-mark: Investigation "${flags.investigation}" は state=${node.state ?? "(無し)"} で active でない。` +
-      "復元対象は進行中 (state: active) の focus のみ。checkpoint する前に op:update で active にせよ。"
+      `checkpoint-mark: Investigation "${flags.investigation}" has state=${node.state ?? "(none)"}, not active. ` +
+      "Only an in-progress (state: active) focus can be restored. Set it active via op:update before checkpointing."
     );
   }
 
   const raw = typeof node.raw_content === "string" ? node.raw_content : "";
   if (raw.trim() === "") {
     throw new Error(
-      `checkpoint-mark: Investigation "${flags.investigation}" の raw_content が空。` +
-      "skill の work_state 書式 (current focus:/next:/blocker:/touched:) で作業状態を書け。"
+      `checkpoint-mark: Investigation "${flags.investigation}" has empty raw_content. ` +
+      "Write the work state in the skill's work_state format (current focus:/next:/blocker:/touched:)."
     );
   }
   // 大文字小文字は寛容 (/mi)。行頭マッチで「current focus:」「next:」の存在を確かめる。
   if (!/^current focus:/mi.test(raw)) {
     throw new Error(
-      `checkpoint-mark: raw_content に "current focus:" 行が無い。` +
-      "skill の work_state 書式 (current focus:/next:/blocker:/touched:) で書け。"
+      `checkpoint-mark: raw_content has no "current focus:" line. ` +
+      "Write it in the skill's work_state format (current focus:/next:/blocker:/touched:)."
     );
   }
   if (!/^next:/mi.test(raw)) {
     throw new Error(
-      `checkpoint-mark: raw_content に "next:" 行が無い。` +
-      "skill の work_state 書式 (current focus:/next:/blocker:/touched:) で書け。"
+      `checkpoint-mark: raw_content has no "next:" line. ` +
+      "Write it in the skill's work_state format (current focus:/next:/blocker:/touched:)."
     );
   }
 
   const firstAction = extractFirstAction(raw);
   if (!firstAction) {
     throw new Error(
-      `checkpoint-mark: next の最初の一手が空。next: の先頭に一意な最初の一手 ` +
-      "(file:line か実行コマンドまで具体化) を書け。復元はこの一手から再開する。"
+      `checkpoint-mark: next's first action is empty. Write a unique first action at the head of next: ` +
+      "(concrete down to file:line or a runnable command). Restore resumes from this action."
     );
   }
 
   const bytes = Buffer.byteLength(raw, "utf8");
   if (bytes > RAW_CONTENT_MAX_BYTES) {
     throw new Error(
-      `checkpoint-mark: raw_content が ${bytes} bytes で上限 ${RAW_CONTENT_MAX_BYTES} bytes (8KB) 超。` +
-      "深い生ログは ConversationChunk に置き、work_state は focus/next/blocker/touched の要約に絞れ。"
+      `checkpoint-mark: raw_content is ${bytes} bytes, over the ${RAW_CONTENT_MAX_BYTES} bytes (8KB) limit. ` +
+      "Put deep raw logs in a ConversationChunk and keep work_state to a focus/next/blocker/touched summary."
     );
   }
 
@@ -143,7 +143,7 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
     marked_at: entry.marked_at,
     ttl_minutes: CHECKPOINT_TTL_MS / 60_000,
     state_path: statePath,
-    note: "one-shot: /clear の復元フックが一度だけ消費する。compact では復元しない"
+    note: "one-shot: the /clear restore hook consumes it exactly once. compact does not restore"
   }, null, 2) + "\n");
 }
 

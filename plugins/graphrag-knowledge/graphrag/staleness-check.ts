@@ -122,8 +122,8 @@ export function stalenessCheck(
     candidate_count: candidates.length,
     candidates,
     note:
-      "読み取り専用の機械抽出。コミットが積まれた=陳腐化ではない — " +
-      "本当に前提が崩れたかの意味判断は人間起動の audit に委ねる。"
+      "Read-only mechanical extraction. Commits piling up != staleness — " +
+      "leave the semantic call of whether a premise actually broke to a human-initiated audit."
   };
 }
 

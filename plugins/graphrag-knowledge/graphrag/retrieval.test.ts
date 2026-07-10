@@ -414,7 +414,7 @@ test("searchGraph attaches state_note to demoted matches only", () => {
     edges: []
   };
   const byId = new Map(searchGraph(graph, "認証", { limit: 10 }).map((m) => [m.node.id, m]));
-  assert.match(byId.get("decision:s:old").state_note, /superseded — refines 逆引きで後継を確認/);
+  assert.match(byId.get("decision:s:old").state_note, /superseded — check refines reverse for successor/);
   assert.match(byId.get("investigation:s:done").state_note, /closed/);
   assert.match(byId.get("goal:s:gone").state_note, /abandoned/);
   assert.match(byId.get("goal:s:won").state_note, /achieved/);

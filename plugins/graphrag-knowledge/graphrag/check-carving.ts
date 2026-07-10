@@ -365,7 +365,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         findings.push({
           severity: "ERROR",
           rule: "carving-config-stale",
-          message: `carving.json に graph に存在しない path の免除エントリが ${stale.length}件 (stale-exemption)。免除は腐らせず掃除する: carving-allow remove --path <p> で削除するか path を直す。`,
+          message: `${stale.length} carving.json exemption(s) reference a path not in the graph (stale-exemption). Don't let exemptions rot — clean them up: carving-allow remove --path <p>, or fix the path.`,
           details: stale.slice(0, 30),
         });
       }
@@ -376,7 +376,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
           findings.push({
             severity: "WARN",
             rule: "config-duplicates-builtin",
-            message: `carving.json の免除 '${entry.path}' は builtin:${dup} と重複。config エントリは不要 (削除推奨)。`,
+            message: `carving.json exemption '${entry.path}' duplicates builtin:${dup}. The config entry is redundant (recommend removing it).`,
           });
         }
       }
@@ -418,7 +418,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "ERROR",
       rule: "summary-provisional",
-      message: `要約が機械テンプレのまま (summary_provisional): ${provisionalNodes.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各ノードの「構成要素サマリ」を「意味」(何をする/何のため/どの関心) に書き換え summary_provisional を外す。テンプレのままだと concern-hint が言語/階層クラスタに退化する。`,
+      message: `Summaries still machine templates (summary_provisional): ${provisionalNodes.length} [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]. Rewrite each node's "constituent summary" into "meaning" (what it does / what for / which concern) and clear summary_provisional. Left as templates, concern-hint degrades into language/layer clusters.`,
       details: provisionalNodes.slice(0, 30).map((n: any) => n.path || n.id),
     });
   }
@@ -426,7 +426,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "INFO",
       rule: "summary-provisional-exempt",
-      message: `summary_provisional だが免除対象 (role 閉集合 / builtin-orphan File): ${provisionalExempt.length}件。lockfile・generated・tool 設定類は embedding から除外済みで意味要約の強制対象外 (書き換えは任意)。`,
+      message: `summary_provisional but exempt (role closed-set / builtin-orphan File): ${provisionalExempt.length}. Lockfiles, generated, and tool config are already excluded from embeddings, so a meaningful summary is not required (rewrite optional).`,
       details: provisionalExempt.slice(0, 30).map((n: any) => n.path || n.id),
     });
   }
@@ -447,7 +447,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "ERROR",
       rule: "candidate-uncarved",
-      message: `carve 未完の候補が残存 (candidate:true): ${uncarved.length}件 [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]。各候補に「意味」の title/summary を与え、candidate:false にし、judgment_input を削除する (機械プレースホルダ命名のまま確定させない)。`,
+      message: `Uncarved candidates remain (candidate:true): ${uncarved.length} [${Object.entries(byType).map(([t, c]) => `${t}:${c}`).join(", ")}]. Give each candidate a meaningful title/summary, set candidate:false, and delete judgment_input (do not finalize with machine placeholder names).`,
       details: uncarved.slice(0, 30).map((n: any) => `${n.id} (${n.title})`),
     });
   }
@@ -461,7 +461,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "ERROR",
       rule: "placeholder-title",
-      message: `機械プレースホルダ命名が title に残存: ${placeholderTitled.length}件。"band N/M" / "(N files)" / "candidate cN" 等はメンバーの構成要素であって意味ではない。その層/塊/鉱脈が「何を担うか」を表す意味命名に置き換える (carving-rules.md「意味ある命名」)。`,
+      message: `Machine placeholder names remain in title: ${placeholderTitled.length}. "band N/M" / "(N files)" / "candidate cN" describe constituent members, not meaning. Replace with a meaningful name for what that layer/component/concern is responsible for (carving-rules.md "Meaningful naming required").`,
       details: placeholderTitled.slice(0, 30).map((n: any) => `${n.id} (${n.title})`),
     });
   }
@@ -475,7 +475,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "WARN",
         rule: "meaningful-slug",
-        message: `Layer slug が連番: ${slug} (意味語に rename 推奨。Component と同じく carving-rules.md「意味slug 必須」が適用される)`,
+        message: `Layer slug is sequential: ${slug} (rename to a meaningful term; carving-rules.md "Meaningful naming required" applies, same as Component)`,
       });
     }
   }
@@ -485,7 +485,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "WARN",
         rule: "meaningful-slug",
-        message: `Component slug が連番: ${slug}`,
+        message: `Component slug is sequential: ${slug}`,
       });
     }
   }
@@ -513,7 +513,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "layer-no-doc",
-      message: `role=documentation の File が Layer に所属している (${docInLayer.length}件)。Layer は実行依存ピラミッドの位置を表すため、doc は除外して Decision/OK の documented_by 出所として扱うのが筋。`,
+      message: `role=documentation File(s) belong to a Layer (${docInLayer.length}). A Layer marks position in the runtime-dependency pyramid, so exclude docs and treat them as documented_by sources for Decision/OK instead.`,
       details: docInLayer.slice(0, 20),
     });
   }
@@ -551,7 +551,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "ERROR",
       rule: "component-coverage",
-      message: `Component 未所属の実装ファイル: ${compOrphans.length}件 (allowed-orphan 自動判定後)。carving-rules.md 網羅性ゲート違反。`,
+      message: `Implementation files not in any Component: ${compOrphans.length} (after automatic allowed-orphan detection). Violates carving-rules.md coverage regression gate.`,
       details: compOrphans.slice(0, 30),
     });
   }
@@ -584,7 +584,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "layer-coverage",
-      message: `Layer 未所属の実装ファイル: ${layerOrphans.length}件 (allowed-orphan / documentation / generated 除外後)。`,
+      message: `Implementation files not in any Layer: ${layerOrphans.length} (after excluding allowed-orphan / documentation / generated).`,
       details: layerOrphans.slice(0, 30),
     });
   }
@@ -625,7 +625,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         findings.push({
           severity: "WARN",
           rule: "concern-component-duplicate",
-          message: `Concern と Component の Jaccard 重複が高い (実装ファイル基準): ${co.id.split(":").pop()} ∩ ${comp.id.split(":").pop()} = ${j.toFixed(2)} (≥${args.jaccardThreshold})。二重表現の疑い。Concern を取り下げるか別の動機に絞り込む。`,
+          message: `High Jaccard overlap between Concern and Component (implementation files): ${co.id.split(":").pop()} ∩ ${comp.id.split(":").pop()} = ${j.toFixed(2)} (≥${args.jaccardThreshold}). Suspected double representation. Withdraw the Concern or narrow it to a different motive.`,
         });
       }
     }
@@ -656,7 +656,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "WARN",
         rule: "concern-component-dominance",
-        message: `Concern '${co.id.split(":").pop()}' は ${(ratio * 100).toFixed(0)}% が単一 Component '${dominant[0].split(":").pop()}' に閉じる (>${(args.dominanceThreshold * 100).toFixed(0)}%)。横断条件は形式的成立だが実質単一寄り。分割または取り下げ検討。`,
+        message: `Concern '${co.id.split(":").pop()}' is ${(ratio * 100).toFixed(0)}% contained in a single Component '${dominant[0].split(":").pop()}' (>${(args.dominanceThreshold * 100).toFixed(0)}%). The crosscut condition holds formally but is effectively single-Component. Consider splitting or withdrawing.`,
       });
     }
   }
@@ -669,7 +669,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "INFO",
       rule: "indexer-signal-missing",
-      message: `cross_component_in_degree シグナルが全 File で空。indexer 再 index + signal-only mutation で File ノードへマージしないと Concern 候補の縦串検出に使えない。`,
+      message: `cross_component_in_degree signal is empty on all Files. Without re-indexing and merging it into File nodes via a signal-only mutation, it cannot drive vertical detection of Concern candidates.`,
     });
   }
 
@@ -692,7 +692,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "knowledge-impl-binding-missing",
-      message: `Decision / OperationalKnowledge / Risk のうち、実装ファイルへの sets_policy_for または documented_by 紐付けが無いものが ${noImplBinding.length} 件。knowhow / plans / design-decisions doc 経由しか紐付かない状態だと「この決定/知見がどのコードを動かしているか」が graph 上から辿れない。pnpm graph:edge:suggest-policy で候補を機械抽出して mutation 検討。`,
+      message: `${noImplBinding.length} Decision / OperationalKnowledge / Risk node(s) have no sets_policy_for or documented_by binding to an implementation file. When linked only via knowhow / plans / design-decisions docs, "which code this decision/insight drives" is not traceable in the graph. Extract candidates with pnpm graph:edge:suggest-policy and consider a mutation.`,
       details: noImplBinding.slice(0, 30)
     });
   }
@@ -711,14 +711,14 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       (e: any) => e.type === "sets_policy_for" || e.type === "risks_in"
     ).length;
     if (policyIn >= POLICY_HUB_THRESHOLD) {
-      policyHubs.push(`${id} ← sets_policy_for/risks_in ${policyIn}本`);
+      policyHubs.push(`${id} ← sets_policy_for/risks_in ${policyIn} edge(s)`);
     }
   }
   if (policyHubs.length > 0) {
     findings.push({
       severity: "WARN",
       rule: "crosscut-policy-hub",
-      message: `横断ノードに方針/リスクエッジが ${POLICY_HUB_THRESHOLD} 本以上収束 (${policyHubs.length}件)。雑な「全体」宛 (ミニ System 化) の疑い。各エッジが「正直でいられる一番低い高度」か見直し、より狭い宛先 (File / 別 Component) に降ろせるものは降ろす。`,
+      message: `Policy/risk edges converge on crosscut nodes, ${POLICY_HUB_THRESHOLD}+ each (${policyHubs.length}). Suspected sloppy "whole-system" targeting (mini-System). Review whether each edge sits at "the lowest altitude it can honestly sit at", and push those that can go to a narrower target (File / another Component) down.`,
       details: policyHubs.slice(0, 20),
     });
   }
@@ -735,7 +735,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       findings.push({
         severity: "INFO",
         rule: "vector-index-unavailable",
-        message: `vector-index を読み込めなかった (path: ${args.vectorPath})。node-duplicate-suspect ルールは skip。`
+        message: `Could not read vector-index (path: ${args.vectorPath}). Skipping the node-duplicate-suspect rule.`
       });
     }
     if (vector) {
@@ -774,7 +774,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         findings.push({
           severity: "WARN",
           rule: "node-duplicate-suspect",
-          message: `embedding 距離で表記揺れ重複疑いのノードペアが ${duplicates.length} 件 (similarity >= ${args.duplicateThreshold})。worktree マージ後の同概念別命名 (例: 'auto-update' vs 'auto-updater') を検出。LLM 確認の上、片方削除 + edge 張り替えで統合。`,
+          message: `${duplicates.length} node pair(s) suspected of notation-variance duplication by embedding distance (similarity >= ${args.duplicateThreshold}). Detects same-concept different-naming after a worktree merge (e.g. 'auto-update' vs 'auto-updater'). After LLM confirmation, merge by deleting one and rewiring its edges.`,
           details: duplicates.slice(0, 20)
         });
       }
@@ -783,7 +783,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "INFO",
       rule: "vector-index-not-provided",
-      message: `--vector-index 未指定 (or GRAPHRAG_VECTOR_INDEX_PATH 未設定)。node-duplicate-suspect ルールは skip。表記揺れ重複検出には vector-index を渡す。`
+      message: `--vector-index not given (or GRAPHRAG_VECTOR_INDEX_PATH unset). Skipping the node-duplicate-suspect rule. Pass a vector-index to detect notation-variance duplicates.`
     });
   }
 
@@ -808,7 +808,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "multi-concern-membership",
-      message: `1 ファイルが ≧3 Concern に所属: ${tripleConcerns.length}件。単一動機原則から、各 Concern が本当に別動機かレビュー必要。`,
+      message: `Files belonging to ≥3 Concerns: ${tripleConcerns.length}. By the single-motive principle, review whether each Concern is truly a distinct motive.`,
       details: tripleConcerns.slice(0, 20),
     });
   }
@@ -840,7 +840,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "exemption-ratio-high",
-      message: `allowed-orphan 免除が実装 File の ${(exemptRatio * 100).toFixed(1)}% (${patternExemptions.length}/${implFileTotal}, >15%)。免除で網羅性ゲートが空洞化していないか棚卸しし、Component に所属させられるものは所属させる。`,
+      message: `allowed-orphan exemptions cover ${(exemptRatio * 100).toFixed(1)}% of implementation Files (${patternExemptions.length}/${implFileTotal}, >15%). Take stock of whether exemptions are hollowing out the coverage gate, and put whatever can belong to a Component into one.`,
     });
   }
 
@@ -853,14 +853,14 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "knowledge-floor-goal-missing",
-      message: `Goal が 0 件。design-review の scope-creep / roadmap 観点が無効な状態。conceptual-pass の知識軸シーディングを実施せよ。`,
+      message: `0 Goals. The design-review scope-creep / roadmap lens is disabled. Run knowledge-axis seeding in the conceptual pass.`,
     });
   }
   if (constraintCount === 0) {
     findings.push({
       severity: "WARN",
       rule: "knowledge-floor-constraint-missing",
-      message: `Constraint が 0 件。design-review の scope-creep / roadmap 観点が無効な状態。conceptual-pass の知識軸シーディングを実施せよ。`,
+      message: `0 Constraints. The design-review scope-creep / roadmap lens is disabled. Run knowledge-axis seeding in the conceptual pass.`,
     });
   }
 
@@ -906,7 +906,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "superseded-premise",
-      message: `現役ノードが終端 state (superseded/abandoned/closed) のノードを前提にしている: ${deadPremises.length}件。前提が死んでいる。refines 逆引きで後継を確認し、前提を後継に張り替えるか依存側の見直しを検討。`,
+      message: `Live nodes depend on premises in a terminal state (superseded/abandoned/closed): ${deadPremises.length}. The premise is dead. Find the successor via reverse refines and either rewire the premise to it or reconsider the dependent side.`,
       details: deadPremises.slice(0, 30),
     });
   }
@@ -928,7 +928,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "superseded-no-successor",
-      message: `state:superseded なのに後継からの refines が 0 本のノードが ${supersededNoSuccessor.length} 件。「何に置き換えられたか」が辿れない。後継ノードから refines エッジを張るか、後継が無いなら state の見直しを検討。`,
+      message: `${supersededNoSuccessor.length} node(s) are state:superseded but have 0 incoming refines from a successor. "What replaced it" is not traceable. Add a refines edge from the successor node, or reconsider the state if there is no successor.`,
       details: supersededNoSuccessor.slice(0, 30),
     });
   }
@@ -950,7 +950,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "constraint-binding-missing",
-      message: `constrains エッジが 0 本の Constraint が ${constraintUnbound.length} 件。bind 無し Constraint はレビューの逆引きに出ない (ACK 帯の盲点)。constrains で宛先 Decision / File / OperationalKnowledge を明示する。`,
+      message: `${constraintUnbound.length} Constraint(s) have 0 constrains edges. An unbound Constraint does not surface in review's reverse lookup (a blind spot in the ACK band). Name the target Decision / File / OperationalKnowledge via constrains.`,
       details: constraintUnbound.slice(0, 30),
     });
   }
@@ -964,7 +964,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "temporary-relation-remaining",
-      message: `temporary_relation_candidate エッジが ${tempEdges.length} 本残存。仮マーカーのまま放置すると型付けされた関係が欠落する。各ペアの中身を確認し、正式なエッジ型 (refines / has_premise / supersedes 等) に昇格するか、関係が無ければ削除する。`,
+      message: `${tempEdges.length} temporary_relation_candidate edge(s) remain. Left as provisional markers, typed relations go missing. Inspect each pair and promote to a proper edge type (refines / has_premise / supersedes, etc.), or delete if there is no relation.`,
       details: tempEdges.slice(0, 20).map((e: any) => `${e.from} → ${e.to}`),
     });
   }
@@ -989,7 +989,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     findings.push({
       severity: "WARN",
       rule: "knowledge-description-missing",
-      message: `description 欠落の知識ノードが ${descMissingNodes.length} 件 (Decision / RejectedOption / Constraint / Goal / Risk / OperationalKnowledge)。summary だけでは embedding の意味担体が薄く、ask の精度に直結する。各ノードに背景・根拠・具体例を description に記述する。`,
+      message: `${descMissingNodes.length} knowledge node(s) missing description (Decision / RejectedOption / Constraint / Goal / Risk / OperationalKnowledge). With only summary, the embedding carries little meaning, which directly hurts ask precision. Write background, rationale, and concrete examples into each node's description.`,
       details: descMissingNodes.slice(0, 30),
     });
   }
@@ -1020,10 +1020,10 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     console.log(`nodes: ${graph.nodes.length} | files: ${files.length} | components: ${components.length} | concerns: ${concerns.length} | layers: ${layers.length}`);
     console.log();
     // 免除会計 (常時印字): 免除がゼロでも「ゼロである」ことを見せる
-    console.log(`--- 免除会計 (allowed-orphan accounting) ---`);
-    console.log(`role 別 File 数: ${Object.entries(roleCounts).map(([r, c]) => `${r}:${c}`).join(", ") || "(File なし)"}`);
-    console.log(`免除: ${exemptions.length}件 (うち config 由来 ${configExemptCount}件) | 実装 File ${implFileTotal}件に占める builtin/config 免除比率: ${(exemptRatio * 100).toFixed(1)}%`);
-    console.log(`carving.json: ${loadedConfig.exists ? `${configPath} (${configOrphans.size} エントリ)` : "なし"}`);
+    console.log(`--- allowed-orphan accounting ---`);
+    console.log(`Files by role: ${Object.entries(roleCounts).map(([r, c]) => `${r}:${c}`).join(", ") || "(no files)"}`);
+    console.log(`Exemptions: ${exemptions.length} (${configExemptCount} from config) | builtin/config exemption ratio over ${implFileTotal} implementation Files: ${(exemptRatio * 100).toFixed(1)}%`);
+    console.log(`carving.json: ${loadedConfig.exists ? `${configPath} (${configOrphans.size} entries)` : "none"}`);
     for (const e of exemptions.slice(0, 20)) console.log(`  - ${e.path} (${e.basis})`);
     if (exemptions.length > 20) console.log(`  ... and ${exemptions.length - 20} more`);
     console.log();

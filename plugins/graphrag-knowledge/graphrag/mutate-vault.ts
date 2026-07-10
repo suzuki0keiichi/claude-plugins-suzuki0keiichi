@@ -697,8 +697,8 @@ export async function applyMutationToVault(args: {
       precheck: {
         recent_ask_hits: recentHitIds.length,
         note:
-          "ask-trail にこの state dir の直近 ask ヒットが無い。SKILL.md の ask pre-check " +
-          "(作成前に既存ノードを ask で確認) が実施されたか確認を推奨 (advisory only・reject しない)。",
+          "No recent ask hit for this state dir in the ask-trail. Recommend confirming SKILL.md's ask pre-check " +
+          "(ask for existing nodes before creating) was run (advisory only, never rejects).",
       },
     };
   }

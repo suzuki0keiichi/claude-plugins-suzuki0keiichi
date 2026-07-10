@@ -127,8 +127,8 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
     ? {
         legacy_stateless_investigations: stateless.length,
         legacy_note:
-          `active な Investigation は 0 件だが、state 無しの Investigation が ${stateless.length} 件ある。` +
-          "state 無しは現役/終結を判別できない旧データ。現役のものに state:\"active\"、終わったものに state:\"closed\" を付与せよ。"
+          `0 active Investigations, but ${stateless.length} stateless Investigation(s) exist. ` +
+          "Stateless is legacy data with no live/settled distinction. Set state:\"active\" on live ones, state:\"closed\" on finished ones."
       }
     : {};
 
@@ -138,8 +138,8 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
   const stocktakeNotice = stateless.length > 0 || active.length >= 3
     ? {
         stocktake_hint:
-          `state無し Investigation が ${stateless.length} 件 / active が ${active.length} 件。` +
-          "$CLI stocktake で棚卸し候補を確認できる"
+          `${stateless.length} stateless Investigation(s) / ${active.length} active. ` +
+          "Run $CLI stocktake to review stocktake candidates"
       }
     : {};
 

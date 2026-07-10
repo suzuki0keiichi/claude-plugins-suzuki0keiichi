@@ -74,7 +74,7 @@ test("新鮮な active は suspect でない", () => {
   ]);
   assert.equal(r.suspects.length, 0);
   assert.equal(r.counts.active, 1);
-  assert.match(r.next_action_hint, /健全/);
+  assert.match(r.next_action_hint, /healthy/);
 });
 
 test("generated_at 欠損の active は stale-active + no-generated-at", () => {

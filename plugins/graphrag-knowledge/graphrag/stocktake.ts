@@ -123,8 +123,8 @@ export function stocktake(
     suspects,
     next_action_hint:
       suspects.length > 0
-        ? "graphrag-stocktake skill で裁定せよ (summary の自己申告よりコード/テスト/実績の裏取りが勝つ。delete はしない — closed にするだけ)"
-        : "Investigation ライフサイクルは健全。棚卸し不要"
+        ? "Adjudicate with the graphrag-stocktake skill (corroboration against code/tests/track record beats the summary's self-report. never delete — only set closed)"
+        : "Investigation lifecycle is healthy. No stocktake needed"
   };
 }
 

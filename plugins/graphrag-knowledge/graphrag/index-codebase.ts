@@ -348,7 +348,7 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
       judgment_input: {
         definition: "files tightly coupled by import dependency (graph community)",
         member_files: sampleRels.slice(0, 60),
-        instruction: "この結合クラスタが表す機能境界を命名し title/summary を与える。1クラスタ=1機能領域でなければ分割/却下も可。",
+        instruction: "Name the functional boundary this coupling cluster represents and give it a title/summary. If one cluster is not one functional area, splitting/rejecting is allowed.",
         expected_output_schema: { title: "string", summary: "string", accept: "boolean" }
       }
     });
@@ -409,7 +409,7 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
       judgment_input: {
         definition: "files at the same depth band in the import dependency DAG (0 = most depended-upon foundation, higher = entry/presentation)",
         member_files: ids.map((i) => relById.get(i)).filter(Boolean).slice(0, 60),
-        instruction: "この依存深さ帯が示すアーキ層を命名し title/summary を与える。",
+        instruction: "Name the architectural layer this dependency-depth band represents and give it a title/summary.",
         expected_output_schema: { title: "string", summary: "string" }
       }
     });
@@ -581,7 +581,7 @@ export function resolvePreviousGraph(args: { root: string; previous?: string; va
       const fileNodes = Array.isArray(g?.nodes) ? g.nodes.filter((n: any) => n.type === "File") : [];
       // system slug が一致する File を1つも持たない vault は別 system のもの → 採用しない。
       if (sysPrefix && !fileNodes.some((n: any) => typeof n.id === "string" && n.id.startsWith(sysPrefix))) {
-        console.error(`[index] vault ${vaultDir} は system '${args.systemName}' の File を持たない — スキップ`);
+        console.error(`[index] vault ${vaultDir} has no File for system '${args.systemName}' — skipping`);
         continue;
       }
       if (fileNodes.length > 0) {

@@ -362,8 +362,8 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   ).length;
   if (provisionalCount > 0) {
     console.error(
-      `[warn] 要約がテンプレのまま (summary_provisional): ${provisionalCount}件 (File / Component / Layer 等) を vault に書き出す。` +
-      `意味の要約に書き換えて summary_provisional を外すまで、検索・concern-hint の品質は落ちたまま。`
+      `[warn] summaries still template-only (summary_provisional): writing ${provisionalCount} node(s) (File / Component / Layer, etc.) to the vault. ` +
+      `Until you rewrite them into meaningful summaries and clear summary_provisional, search / concern-hint quality stays degraded.`
     );
   }
   const files = buildVaultFiles(graph);
@@ -382,11 +382,11 @@ export function main(argv: string[] = process.argv.slice(2)): void {
           `Refusing to build vault: ${outDir} already contains ${lost.length} node(s) absent from the source graph.`
         );
         console.error(
-          `これらは索引 (graph.json) に無いため vault-build の全消しで失われる: ${JSON.stringify(byType)}`
+          `These are absent from the index (graph.json) and will be lost by vault-build's full wipe: ${JSON.stringify(byType)}`
         );
         console.error(
-          "vault-build は空 vault の初回構築用。知識が蓄積された vault を再索引するなら、既存 vault を取り込んでから" +
-          " merge する mutation/reconcile フローを使うこと (通常の書込は commit-mutation が graph.json を介さず直接 vault に書く)。"
+          "vault-build is for the initial build of an empty vault. To re-index a vault with accumulated knowledge, import the existing vault first" +
+          " and use a merge mutation/reconcile flow (normal writes go through commit-mutation, which writes directly to the vault without graph.json)."
         );
       }
     } catch (err) {
@@ -397,11 +397,11 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         `(${err instanceof Error ? err.message : String(err)}).`
       );
       console.error(
-        "vault-build はこのディレクトリを全消しして作り直すが、中身を検証できないため上書きで失われる知識が無いと保証できない。"
+        "vault-build wipes this directory and rebuilds it, but since its contents cannot be verified, it cannot guarantee that overwriting loses no knowledge."
       );
     }
     if (blocked) {
-      console.error("どうしても全消しして作り直すなら --force を付けて再実行する。");
+      console.error("If you really must wipe and rebuild, re-run with --force.");
       process.exit(1);
     }
   }

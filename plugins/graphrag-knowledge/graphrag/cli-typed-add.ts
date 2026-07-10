@@ -69,8 +69,8 @@ function assertEdgeAllowed(edgeType: EdgeType, fromType: NodeType, toId: string,
     }
     const allowedStr = [...allowedTos].join(", ") || "(none)";
     throw new Error(
-      `${flag}: "${toId}" は ${edgeType} (${fromType} -> ?) の宛先に不正です ` +
-        `(推定型: ${toType ?? "unknown"}、許容: ${allowedStr})`
+      `${flag}: "${toId}" is not a valid target for ${edgeType} (${fromType} -> ?) ` +
+        `(inferred type: ${toType ?? "unknown"}, allowed: ${allowedStr})`
     );
   }
 }
@@ -196,8 +196,8 @@ function assertIdSegment(value: string, flag: string): void {
     throw new Error(
       `${flag}: "${value}" is invalid. ` +
         `slug must be meaning-bearing kebab-case: lowercase letters/digits plus . _ - ` +
-        `(pattern ${ID_SEGMENT_RE}). ":" や空白・大文字は id の 3 セグメント規約 ` +
-        `(<type>:<system>:<slug>) を壊すため使えません。`
+        `(pattern ${ID_SEGMENT_RE}). ":", whitespace, and uppercase break the id 3-segment convention ` +
+        `(<type>:<system>:<slug>) and cannot be used.`
     );
   }
 }
@@ -250,8 +250,8 @@ export function buildAddDecisionPlan(args: AddDecisionArgs) {
     assertEdgeAllowed("led_to", "Investigation", id, "--from-investigation");
     if (nodeTypeFromId(args.fromInvestigation) !== "Investigation") {
       throw new Error(
-        `--from-investigation: "${args.fromInvestigation}" は Investigation ではありません ` +
-          `(led_to は Investigation -> Decision、推定型: ${nodeTypeFromId(args.fromInvestigation) ?? "unknown"})`
+        `--from-investigation: "${args.fromInvestigation}" is not an Investigation ` +
+          `(led_to is Investigation -> Decision, inferred type: ${nodeTypeFromId(args.fromInvestigation) ?? "unknown"})`
       );
     }
     edges.push(makeEdge("led_to", args.fromInvestigation, id));
@@ -297,7 +297,7 @@ export function buildAddRiskPlan(args: AddRiskArgs) {
 export function buildAddConstraintPlan(args: AddConstraintArgs) {
   const constrains = args.constrains ?? [];
   if (constrains.length < 1) {
-    throw new Error("buildAddConstraintPlan: --constrains is required (≥1。孤児 Constraint 防止)");
+    throw new Error("buildAddConstraintPlan: --constrains is required (≥1; prevents orphan Constraint)");
   }
   const id = nodeId("constraint", args.system, args.slug);
   // Constraint は documented_by 不可・evidence 不要 (契約)。エッジは constrains のみ。
@@ -366,7 +366,7 @@ export function buildAddInvestigationPlan(args: AddInvestigationArgs) {
 
 export function buildAddRejectedOptionPlan(args: AddRejectedOptionArgs) {
   if (!args.rejectedInFavorOf) {
-    throw new Error("buildAddRejectedOptionPlan: --rejected-in-favor-of is required (孤児 RejectedOption 防止)");
+    throw new Error("buildAddRejectedOptionPlan: --rejected-in-favor-of is required (prevents orphan RejectedOption)");
   }
   const id = nodeId("rejectedoption", args.system, args.slug);
   // schema 上 'Decision が RejectedOption を選ばなかった' を表すエッジは

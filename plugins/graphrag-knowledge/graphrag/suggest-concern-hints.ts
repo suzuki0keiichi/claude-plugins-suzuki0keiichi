@@ -111,15 +111,15 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   const provisionalFiles = allFiles.filter((n: any) => n.summary_provisional === true);
   if (provisionalFiles.length > 0 && !args.allowProvisional) {
     console.error(
-      `Refusing to suggest: ${provisionalFiles.length}/${allFiles.length} File ノードの要約が ` +
-      `機械テンプレ (summary_provisional) のままです。`
+      `Refusing to suggest: ${provisionalFiles.length}/${allFiles.length} File node summaries are ` +
+      `still machine templates (summary_provisional).`
     );
     console.error(
-      "テンプレ要約だと embedding が言語・階層語で固まり、縦串 (Concern) 候補が無意味になります。"
+      "Template summaries make embeddings cluster on language/layer terms, rendering vertical (Concern) candidates meaningless."
     );
     console.error(
-      "各 File を読んで本物の要約に書き換え summary_provisional を外してから再実行してください " +
-      "(承知の上で走らせるなら --allow-provisional)。"
+      "Read each File, rewrite it to a real summary, and clear summary_provisional before re-running " +
+      "(pass --allow-provisional to run anyway)."
     );
     process.exit(1);
   }

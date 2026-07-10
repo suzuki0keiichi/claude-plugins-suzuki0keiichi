@@ -247,7 +247,7 @@ export function suggestRelationsForNodes(args: {
 }): RelationPair[] {
   const topN = args.topN ?? 50;
   const note =
-    "refines / has_premise / supersede (方針転換レシピ) のどれかは LLM が中身を読んで判断";
+    "refines / has_premise / supersede (policy-reversal recipe) — LLM reads the contents to decide which";
   const relationTypeSet = new Set<string>(RELATION_NODE_TYPES);
 
   // 型ごとにノードをまとめ、同型内の総当たり (i<j) でペアを作る。
@@ -326,7 +326,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       band: [RELATION_BAND_LOW, RELATION_BAND_HIGH],
       top_n: args.topN,
       // 0.92 以上は重複疑いなので carving-check #10 (node-duplicate-suspect) の領域。ここには出さない。
-      note: `cosine [${RELATION_BAND_LOW}, ${RELATION_BAND_HIGH}) の同型知識ペアのみ。${RELATION_BAND_HIGH} 以上は重複疑い (carving-check #10) の領域で、ここには含めない。`,
+      note: `Same-type knowledge pairs in cosine [${RELATION_BAND_LOW}, ${RELATION_BAND_HIGH}) only. ${RELATION_BAND_HIGH} and above is the duplicate-suspect zone (carving-check #10), excluded here.`,
       pairs,
       pair_count: pairs.length,
     };

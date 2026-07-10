@@ -10,7 +10,7 @@ Common principle: null / missing fields are not emitted (no filler like `path: n
 
 ## `next_action_hint`
 
-Computed from the **final stage**'s result (if brief sufficed, brief's; if it dug down to evidence, evidence's confidence/count). Wording usable as-is as a user-facing explanation.
+Computed from the **final stage**'s result (if brief sufficed, brief's; if it dug down to evidence, evidence's confidence/count). Wording ready to relay to the user as the explanation (translate into the conversation language when relaying).
 
 ## `stages[*].output.query.match_confidence`
 
@@ -32,7 +32,7 @@ The same relative judgment as world_hints, applied to the local vault's matches 
 
 ## a match's `state` / `state_note`
 
-Nodes whose state is superseded/closed/abandoned/achieved are penalized to 0.6x their ranking score (not excluded = the no-hard-reject principle). A penalized match gets a `state_note` (e.g. `"superseded — refines 逆引きで後継を確認"`), so follow the note and prefer the successor/live node.
+Nodes whose state is superseded/closed/abandoned/achieved are penalized to 0.6x their ranking score (not excluded = the no-hard-reject principle). A penalized match gets a `state_note` (e.g. `"superseded — check refines reverse for successor"`), so follow the note and prefer the successor/live node.
 
 ## a match's `relations` (brief)
 

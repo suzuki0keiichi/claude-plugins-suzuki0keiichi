@@ -241,7 +241,7 @@ export function introHint(profileMtime: string | null, now: string): string | nu
   const elapsedMs = nowMs - mtimeMs;
   if (elapsedMs <= INTRO_STALE_DAYS * 24 * 60 * 60 * 1000) return null;
   const days = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
-  return `VAULT.md が ${days}日前から未更新。蓄積に対して自己紹介が古い可能性`;
+  return `VAULT.md unchanged for ${days} days. Self-introduction may be stale relative to the accumulation`;
 }
 
 // ヒント出力に載せる自己紹介本文の上限。VAULT.md は数行が想定だが、長文でも
@@ -549,9 +549,9 @@ export async function buildWorldHints(
     .filter((h) => h.confidence !== "none");
 
   const standoutNotes: Record<WorldStandout, string> = {
-    single: "候補 vault が 1 つだけのため相対判定なし (confidence は絶対値のみ)。",
-    clear: "top1 が他の候補から突出している。問いがこの vault の領域に固有である可能性が高い。",
-    crowd: "候補が横並びで突出なし。どの vault も同程度にしか近くない (本当に複数に関係するか、どこにも無いかのどちらか)。"
+    single: "Only one candidate vault, so no relative judgment (confidence is absolute only).",
+    clear: "top1 stands out from the other candidates. The query is likely specific to this vault's domain.",
+    crowd: "Candidates are neck and neck with no standout. Every vault is only about equally close (either it genuinely spans several, or it belongs to none)."
   };
 
   return {
@@ -569,7 +569,7 @@ export async function buildWorldHints(
     standout,
     standout_note: standoutNotes[standout],
     hints,
-    note: "ヒントのみ。別 vault に実際に掛ける (ask_command を実行する) かどうかは呼び手の判断。"
+    note: "Hints only. Whether to actually run against another vault (execute ask_command) is the caller's call."
   };
 }
 

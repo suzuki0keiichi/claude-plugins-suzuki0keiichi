@@ -135,8 +135,8 @@ export function extractRevertCandidates(commits: GitCommit[]): RevertCandidate[]
     title: `差し戻された変更: ${original}`,
     commits: list,
     note:
-      "revert コミット由来の候補。差し戻された変更が「却下されたアプローチ」なのか" +
-      "単なる手戻り (再適用済み等) なのかは、履歴と diff を見て判断してからノード化する。"
+      "Candidate from a revert commit. Whether the reverted change is a \"rejected approach\" or " +
+      "just churn (already re-applied, etc.) — decide from history and diff before making it a node."
   }));
 }
 
@@ -197,8 +197,8 @@ export function harvestHistory(
       candidates: markers
     },
     note:
-      "決定論抽出のみ・書き込みなし。candidate をノード化するかは LLM が判断して typed-add する " +
-      "(重複確認を先に)。"
+      "Deterministic extraction only, no writes. Whether to turn a candidate into a node is the LLM's call via typed-add " +
+      "(dedup-check first)."
   };
 }
 
