@@ -187,7 +187,7 @@ Discipline:
 ```
 
 - If the Investigation itself does not exist on the first run, make the first node `op:create` + `type: "Investigation"` + `state: "active"` + `title`/`summary`.
-- The rescue is not necessarily one Decision and one Risk. **Sweep once per type** (Decision/RejectedOption/Risk/OperationalKnowledge, plus +Assumption/Agreement for project) and list **only the ones that do not exist** per the `ask` duplicate check. Always attach `derived_from`→Investigation to each knowledge node.
+- The rescue is not necessarily one Decision and one Risk. **Sweep once per type** (Decision/RejectedOption/Risk/OperationalKnowledge, plus +Assumption/Agreement for project) and list **only the ones that do not exist** per the duplicate check — checkpoint's lightweight rule applies here: upfront `ask` only for candidates likely to predate the session, otherwise rely on the write-time duplicate gate (graphrag-checkpoint §B). Always attach `derived_from`→Investigation to each knowledge node.
 - For flush only (zero rescue), it holds with nodes = the Investigation (+ConversationChunk) only, and edges = `discussed_in` only.
 
 ---

@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.9.0
+version: 4.9.1
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -45,7 +45,7 @@ This skill is the read/write foundation. Three derived skills review changes and
 - **DO NOT translate "read/trace the graph" into grep / glob / read.** Do not read vault `.md` files directly — use `ask` instead. The CLI auto-discovers the vault (§Setup). `ask` works without knowing the vault path; if not found, it hard-errors. Falling back to grep is a design violation.
 - **DO NOT grep / read `graphrag/*.ts` source code.** Everything the LLM needs is in this file and `$REF/`. Do not re-derive types from `schema.ts` (§Schema quick-ref is enough). Do not re-derive CLI invocation (`$CLI <verb>` is enough).
 - **DO NOT edit `vault/` directly.** The vault is the source of truth, but write through `commit-mutation` / `add-*` only (CLI guarantees lock / OCC / atomic publish / git commit).
-- **DO NOT create duplicate nodes.** Always check existing nodes via `ask` before creating. Prefer `skip` / `update` / `supersede` / `review` over new creation. The write-time duplicate gate (`duplicate_check`, §Mutation Plan) catches suspects as a last resort, but **do not skip the `ask` pre-check just because the gate exists**. To acknowledge a suspect as intentionally distinct, use `--dup-ack <id[,id...]>`.
+- **DO NOT create duplicate nodes.** Always check existing nodes via `ask` before creating. Prefer `skip` / `update` / `supersede` / `review` over new creation. The write-time duplicate gate (`duplicate_check`, §Mutation Plan) catches suspects as a last resort, but **do not skip the `ask` pre-check just because the gate exists** (sole scoped exception: the checkpoint rescue pass — graphrag-checkpoint §B). To acknowledge a suspect as intentionally distinct, use `--dup-ack <id[,id...]>`.
 - **DO NOT ignore the vault the CLI reports writing to.** Every write verb prints `[graphrag] vault: <path> (source: <layer>)` to stderr and returns `vault_dir` / `vault_dir_source` in its JSON — this printed line is the primary wrong-vault tripwire when cwd changes (worktree, subdirectory, different branch checkout). Verify it on the first write; `inspect` remains available for pre-flight checks. If the vault is unexpected, use `--vault <path>` or set `GRAPHRAG_VAULT_DIR` in `.graphrag/.env`.
 - **DO NOT `git merge` vault files.** Git merge cannot detect semantic duplicates, missing lineage, or contradictory edges — it produces a broken vault. Use `branch-merge` → judgment packets → `commit-mutation` for semantic-unit application (§Parallel work, `$REF/branch-merge.md`).
 - **DO NOT pollute the graph with session-local scratch** (§What to persist).
@@ -83,6 +83,7 @@ Read files surfaced by GraphRAG first; broaden only when `ask` results are insuf
 Search combines lexical + semantic (§Invariants #3), so **query vocabulary determines the hit surface**.
 
 - **Include both natural-language and code-language terms.** Knowledge is distilled in natural language (e.g. "duplicate detection") while code uses English identifiers (e.g. `duplicate_check`). Using only one narrows the surface. Even in a casual Japanese query, adding 1–2 code terms helps both channels (e.g.: `ask "重複ノードを弾く duplicate_check の仕組み"`).
+- **Query formula**: `<topic/phenomenon in natural language> + <1–2 code identifiers>` (+ a node-type word such as Decision / Risk / 制約 when hunting a specific type). Compose one good query from this formula instead of firing several narrow ones.
 - **Use `--gist "<expected one-liner>"` for multi-query.** When the question alone is hard to hit, add the expected answer as `--gist` — it embeds question and gist separately and matches against both.
   - Example: `ask "なぜ vault を単一正本にした" --gist "graph.json は索引器の中間表現であって正本ではない"`
 - **`--graph-rerank on|off`** (default off; hub-biased net-negative; consider on only for balanced island-structure graphs).
@@ -238,7 +239,7 @@ Only applies when you've retrieved the relevant node via GraphRAG AND read the c
 
 ## Reporting format (user-facing)
 
-Report graph changes in natural language (what knowledge changed / what relationships were connected / why it was kept / verification status). Do not dump node IDs / edge IDs / raw `commit-mutation` JSON output to the user — demote IDs to parenthetical references. Reports must connect to "so, what do we do next?"
+Report graph changes in natural language, **in the conversation language** (what knowledge changed / what relationships were connected / why it was kept / verification status). Do not dump node IDs / edge IDs / raw `commit-mutation` JSON output to the user — demote IDs to parenthetical references. Reports must connect to "so, what do we do next?"
 
 ## Reference links
 

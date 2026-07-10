@@ -1,6 +1,6 @@
 ---
 name: graphrag-design-review
-version: 1.2.0
+version: 1.2.1
 description: 設計案や approach を、コードを書く前にグラフ（プロジェクトの永続知識）と照合してレビューする AI 設計レビュー。「実装前にこの方針でいい?」「この設計どう思う」「この approach を見て」と、実装に入る前の設計・計画の是非や、過去判断・制約との整合・roadmap との親和性を確認したい時に使う。実装後の diff レビューは graphrag-pr-review、人間向けの説明資料は graphrag-review-doc。スラッシュ: /graphrag-knowledge:graphrag-design-review
 ---
 
@@ -24,7 +24,7 @@ The design proposal / approach / plan under review. If `$ARGUMENTS` carries a de
    node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts ask "<proposal area> の Decision / Constraint / Goal / Risk / 却下案" --limit 8
    ```
    - Include in the query both the proposal's domain words (natural language) and concrete code identifiers the proposal touches (file / component / function names) — method §1 query discipline. A single-register query narrows the hit surface.
-   - Do not fire repeatedly. If needed, deep-dive a specific node's neighborhood with `evidence <node-id>` just once or twice.
+   - Do not fire repeatedly. If needed, deep-dive a specific node's neighborhood with `evidence --request "<node title or path>"` just once or twice (evidence cannot be looked up by id — method §1; confirm the target via direct_evidence's id/type, then read graph_context).
 2. **Perspectives to check against** (high-altitude perspectives that matter before implementation):
    - **Implicit breach of an existing Decision**: is the proposal silently breaking the intent of a settled decision in that area, without saying so?
    - **Rejected-option reintroduction**: is the proposal the same approach as a past RejectedOption (= a past guard; if reconsidering, demand "why is it different this time")?

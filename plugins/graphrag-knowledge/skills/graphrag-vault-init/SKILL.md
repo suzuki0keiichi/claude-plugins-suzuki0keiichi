@@ -1,6 +1,6 @@
 ---
 name: graphrag-vault-init
-version: 1.1.0
+version: 1.1.1
 description: vault (ナレッジグラフ) の初期構築。system vault (コード/プロダクト知識) と project vault (時限イニシアチブ) の両方に対応。「vault を作りたい」「初期構築したい」「新しいプロジェクトを管理したい」「リポジトリを索引したい」で発火。
 ---
 
@@ -60,6 +60,8 @@ Before creating a project vault, ensure each system vault it will reference alre
 mkdir -p <system-root>/vault/Deliverable
 # Write VAULT.md + Deliverable node files (title + summary only, no edges needed yet)
 ```
+
+**Bootstrap exception**: hand-writing VAULT.md and stub node files is sanctioned ONLY at this step — an empty vault has no writer to go through yet. From the vault's first real write onward, the parent skill's "DO NOT edit `vault/` directly" rule applies with no exceptions (all writes via `add-*` / `commit-mutation`).
 
 ### Step 1: Create Directory Structure
 

@@ -1,6 +1,6 @@
 ---
 name: graphrag-review-doc
-version: 1.5.0
+version: 1.5.1
 description: 人間が PR レビューするための、概念レベルの説明資料(視覚的な HTML 文書)をグラフ（プロジェクトの永続知識）を背骨に生成する。「この PR のレビュー資料を作って」「概念レベルで説明する文書がほしい」「レビュアー向けに分かりやすく説明して」と、人間レビュアーに渡す資料を求められた時に使う。AI が所見を返すレビュー本体は graphrag-pr-review（本 skill は成果物が HTML 文書である時に選ぶ）。スラッシュ: /graphrag-knowledge:graphrag-review-doc
 ---
 
@@ -22,7 +22,7 @@ If `$ARGUMENTS` carries a base/head, use it; otherwise target the current workin
 1. **Build the frame by reverse lookup** — execute method §2 verbatim (same pipeline as pr-review; pull with `ask` / `evidence`, do not grep).
 2. **Match against the impact zone by forward expansion** — execute method §2.5 verbatim. Candidates **require corroboration — actually read the candidate Files and the diff** (do not conclude from within the graph alone). Note them alongside in the doc's "what was touched", with propagation path + a judgment made after reading.
 3. **Pick up concept deltas** — execute method §3 verbatim. **The doc emits these not as a separate list but as annotations within the relevant section**.
-4. **Assemble the HTML doc**. Visually clear. Cover the graph-derived information and make the explanation hit the core.
+4. **Assemble the HTML doc**. Visually clear. Cover the graph-derived information and make the explanation hit the core. Write the document text in the conversation language (the audience is the human reviewers, not the LLM).
 
 ## Doc structure (graph as backbone)
 
