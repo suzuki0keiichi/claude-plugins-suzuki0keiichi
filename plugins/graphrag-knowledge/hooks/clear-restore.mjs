@@ -11,6 +11,13 @@
 //   - one-shot: 読んだら「判定より先に」キーを消費 (削除して書き戻す)。鮮度判定で先に return して
 //     キーが残ると、次の無関係な /clear で同じ指示が再注入される事故が実際に起きた。だから全分岐
 //     (注入する/しない) より前に必ず消す。
+//   - 予約キーの置き場所は書き手 (checkpoint-mark の cacheDirForVault(vault)) と同じ規則で解決する:
+//     walk-up した anchor の .graphrag/.env が GRAPHRAG_VAULT_DIR で外部 vault を指していれば
+//     「vault の親の .graphrag/cache」を読む。ここを anchor 側固定で読むと共有 vault 構成で
+//     書き手と分裂し、復元が毎回無音で失敗する (実際に起きた)。
+//   - ack 契約: 注入は additionalContext なので人間には見えない。復元成功/不成功のどちらの
+//     注入文も「最初の返答の冒頭でユーザーに宣言せよ」を義務付ける。これにより /clear 後の
+//     最初の返答に宣言が無い = 引き継ぎ失敗、と人間が沈黙から判定できる。
 // 三段で無害化する: (1) .graphrag が walk-up で見つからなければ即 no-op、
 // (2) GRAPHRAG_CLEAR_RESTORE=off で明示 opt-out、(3) 配布 scope で届く範囲自体を絞れる。
 // 依存ゼロの素 node (node:fs / node:path のみ。graphrag/*.ts を import しない) —
@@ -58,9 +65,44 @@ function isOptedOut(anchorDir) {
   return false;
 }
 
-// checkpoint-mark verb が書く予約キーの置き場所 (= cacheDirForVault(vault) 固定)。
-function askStatePath(anchorDir) {
-  return path.join(anchorDir, ".graphrag", "cache", "ask-state.json");
+// 書き手 (checkpoint-mark) が使う vault dir を、CLI と同じ first-wins で解決する:
+// シェル env → anchor の .graphrag/.env の GRAPHRAG_VAULT_DIR → ローカル既定 (<anchor>/.graphrag/vault)。
+// 相対パスは anchor 基準で解決する (CLI は自身の cwd 基準だが、フックに書き手の cwd は届かない)。
+function resolveVaultDir(anchorDir) {
+  const fromEnv = process.env.GRAPHRAG_VAULT_DIR;
+  if (typeof fromEnv === "string" && fromEnv !== "") return path.resolve(anchorDir, fromEnv);
+  const envPath = path.join(anchorDir, ".graphrag", ".env");
+  try {
+    if (existsSync(envPath)) {
+      // parseDotEnv (graphrag/cli-env.ts) の簡易複製: # コメント / export 接頭辞 / 引用符除去。
+      for (const rawLine of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#")) continue;
+        const body = line.startsWith("export ") ? line.slice("export ".length).trim() : line;
+        const m = /^GRAPHRAG_VAULT_DIR\s*=\s*(.*)$/.exec(body);
+        if (!m) continue;
+        let value = m[1].trim();
+        if (
+          (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+          (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+        ) {
+          value = value.slice(1, -1);
+        }
+        if (value) return path.resolve(anchorDir, value);
+      }
+    }
+  } catch {
+    // .env が読めなければローカル既定へフォールバック
+  }
+  return path.join(anchorDir, ".graphrag", "vault");
+}
+
+// checkpoint-mark verb が書く予約キーの置き場所 (= cacheDirForVault(vault) の依存ゼロ複製)。
+// vault の親を .graphrag に正規化し、その下の cache/ask-state.json。
+function askStatePath(vaultDir) {
+  let stateDir = path.dirname(path.resolve(vaultDir));
+  if (path.basename(stateDir) !== ".graphrag") stateDir = path.join(stateDir, ".graphrag");
+  return path.join(stateDir, "cache", "ask-state.json");
 }
 
 // 予約キーを消費 (削除) して原子書き込みで書き戻す。他キーは保つ。
@@ -101,8 +143,8 @@ async function main() {
   if (!anchorDir) return; // 非 graphrag リポジトリ — 透明
   if (isOptedOut(anchorDir)) return; // 明示 opt-out
 
-  const fp = askStatePath(anchorDir);
-  if (!existsSync(fp)) return; // ask-state.json 自体が無い — 無音
+  const fp = askStatePath(resolveVaultDir(anchorDir));
+  if (!existsSync(fp)) return; // ask-state.json 自体が無い — 無音 (checkpoint 未実行と同義)
   let state;
   try {
     state = JSON.parse(readFileSync(fp, "utf8"));
@@ -143,7 +185,9 @@ async function main() {
       : `checkpoint belongs to a different directory (${entry.cwd})`;
     emit(
       `A graphrag checkpoint existed but was NOT restored (${reason}). ` +
-      "If needed, restore manually via the graphrag CLI: brief --mode resume."
+      "The user cannot see this message and may be relying on the handover — open your first reply by " +
+      "telling them the checkpoint was not restored and why. " +
+      "Offer manual restore via the graphrag CLI: brief --mode resume."
     );
     return;
   }
@@ -151,6 +195,9 @@ async function main() {
   // 判定 OK — 命令形プロースを注入 (JSON ダンプではない)。
   emit(
     "Automatic restore from the last graphrag checkpoint. Prioritize this over any compact summary or exploration.\n" +
+    "Handover ack (mandatory): the user cannot see this injection — your first reply is their only proof " +
+    "the handover worked. Open it with 1-2 lines declaring that the checkpoint was restored: the current " +
+    "focus and the first action you are about to take. Then execute that first action.\n" +
     "First action (do NOT restart from ask / brief re-runs or broad exploration):\n" +
     `→ ${entry.first_action}\n\n` +
     "--- work state (as of checkpoint) ---\n" +
@@ -162,4 +209,9 @@ async function main() {
 
 main().catch(() => {
   // 入力不正 / IO 失敗等 — セッション開始をブロックせず黙って終了。
-}).finally(() => process.exit(0));
+}).finally(() => {
+  // process.exit() は使わない: macOS では pipe への stdout 書き込みが非同期なので、
+  // exit が emit の flush に先行すると注入 JSON が途中で切れる (予約キーは消費済みのため
+  // 復元内容が回収不能に消える)。stdin は消費済みで他に生きたハンドルは無く、自然終了する。
+  process.exitCode = 0;
+});

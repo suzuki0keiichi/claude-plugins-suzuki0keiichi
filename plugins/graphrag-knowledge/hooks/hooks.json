@@ -1,5 +1,5 @@
 {
-  "description": "(1) git commit 直前に判断/却下案/リスク/運用知識の書き戻しを促す (focus 決着時は Investigation の close も促す)。(2) clear 直後にのみ、checkpoint-mark が ask-state.json の予約キーに刻んだ作業状態と『最初の一手』を one-shot で消費して additionalContext に注入する (60 分失効・cwd 厳密一致・読んだら即消費)。compact では復元しない (古い checkpoint の無条件再注入を避ける)。いずれも常に非ブロッキング (vault 無しや失敗時は無音)。",
+  "description": "(1) git commit 直前に判断/却下案/リスク/運用知識の書き戻しを促す (focus 決着時は Investigation の close も促す)。(2) clear 直後にのみ、checkpoint-mark が ask-state.json の予約キーに刻んだ作業状態と『最初の一手』を one-shot で消費して additionalContext に注入する (60 分失効・cwd 厳密一致・読んだら即消費)。予約キーの置き場所は書き手と同じ cacheDirForVault 規則で解決する (.env の GRAPHRAG_VAULT_DIR による外部 vault リダイレクト対応)。注入文は復元の成否をユーザーへ最初の返答冒頭で宣言する義務 (ack) をエージェントに課す。compact では復元しない (古い checkpoint の無条件再注入を避ける)。いずれも常に非ブロッキング (vault 無しや失敗時は無音)。",
   "hooks": {
     "PreToolUse": [
       {

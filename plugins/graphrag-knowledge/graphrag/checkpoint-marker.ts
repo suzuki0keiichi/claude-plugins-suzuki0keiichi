@@ -112,8 +112,10 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
   }
 
   // 予約キーの置き場所は cacheDirForVault(vaultDir) 固定。resolveAskStateDir は使わない:
-  //   - 依存ゼロのフック (clear-restore.mjs) は walk-up で vault 側の .graphrag/cache しか
-  //     見つけられないので、書き手も同じ場所へ書かないと復元時に読めない。
+  //   - 復元フック (clear-restore.mjs) は依存ゼロのままこの規則を複製して読む: walk-up で
+  //     anchor を見つけ、.graphrag/.env の GRAPHRAG_VAULT_DIR も解決して「vault の親の
+  //     .graphrag/cache」に辿り着く。書き手と読み手は常にこの同一規則で揃えること —
+  //     片側だけ変えると共有 vault 構成で分裂し、復元が毎回無音で失敗する (実際に起きた)。
   //   - checkpoint は vault へ知識を書く行為なので readonly モード (consumer cache) は前提にない。
   const stateDir = cacheDirForVault(vaultDir);
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
