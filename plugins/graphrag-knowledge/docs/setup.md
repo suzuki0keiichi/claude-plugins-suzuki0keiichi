@@ -51,6 +51,8 @@ graphrag の検索は **意味（埋め込みベクトル）検索が前提**で
 
 NPU を積むマシン（Apple Silicon の Neural Engine や、最近の AI PC の NPU など）なら、対応する実行環境で `nomic-embed-text` を NPU で動かせるよう設定しておくとよいです。NPU が無ければ GPU、それも無ければ CPU でも動きます。
 
+プラットフォーム別の具体的な構築手順は **[embedding-npu.md](./embedding-npu.md)** にまとめています（Ubuntu / Intel NPU は実機検証済み。Windows / macOS は追記予定）。
+
 #### 別ポート / 別マシン / OpenAI 互換サービスを使う
 
 自動検出から外れる置き場所は `.env` に明示します。**embedding 系の設定はマシンごとに決まる**ので、リポジトリではなく `~/.graphrag/.env` に置いてください（リポジトリに書くと別マシンに持っていった時に合わなくなります）:
