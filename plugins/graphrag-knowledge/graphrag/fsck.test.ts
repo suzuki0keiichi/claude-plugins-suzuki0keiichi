@@ -77,6 +77,7 @@ const ALL_CHECK_IDS = [
   "edge-endpoints",
   "schema-validate",
   "round-trip",
+  "tombstones",
   "git-uncommitted",
 ];
 
@@ -309,3 +310,36 @@ test("cli 経由 (verb 配線): `fsck --vault` が exit 0 / 壊れた vault で 
   assert.equal(bad.code, 1);
   assert.equal(JSON.parse(bad.stdout).status, "error");
 });
+
+// ── issue #18: tombstones check ─────────────────────────────────────────────
+
+test("fsck: 台帳の parse 不能行は tombstones ERROR、蘇生 id は advisory WARN", () => {
+  const { repo, vault } = gitVault();
+  // 正常エントリ + 生きているノード id の蘇生エントリ
+  appendTombstones(vault, [
+    { id: "decision:s:gone", deleted_at: "2026-07-13T00:00:00.000Z", reason: "purge" },
+  ]);
+  commitAll(repo, "ledger");
+  let report = fsckVault({ vaultDir: vault });
+  assert.equal(check(report, "tombstones").status, "ok");
+
+  // 蘇生: 台帳に載っている id が生きている → warn (error ではない)
+  const liveId = report.counts.nodes > 0 ? (importVault(vault).nodes[0] as any).id : null;
+  assert.ok(liveId);
+  appendTombstones(vault, [{ id: liveId, deleted_at: "2026-07-13T00:00:00.000Z", reason: "old delete" }]);
+  commitAll(repo, "resurrected");
+  report = fsckVault({ vaultDir: vault });
+  const cWarn = check(report, "tombstones");
+  assert.equal(cWarn.status, "warn");
+  assert.deepEqual(cWarn.detail.resurrected, [liveId]);
+
+  // parse 不能行 → error
+  appendFileSync(path.join(vault, ".tombstones", "2026-07.jsonl"), "{ broken\n");
+  commitAll(repo, "broken line");
+  report = fsckVault({ vaultDir: vault });
+  assert.equal(check(report, "tombstones").status, "error");
+  assert.equal(report.status, "error");
+});
+import { appendTombstones } from "./tombstones.ts";
+import { appendFileSync } from "node:fs";
+import { importVault } from "./import-vault.ts";

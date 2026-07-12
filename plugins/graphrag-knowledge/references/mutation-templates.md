@@ -112,6 +112,24 @@ Goals relate to each other via `refines`; connection to grounds is via `derived_
 
 The cascaded edge IDs can be checked in `summary.cascaded_edge_ids` of the `commit-mutation` output.
 
+Every node delete is also recorded in the vault's **tombstone ledger** (`.tombstones/YYYY-MM.jsonl`, committed in the same mutation commit): `{id, type, title, deleted_at, reason, successor?, cascaded_edges?}`. The ledger answers "did this id die, when, why, what replaced it" from the living vault, and keeps the cascaded edge tuples as repair material. `xref-check` consults it to classify dangling cross-vault refs as `tombstoned` (301 when a successor exists / 410 when gone) instead of merely `broken`.
+
+## Delete + replace with successor (301) — purge/reconcile writers
+
+When a delete has a known replacement (e.g. document re-ingestion replacing extracted nodes), record the old→new mapping in the same atomic commit via `successors`. Validation requires each `old` to be deleted by this plan and each `new` to exist after the mutation. Note there is no same-id replace: a plan that deletes and creates the *same* id is rejected (plan-duplicate-id + create-exists) — successors are for *different* ids.
+
+```json
+{
+  "reason": "<docId> 再取り込み: 変わった項目を置き換え",
+  "nodes": [
+    { "op": "delete", "id": "<docId>:n3" },
+    { "op": "create", "id": "<docId>:h3f9a2c1", "type": "Risk", "title": "...", "summary": "..." }
+  ],
+  "edges": [],
+  "successors": [ { "old": "<docId>:n3", "new": "<docId>:h3f9a2c1" } ]
+}
+```
+
 ## Policy reversal (overturn a Decision; the supersedes grammar is unchanged)
 
 Create a new Decision, (1) wire `refines`: new→old, and (2) set the old Decision to `state: "superseded"` via op:update. `supersedes` stays Decision|OK → RejectedOption — there is no grammar to wire it between Decisions. Incoming `has_premise` edges to the old node stay live (lineage preservation).
@@ -199,7 +217,8 @@ Discipline:
   reason: string,                   // required — why this mutation
   nodes: Array<MutationNode>,       // op: create / update / delete
   edges: Array<MutationEdge>,       // op: create / delete (update usually unnecessary)
-  duplicate_ack?: string[]          // only when acknowledging duplicate gate suspects (existing node ids)
+  duplicate_ack?: string[],         // only when acknowledging duplicate gate suspects (existing node ids)
+  successors?: Array<{ old: string, new: string }>  // 301 mapping for deletes replaced in this plan (tombstone ledger)
 }
 ```
 

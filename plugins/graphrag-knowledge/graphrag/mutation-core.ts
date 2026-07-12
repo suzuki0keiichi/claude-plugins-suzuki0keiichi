@@ -24,7 +24,8 @@ export function normalizeMutationPlan(plan) {
     reason: typeof plan.reason === "string" ? plan.reason : "",
     nodes,
     edges,
-    duplicate_ack: normalizeDuplicateAck(plan.duplicate_ack)
+    duplicate_ack: normalizeDuplicateAck(plan.duplicate_ack),
+    successors: normalizeSuccessors(plan.successors)
   };
 }
 
@@ -36,6 +37,20 @@ function normalizeDuplicateAck(value: unknown): string[] {
     throw new Error("mutation plan duplicate_ack must be an array of node id strings");
   }
   return value;
+}
+
+// 削除ノードの後継 (301) 対応。delete+create+対応付けを1コミットで原子化するための
+// 入力で、tombstone 台帳の successor に記録される。形が崩れた対応は黙って落とすと
+// 「301 を書いたつもりが台帳に無い」になるので明示エラー。
+function normalizeSuccessors(value: unknown): Array<{ old: string; new: string }> {
+  if (value === undefined || value === null) return [];
+  if (
+    !Array.isArray(value) ||
+    value.some((s) => typeof s?.old !== "string" || typeof s?.new !== "string")
+  ) {
+    throw new Error('mutation plan successors must be an array of { "old": <node id>, "new": <node id> }');
+  }
+  return value.map((s) => ({ old: s.old, new: s.new }));
 }
 
 export function validateMutation({ currentGraph, plan, enforceSourceBacking = false, schema }: {
@@ -84,8 +99,9 @@ export function validateMutation({ currentGraph, plan, enforceSourceBacking = fa
     ...immutableFailures
   ];
 
-  const audit = { cascadedEdgeIds: [] as string[] };
+  const audit = { cascadedEdgeIds: [] as string[], cascadedEdges: [] as any[] };
   const nextGraph = applyMutationToGraph(currentGraph, plan, audit);
+  failures.push(...successorFailures({ plan, nextGraph }));
   if (enforceSourceBacking) {
     failures.push(...sourceBackingFailures({ plan, nextGraph, schema }));
   }
@@ -95,11 +111,41 @@ export function validateMutation({ currentGraph, plan, enforceSourceBacking = fa
     valid: failures.length === 0,
     failures,
     nextGraph,
-    cascadedEdgeIds: audit.cascadedEdgeIds
+    cascadedEdgeIds: audit.cascadedEdgeIds,
+    cascadedEdges: audit.cascadedEdges
   };
 }
 
-export function applyMutationToGraph(graph, plan, audit?: { cascadedEdgeIds: string[] }) {
+// successors (301) の妥当性: old はこの plan で delete されるノード、new は mutation 後の
+// グラフに実在するノードに限る。ここを緩めると「台帳に書いた後継が最初から解決不能」
+// という自己矛盾した tombstone が生まれるため、typo をこの時点で fail-loud に弾く。
+function successorFailures(args: { plan: any; nextGraph: any }): string[] {
+  const successors: Array<{ old: string; new: string }> = args.plan.successors ?? [];
+  if (successors.length === 0) return [];
+  const failures: string[] = [];
+  const deletedIds = new Set(
+    args.plan.nodes.filter((n: any) => mutationOp(n) === "delete").map((n: any) => n.id)
+  );
+  const nextIds = new Set((args.nextGraph.nodes ?? []).map((n: any) => n.id));
+  for (const dup of duplicates(successors.map((s) => s.old))) {
+    failures.push(`mutation plan successors has duplicate old id: ${dup}`);
+  }
+  for (const s of successors) {
+    if (!deletedIds.has(s.old)) {
+      failures.push(`successor old node is not deleted by this plan: ${s.old}`);
+    }
+    if (!nextIds.has(s.new)) {
+      failures.push(`successor new node does not exist after mutation: ${s.new}`);
+    }
+  }
+  return failures;
+}
+
+export function applyMutationToGraph(
+  graph,
+  plan,
+  audit?: { cascadedEdgeIds: string[]; cascadedEdges?: any[] }
+) {
   let nextNodes = [...(graph.nodes ?? [])];
   let nextEdges = [...(graph.edges ?? [])];
 
@@ -159,17 +205,25 @@ export function applyMutationToGraph(graph, plan, audit?: { cascadedEdgeIds: str
       nextNodes = nextNodes.filter((node) => !deletedNodeIds.has(node.id));
     }
     const cascaded = new Set<string>();
+    // カスケードされたエッジは id だけでなく全タプルも残す — 消えたエッジは grep でも
+    // 引けなくなるので、tombstone 台帳が「後継へ張り直す」修復材料として from/to/type を持つ。
+    const cascadedEdges: any[] = [];
     nextEdges = nextEdges.filter((edge) => {
       if (deletedEdgeIds.has(edge.id)) return false;
       if (deletedNodeIds.has(edge.from) || deletedNodeIds.has(edge.to)) {
         if (edge.id) cascaded.add(edge.id);
+        cascadedEdges.push({ id: edge.id, type: edge.type, from: edge.from, to: edge.to });
         return false;
       }
       return true;
     });
-    if (audit) audit.cascadedEdgeIds = [...cascaded];
+    if (audit) {
+      audit.cascadedEdgeIds = [...cascaded];
+      audit.cascadedEdges = cascadedEdges;
+    }
   } else if (audit) {
     audit.cascadedEdgeIds = [];
+    audit.cascadedEdges = [];
   }
 
   return {

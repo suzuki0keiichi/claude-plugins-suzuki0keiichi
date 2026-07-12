@@ -4,7 +4,9 @@
  * Scans all edges in the current vault for `vault:` prefixed `to` fields,
  * attempts to resolve each one via xref-resolver, and reports:
  *   resolved   — vault found, node found
- *   broken     — vault found but node missing
+ *   tombstoned — node missing but the target vault's deletion ledger knows it
+ *                (301 when a successor exists, 410 when gone; see result.tombstone)
+ *   broken     — vault found but node missing (and no tombstone)
  *   orphan     — no vault with the given slug found
  *   unresolvable — GRAPHRAG_WORLD_DIR not configured
  *
@@ -69,6 +71,7 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
 
   const resolved = results.filter((r) => r.status === "resolved");
   const broken = results.filter((r) => r.status === "broken");
+  const tombstoned = results.filter((r) => r.status === "tombstoned");
   const orphan = results.filter((r) => r.status === "orphan");
   const unresolvable = results.filter((r) => r.status === "unresolvable");
 
@@ -83,6 +86,11 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
       total_cross_vault_edges: results.length,
       resolved: resolved.length,
       broken: broken.length,
+      // 台帳に載っている削除済み参照 (issue #18)。final_successor があれば 301 (後継へ
+      // 張り替え可能)、無ければ 410 (参照ごと削除するしかない)。各 result の
+      // tombstone フィールドに修復材料 (chain / successor_alive) が入る。
+      tombstoned: tombstoned.length,
+      tombstoned_with_successor: tombstoned.filter((r) => r.tombstone?.final_successor).length,
       orphan: orphan.length,
       unresolvable: unresolvable.length,
       parent_status: parent.status,

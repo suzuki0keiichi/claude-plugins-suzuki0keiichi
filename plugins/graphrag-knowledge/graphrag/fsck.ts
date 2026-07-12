@@ -14,6 +14,8 @@
  *   - schema-validate       : validateGraph (schema レベル) が通る
  *   - round-trip            : import → 再構築 → ディスクと byte 比較。差分 = 非 canonical
  *                             直列化 (WARN — 破損ではなく、次の書き込みが書き直す漂流)
+ *   - tombstones            : 削除台帳 (.tombstones/*.jsonl) がパースできる (不能行 = ERROR)。
+ *                             台帳掲載 id の生存 (蘇生) は advisory WARN
  *   - git-uncommitted       : vault 配下の未 commit 変更 (torn write の兆候) = ERROR + 復旧ヒント
  *
  * exit code: ok/warn → 0, error → 1。
@@ -30,6 +32,7 @@ import { importVaultFile, normalizeEol } from "./import-vault.ts";
 import { buildVaultFiles } from "./build-vault.ts";
 import { validateGraph, type SchemaDefinition } from "./schema.ts";
 import { resolveSchema } from "./schema-registry.ts";
+import { readTombstones } from "./tombstones.ts";
 import { parseCrossVaultRef } from "./xref-resolver.ts";
 
 export type FsckStatus = "ok" | "warn" | "error";
@@ -265,7 +268,36 @@ export function fsckVault(options: {
       : {}),
   });
 
-  // ── 7. git-uncommitted (torn write の兆候) ───────────────────────────────
+  // ── 7. tombstones (削除台帳の整合 — issue #18) ────────────────────────────
+  // parse 不能行・必須フィールド欠落は error (台帳が読めないと 301 解決が黙って
+  // 素通りする)。台帳に載っている id の生存は error にしない — 同一内容の復活
+  // (content-hash 採番では正しい蘇生) がありうるため、advisory の warn に留める。
+  {
+    const tombs = readTombstones(vaultDir);
+    const liveIds = new Set(nodes.map((n: any) => n.id));
+    const resurrected = [...new Set(tombs.entries.filter((e) => liveIds.has(e.id)).map((e) => e.id))];
+    checks.push({
+      id: "tombstones",
+      status: tombs.errors.length > 0 ? "error" : resurrected.length > 0 ? "warn" : "ok",
+      detail: { entries: tombs.entries.length, parse_errors: tombs.errors, resurrected },
+      ...(tombs.errors.length > 0
+        ? {
+            hint:
+              "tombstone ledger lines that cannot be parsed make deleted-node lookups (xref-check 301 " +
+              "resolution) silently incomplete. Fix or remove the offending lines in .tombstones/*.jsonl.",
+          }
+        : resurrected.length > 0
+          ? {
+              hint:
+                "these node ids appear in the deletion ledger but are alive again. Legitimate when the same " +
+                "content was re-ingested (resurrection); if unexpected, check whether an old id was reused " +
+                "for a different concept.",
+            }
+          : {}),
+    });
+  }
+
+  // ── 8. git-uncommitted (torn write の兆候) ───────────────────────────────
   let gitCheck: FsckCheck;
   try {
     const porcelain = (deps.gitStatusPorcelain ?? defaultGitStatusPorcelain)(vaultDir).trim();

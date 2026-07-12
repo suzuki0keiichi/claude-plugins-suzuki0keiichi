@@ -1015,3 +1015,72 @@ test("brief matches with unresolved cross-vault edges get cross_vault_resolved v
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── issue #18: tombstone (削除台帳) 参照解決 ─────────────────────────────────
+
+test("checkCrossVaultRefs: 台帳に載った削除済みノードは tombstoned (301) で後継と生存を返す", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-check-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    const { vaultDir } = makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v3", type: "Deliverable", title: "successor node", summary: "s" }
+    });
+    // 旧ノード deliverable:billing:v2 は存在せず、台帳が v3 を後継として知っている。
+    appendTombstones(vaultDir, [
+      { id: "deliverable:billing:v2", deleted_at: "2026-07-13T00:00:00.000Z", reason: "purge", successor: "deliverable:billing:v3" }
+    ]);
+
+    const graph = {
+      nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
+      edges: [
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" }
+      ]
+    };
+
+    const results = checkCrossVaultRefs(graph, worldDir);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, "tombstoned");
+    assert.equal(results[0].tombstone?.final_successor, "deliverable:billing:v3");
+    assert.equal(results[0].tombstone?.successor_alive, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("checkCrossVaultRefs: 後継無しの tombstone は final_successor null (410)、台帳に無い欠落は従来どおり broken", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-check-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    const { vaultDir } = makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:alive", type: "Deliverable", title: "alive", summary: "a" }
+    });
+    appendTombstones(vaultDir, [
+      { id: "deliverable:billing:gone", deleted_at: "2026-07-13T00:00:00.000Z", reason: "purge" }
+    ]);
+
+    const graph = {
+      nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
+      edges: [
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:gone" },
+        { id: "e:2", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:never-existed" }
+      ]
+    };
+
+    const results = checkCrossVaultRefs(graph, worldDir);
+    const gone = results.find((r) => r.edge_id === "e:1");
+    const never = results.find((r) => r.edge_id === "e:2");
+    assert.equal(gone?.status, "tombstoned");
+    assert.equal(gone?.tombstone?.final_successor, null);
+    assert.equal(gone?.tombstone?.successor_alive, null);
+    assert.equal(never?.status, "broken");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+import { appendTombstones } from "./tombstones.ts";

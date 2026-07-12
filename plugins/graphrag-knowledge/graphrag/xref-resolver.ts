@@ -20,6 +20,7 @@ import path from "node:path";
 import { importVault } from "./import-vault.ts";
 import { loadWorldConfig, WORLD_FILE, type WorldVaultRef } from "./world.ts";
 import { resolveSchema } from "./schema-registry.ts";
+import { latestTombstones, resolveSuccessor } from "./tombstones.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,7 +45,7 @@ export interface ResolvedNode {
   summary: string | null;
 }
 
-export type XRefStatus = "resolved" | "broken" | "orphan" | "unresolvable";
+export type XRefStatus = "resolved" | "broken" | "tombstoned" | "orphan" | "unresolvable";
 
 export interface XRefCheckResult {
   /** Original cross-vault ref string */
@@ -58,6 +59,20 @@ export interface XRefCheckResult {
   detail?: string;
   /** Populated when the ref matched via a vault_slug_alias instead of the current vault_slug */
   alias_warning?: string;
+  /**
+   * Populated when status === "tombstoned": the target vault's deletion ledger knows this
+   * node id. `final_successor` is the collapsed successor chain (301); null means the
+   * knowledge is gone with no successor (410 — the ref cannot be repaired, only removed).
+   * `successor_alive` reports whether the final successor currently exists in the target
+   * vault (the repair-target check; null when there is no successor).
+   */
+  tombstone?: {
+    deleted_at: string;
+    reason: string;
+    final_successor: string | null;
+    chain: string[];
+    successor_alive: boolean | null;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +451,35 @@ export function checkCrossVaultRefs(
 
     const node = (graph2.nodes ?? []).find((n: any) => n.id === parts.nodeId);
     if (!node) {
+      // 台帳 (issue #18): 消えた ID が tombstone にあれば「単に壊れた」ではなく
+      // 「削除済み・後継はこれ (301)」として報告する。後継チェーンは畳み、後継の
+      // 生存も確認する (修復先が実在しない tombstone は 410 相当として扱える)。
+      const tombs = latestTombstones(vaultDir);
+      const entry = tombs.get(parts.nodeId);
+      if (entry) {
+        const resolution = resolveSuccessor(tombs, parts.nodeId);
+        const successorAlive =
+          resolution.final_successor === null
+            ? null
+            : (graph2.nodes ?? []).some((n: any) => n.id === resolution.final_successor);
+        results.push({
+          ref,
+          edge_id: edgeId,
+          status: "tombstoned",
+          detail:
+            resolution.final_successor === null
+              ? `node "${parts.nodeId}" was deleted (${entry.deleted_at}) with no successor — gone (410)`
+              : `node "${parts.nodeId}" was deleted (${entry.deleted_at}); successor: ${resolution.final_successor} (301)`,
+          tombstone: {
+            deleted_at: entry.deleted_at,
+            reason: entry.reason,
+            final_successor: resolution.final_successor,
+            chain: resolution.chain,
+            successor_alive: successorAlive
+          }
+        });
+        continue;
+      }
       results.push({
         ref,
         edge_id: edgeId,

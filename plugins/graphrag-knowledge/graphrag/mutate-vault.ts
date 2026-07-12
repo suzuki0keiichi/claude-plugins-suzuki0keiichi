@@ -31,6 +31,7 @@ import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
+import { appendTombstones, type TombstoneEntry } from "./tombstones.ts";
 
 // export はフォールト注入テスト用 (writeVaultDelta の deps.writeFile 既定実装)。
 export function writeFileAtomic(abs: string, content: string): void {
@@ -199,6 +200,43 @@ export function assertRemovalsExplained(args: {
   err.removed_files = [...args.removed];
   err.lost_node_ids = lost;
   throw err;
+}
+
+/**
+ * plan の node delete を tombstone 台帳へ記録する (issue #18)。
+ * 「この ID は消えたか / いつ・なぜ / 後継はどれか / どのエッジが巻き添えになったか」を
+ * 生きている vault から引けるようにする。plan.successors (validateMutation 検証済み) が
+ * あれば successor として記録され、カスケードエッジは削除ノードに接していたタプルだけを
+ * 各エントリへ振り分ける (修復時に「後継へ張り直す」材料になる)。
+ */
+function recordTombstones(args: {
+  vaultDir: string;
+  plan: any;
+  currentGraph: { nodes?: any[] };
+  cascadedEdges: any[];
+  delta: { written: string[]; created: string[] };
+}): { recorded: number; shards: string[] } {
+  const deletes = (args.plan.nodes ?? []).filter((n: any) => (n.op ?? "create") === "delete");
+  if (deletes.length === 0) return { recorded: 0, shards: [] };
+  const byId = new Map((args.currentGraph.nodes ?? []).map((n: any) => [n.id, n]));
+  const successorByOld = new Map(
+    ((args.plan.successors ?? []) as Array<{ old: string; new: string }>).map((s) => [s.old, s.new])
+  );
+  const deletedAt = new Date().toISOString();
+  const reason = typeof args.plan.reason === "string" && args.plan.reason ? args.plan.reason : "graphrag mutation";
+  const entries: TombstoneEntry[] = deletes.map((n: any) => {
+    const cur: any = byId.get(n.id);
+    const cascaded = args.cascadedEdges.filter((e) => e.from === n.id || e.to === n.id);
+    const entry: TombstoneEntry = { id: n.id, deleted_at: deletedAt, reason };
+    if (typeof cur?.type === "string") entry.type = cur.type;
+    if (typeof cur?.title === "string") entry.title = cur.title;
+    const successor = successorByOld.get(n.id);
+    if (successor) entry.successor = successor;
+    if (cascaded.length > 0) entry.cascaded_edges = cascaded;
+    return entry;
+  });
+  const shards = appendTombstones(args.vaultDir, entries, args.delta);
+  return { recorded: entries.length, shards };
 }
 
 export function vaultHead(vaultDir: string): string {
@@ -571,6 +609,9 @@ export async function applyMutationToVault(args: {
       // 書き込み後セルフチェック: 説明できないファイル削除 (= plan に無い知識の消滅) を
       // commit 前に検知して throw する (下の catch で HEAD へ巻き戻る)。
       assertRemovalsExplained({ currentGraph: current, nextGraph: v.nextGraph, plan, removed: delta.removed });
+      // node delete を tombstone 台帳へ記録 (mutation と同一コミットで確定する。
+      // シャードは delta に積むので、commit 失敗時の巻き戻しは .md と同じ経路で効く)。
+      const tombstones = recordTombstones({ vaultDir, plan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
       let head: string | null = null;
       if (args.git !== false) {
         head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation");
@@ -588,6 +629,8 @@ export async function applyMutationToVault(args: {
           deleted: plan.nodes.filter((n: any) => n.op === "delete").map((n: any) => n.id),
         },
         cascaded_edge_ids: v.cascadedEdgeIds,
+        // 削除の台帳記録 (issue #18)。recorded=0 (削除なし) なら shards は空。
+        tombstones,
         // 書き込み後セルフチェックの結果 (ここに到達した = 全削除が説明済み)。
         post_write_check: {
           id: "unexplained-removal",

@@ -147,7 +147,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `concern-hint` | machine hints for Concerns (embedding proximity clustering). For blind-spot checking after LLM modeling |
 | `edge-suggest-policy` | sets_policy_for candidate extraction |
 | `carving-check` | carving quality gate |
-| `xref-check` | cross-vault ref + VAULT.md `parent` integrity check (read-only): resolves each `vault:` edge, reports resolved/broken/orphan/unresolvable + parent status |
+| `xref-check` | cross-vault ref + VAULT.md `parent` integrity check (read-only): resolves each `vault:` edge, reports resolved/tombstoned (deleted per ledger — 301 with successor / 410 without)/broken/orphan/unresolvable + parent status |
 | `branch-merge` | semantic merge analysis of vault git branches (read-only). Procedure: `$REF/branch-merge.md` |
 | `world-join` | join a world: add this vault to world.json + write `GRAPHRAG_WORLD_DIR` to `.graphrag/.env`. Flags: `--world <dir>` `--vault <dir>` |
 | `world-refresh` | rebuild cross-vault world-cache. When `GRAPHRAG_WORLD_DIR` is set, `ask` includes `world_hints` |
@@ -155,7 +155,7 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `harvest-history` | deterministic extraction from git history (no writes): reverts → RejectedOption candidates, HACK/FIXME markers → OK/Risk candidates |
 | `staleness-check` | count commits since `generated_at` for files linked via documented_by/sets_policy_for/constrains, list candidates above threshold (read-only) |
 | `stocktake` | Investigation lifecycle audit (read-only, deterministic): returns suspect Investigations (stateless / active-and-stale / no-generated-at / progress-claiming-summary) as JSON. Adjudication is the `graphrag-stocktake` skill's job, not this verb's |
-| `fsck` | vault integrity check (read-only): parse / duplicate-id / id↔path / edge-endpoint / schema / round-trip / uncommitted-delta (torn-write) checks as single JSON `{status, checks, counts}`; exit 1 only on error |
+| `fsck` | vault integrity check (read-only): parse / duplicate-id / id↔path / edge-endpoint / schema / round-trip / tombstone-ledger / uncommitted-delta (torn-write) checks as single JSON `{status, checks, counts}`; exit 1 only on error |
 
 ## Parallel work and semantic merge (vault branch)
 
@@ -172,11 +172,13 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
   reason: string,                   // required — why this mutation
   nodes: Array<{ op: "create"|"update"|"delete", id, type?, title?, summary?, description?, raw_content?, updates? }>,
   edges: Array<{ op: "create"|"delete", id, type, from, to }>,
-  duplicate_ack?: string[]          // only when acknowledging duplicate gate suspects (existing node ids)
+  duplicate_ack?: string[],         // only when acknowledging duplicate gate suspects (existing node ids)
+  successors?: Array<{ old, new }>  // 301: map deleted node ids to their replacements (tombstone ledger)
 }
 ```
 
 - Passing `null` as an `updates` value **deletes that field** (e.g. `{ "state": null }` to withdraw state).
+- Every node delete is recorded in the vault's **tombstone ledger** (`.tombstones/YYYY-MM.jsonl`, same commit): `{id, type, title, deleted_at, reason, successor?, cascaded_edges?}` — "did this id die / when / why / what replaced it" stays answerable from the living vault, and cascaded edge tuples are kept as repair material. Deleting and creating the **same id in one plan is rejected** (no replace semantics); `successors` maps old→**different** new ids and is validated (old must be deleted by the plan, new must exist after it). Template: `$REF/mutation-templates.md` §Delete + replace.
 - `op: "update"` refreshes the node's `generated_at` to now (= "re-verified as of now"; `staleness-check` converges) unless the plan sets `generated_at` explicitly.
 - `summary` = one-line headline (stays in frontmatter, primary search carrier).
 - `description` = distilled prose about the node (appears in vault body `## 説明` with round-trip marker, also enters embedding). **Write for every node in principle.** Guidelines:
