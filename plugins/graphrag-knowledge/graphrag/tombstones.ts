@@ -8,8 +8,13 @@
  * 台帳に記録し、切れた参照を後継 (successor / 301) へ辿れるようにする。
  *
  * 形式: `<vaultDir>/.tombstones/YYYY-MM.jsonl` (deleted_at による月シャード)。
- *   - append-only。同一 id の後発エントリが先行を上書きする (last-wins)。これにより
+ *   - append-only。同一 id は deleted_at が最新のエントリが勝つ (時刻 last-wins)。これにより
  *     「削除時点では後継不明 → 後から successor だけ追記」が台帳の書き換えなしにできる。
+ *     行順でなく時刻で解決するのは merge=union (下記) が行順を保証しないため。
+ *   - `.tombstones/.gitattributes` (`*.jsonl merge=union`) をゲートが自動同梱する。
+ *     ブランチ並行の削除が同一シャードへ追記しても git が両側の行を残して自動 merge し、
+ *     **利用者が台帳の競合マーカーを見ることは無い**。各行は独立した事実なので
+ *     「全部残す」が常に正しい解決 (union の意味論と一致する)。
  *   - ドットディレクトリなので writeVaultDelta の孤児 .md 削除 / pruneEmptyDirs /
  *     Obsidian の走査対象にならず、gitCommitVault (`git add -- .`) には乗る
  *     (= mutation と同一コミットで確定する)。
@@ -58,6 +63,7 @@ export function appendTombstones(
   sink?: { written: string[]; created: string[] }
 ): string[] {
   if (entries.length === 0) return [];
+  ensureUnionMergeAttributes(vaultDir, sink);
   const byShard = new Map<string, TombstoneEntry[]>();
   for (const e of entries) {
     const rel = tombstoneShardRel(e.deleted_at);
@@ -82,6 +88,28 @@ export function appendTombstones(
     }
   }
   return shards;
+}
+
+/**
+ * `.tombstones/.gitattributes` (`*.jsonl merge=union`) を無ければ書く。
+ * union は git 組み込みの merge driver なので利用者側の設定は一切不要 — この1ファイルが
+ * リポジトリに乗っているだけで、ブランチ双方が同一シャードへ追記しても競合マーカーが
+ * 出ず両側の行が残る。台帳の各行は独立した事実なのでこれが常に正しい解決。
+ * 初回 append と同じ commit に乗せるため sink (delta) にも積む。
+ */
+function ensureUnionMergeAttributes(
+  vaultDir: string,
+  sink?: { written: string[]; created: string[] }
+): void {
+  const rel = path.join(TOMBSTONES_DIR, ".gitattributes");
+  const abs = path.join(vaultDir, rel);
+  if (existsSync(abs)) return;
+  mkdirSync(path.dirname(abs), { recursive: true });
+  writeFileSync(abs, "*.jsonl merge=union\n");
+  if (sink) {
+    sink.written.push(rel);
+    sink.created.push(rel);
+  }
 }
 
 export type TombstoneReadResult = {
@@ -120,10 +148,23 @@ export function readTombstones(vaultDir: string): TombstoneReadResult {
   return result;
 }
 
-/** id ごとの最新エントリ (last-wins)。 */
+/**
+ * id ごとの最新エントリ。**行順でなく deleted_at で決定的に解決する** — merge=union は
+ * 競合ハンクの行順を保証しないため、ファイル上の位置に意味を持たせると merge のたびに
+ * 解決結果が揺れる。同時刻の同 id は successor 持ちを優先する (301 情報を落とさない側に
+ * 倒す。それも同点なら stable sort によりファイル上の後の行が勝つ)。
+ */
 export function latestTombstones(vaultDir: string): Map<string, TombstoneEntry> {
+  const entries = [...readTombstones(vaultDir).entries];
+  entries.sort((a, b) =>
+    a.deleted_at < b.deleted_at
+      ? -1
+      : a.deleted_at > b.deleted_at
+        ? 1
+        : (a.successor ? 1 : 0) - (b.successor ? 1 : 0)
+  );
   const map = new Map<string, TombstoneEntry>();
-  for (const e of readTombstones(vaultDir).entries) map.set(e.id, e);
+  for (const e of entries) map.set(e.id, e);
   return map;
 }
 

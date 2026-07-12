@@ -284,7 +284,11 @@ export function fsckVault(options: {
         ? {
             hint:
               "tombstone ledger lines that cannot be parsed make deleted-node lookups (xref-check 301 " +
-              "resolution) silently incomplete. Fix or remove the offending lines in .tombstones/*.jsonl.",
+              "resolution) silently incomplete. If the offending lines are git conflict markers " +
+              "(<<<<<<< etc.), resolve by KEEPING BOTH SIDES' JSONL lines and deleting only the marker " +
+              "lines — every entry is an independent fact and line order does not matter (resolution is " +
+              "by deleted_at). Normally this never happens: .tombstones/.gitattributes (merge=union) " +
+              "makes git keep both sides automatically. Otherwise fix or remove the offending lines.",
           }
         : resurrected.length > 0
           ? {
