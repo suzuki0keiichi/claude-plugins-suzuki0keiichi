@@ -249,7 +249,7 @@ export async function runDuplicateCheck(args: {
 
   // 1. lexical exact pre-pass (索引/embedding 非依存 — endpoint が落ちていても走る)。
   const suspects: DuplicateSuspect[] = lexicalExactSuspects(candidates, currentNodes, args.schema);
-  const suspectPairs = new Set(suspects.map((s) => `${s.new_id} ${s.existing_id}`));
+  const suspectPairs = new Set(suspects.map((s) => `${s.new_id}\u0000${s.existing_id}`));
 
   // 2. embedding cosine pass (skip = 非致命。reason に理由を残す)。
   const relations: RelationCandidate[] = [];
@@ -297,8 +297,8 @@ export async function runDuplicateCheck(args: {
           }
           if (similarity >= threshold) {
             // lexical pre-pass が既に同ペアを挙げていれば二重計上しない。
-            if (suspectPairs.has(`${candidate.id} ${row.node_id}`)) continue;
-            suspectPairs.add(`${candidate.id} ${row.node_id}`);
+            if (suspectPairs.has(`${candidate.id}\u0000${row.node_id}`)) continue;
+            suspectPairs.add(`${candidate.id}\u0000${row.node_id}`);
             suspects.push({
               new_id: candidate.id,
               existing_id: row.node_id,
