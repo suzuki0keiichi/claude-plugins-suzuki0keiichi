@@ -40,8 +40,9 @@ export interface StalenessResult {
 
 // 知識ノードのうち「コードを前提に書かれる」型のみ対象 (Investigation 等は対象外)
 // schema.categories.staleness から取得する (runStalenessCheck 内で構築)。
-// File を宛先に取りうる evidence/効力エッジのみ辿る
-const STALENESS_EDGE_TYPES = new Set(["documented_by", "sets_policy_for", "constrains"]);
+// File を宛先に取りうる evidence/効力エッジのみ辿る。enforced_by も対象 —
+// enforcer が大きく変わったなら「まだこの不変条件を守っているか」の再確認候補。
+const STALENESS_EDGE_TYPES = new Set(["documented_by", "sets_policy_for", "constrains", "enforced_by"]);
 
 function defaultGitLogSince(
   root: string,

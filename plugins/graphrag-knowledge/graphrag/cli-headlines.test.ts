@@ -701,13 +701,16 @@ test("add-constraint: Constraint ノード + constrains エッジを書く (docu
         "--system", "s", "--slug", "no-npm",
         "--title", "npm 禁止", "--summary", "pnpm 一択",
         "--constrains", "file:s:src/a.ts",
-        "--aliases", "no npm,pnpm only"
+        "--aliases", "no npm,pnpm only",
+        "--unenforceable", "lockfile 検査は未整備 (外部条件扱いの例)"
       ])
     );
     const imp = importVault(vault);
     const node = imp.nodes.find((n) => n.id === "constraint:s:no-npm");
     assert.ok(node, "constraint node written");
     assert.deepEqual(node.aliases, ["no npm", "pnpm only"], "aliases 配線");
+    assert.equal(node.enforcement, "none", "enforcement:none が実 vault を round-trip する");
+    assert.equal(node.enforcement_reason, "lockfile 検査は未整備 (外部条件扱いの例)");
     assert.ok(
       imp.edges.some((e) => e.type === "constrains" && e.from === "constraint:s:no-npm" && e.to === "file:s:src/a.ts"),
       "constrains edge written"
@@ -716,6 +719,61 @@ test("add-constraint: Constraint ノード + constrains エッジを書く (docu
       !imp.edges.some((e) => e.type === "documented_by" && e.from === "constraint:s:no-npm"),
       "Constraint は documented_by を張らない"
     );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("add-constraint: --enforced-by は enforced_by エッジ + File 自動作成で実 vault に書ける", async () => {
+  const { repo, vault, stateDir } = gitInitVault();
+  try {
+    // enforcer 検査ファイルを repo に実在させる (auto-create の disk 実在ガードを通す)
+    mkdirSync(path.join(repo, "test"), { recursive: true });
+    writeFileSync(path.join(repo, "test", "no-npm.test.ts"), "test(\"lockfile\", () => {});\n");
+    await withVaultEnv(vault, stateDir, () =>
+      dispatchHeadline("add-constraint", [
+        "--system", "s", "--slug", "no-npm",
+        "--title", "npm 禁止", "--summary", "pnpm 一択",
+        "--constrains", "file:s:src/a.ts",
+        "--enforced-by", "file:s:test/no-npm.test.ts"
+      ])
+    );
+    const imp = importVault(vault);
+    const node = imp.nodes.find((n) => n.id === "constraint:s:no-npm");
+    assert.ok(node, "constraint node written");
+    assert.ok(!("enforcement" in node), "enforcer 有りのとき enforcement:none を撒かない");
+    assert.ok(
+      imp.edges.some((e) => e.type === "enforced_by" && e.from === "constraint:s:no-npm" && e.to === "file:s:test/no-npm.test.ts"),
+      "enforced_by edge written"
+    );
+    assert.ok(
+      imp.nodes.some((n) => n.id === "file:s:test/no-npm.test.ts" && n.path === "test/no-npm.test.ts"),
+      "enforcer File node auto-created"
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("add-constraint: enforcement 未選択は両方の処方を示して拒否 / 値なし --unenforceable も明示エラー", async () => {
+  const { repo, vault, stateDir } = gitInitVault();
+  try {
+    await withVaultEnv(vault, stateDir, async () => {
+      await assert.rejects(
+        () => dispatchHeadline("add-constraint", [
+          "--system", "s", "--slug", "x", "--title", "X", "--summary", "x",
+          "--constrains", "file:s:src/a.ts"
+        ]),
+        (e: any) => /--enforced-by/.test(e.message) && /--unenforceable/.test(e.message)
+      );
+      await assert.rejects(
+        () => dispatchHeadline("add-constraint", [
+          "--system", "s", "--slug", "x", "--title", "X", "--summary", "x",
+          "--constrains", "file:s:src/a.ts", "--unenforceable"
+        ]),
+        /--unenforceable requires a reason/
+      );
+    });
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -917,6 +975,31 @@ test("ensureEvidenceFileNodes: ディスクに無い path は typo として明�
       }
     );
     assert.equal(plan.nodes.length, 1, "エラー時は plan を汚さない");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("ensureEvidenceFileNodes: enforced_by 経路も自動作成し、エラーは --enforced-by 名義で言う", () => {
+  const repoRoot = mkdtempSync(path.join(tmpdir(), "evroot-"));
+  try {
+    mkdirSync(path.join(repoRoot, "test"), { recursive: true });
+    writeFileSync(path.join(repoRoot, "test", "guard.test.ts"), "test('g', () => {});\n");
+    const plan: any = {
+      nodes: [{ op: "create", id: "constraint:s:c", type: "Constraint", title: "C", summary: "c" }],
+      edges: [{ op: "create", id: "e1", type: "enforced_by", from: "constraint:s:c", to: "file:s:test/guard.test.ts" }],
+    };
+    const created = ensureEvidenceFileNodes(plan, "/unused", { loadGraph: () => ({ nodes: [] }), repoRoot });
+    assert.deepEqual(created, [{ id: "file:s:test/guard.test.ts", path: "test/guard.test.ts" }]);
+
+    const typoPlan: any = {
+      nodes: [{ op: "create", id: "constraint:s:c", type: "Constraint", title: "C", summary: "c" }],
+      edges: [{ op: "create", id: "e1", type: "enforced_by", from: "constraint:s:c", to: "file:s:test/typo.test.ts" }],
+    };
+    assert.throws(
+      () => ensureEvidenceFileNodes(typoPlan, "/unused", { loadGraph: () => ({ nodes: [] }), repoRoot }),
+      /--enforced-by file:s:test\/typo\.test\.ts.*does not exist on disk/
+    );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

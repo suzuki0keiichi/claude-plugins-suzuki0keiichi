@@ -72,9 +72,26 @@
 
 閉じ忘れ・レガシー化した Investigation を、`stocktake` verb の機械検出 + `graphrag-stocktake` skill の裏取り裁定で `state:closed` に整える定期スイープ。閉じるだけで削除はしない。`brief --mode resume` が溜まりを検知すると `stocktake_hint` を返す。
 
+## 登記層（Constraint の機械強制）
+
+散文だけの Constraint はコードが違反しても何も落ちない（= 注意力頼みの強制に縮退し、日記化する）。これを防ぐ最小の結線が `enforced_by`:
+
+- **新規 Constraint は enforcement の選択が必須**: `--enforced-by file:<s>:<path>`（破ったら落ちる検査 = テスト/lint/型）か `--unenforceable "<理由>"`（法規/SLA など機械強制できない外部条件の明示宣言）。
+- **検査ファイル側にはマーカー** `// graphrag:enforces constraint:<system>:<slug> — <題>` を書く。グラフを引かない人がテストを消す/骨抜きにする瞬間に、現場で効く警告になる。規約を知らない読者も `graphrag` で辿れる（grep → `.graphrag/` → vault）し、`git grep graphrag:enforces` の1発でリポジトリの登記済み enforcer 一覧が出る。
+- **`constraint-check` verb（walker）** が全 Constraint の配線を双方向で突合する: enforcer の消滅（error）・skip・マーカー孤児（tombstone 301 追跡）・未登記 enforcer（そのまま貼れる plan_fragment を返す）。全 finding が `next_step`（何が駄目か・どうすれば直るか）を持つ。CI では `--strict` で warn も赤にできる。
+- `graphrag-pr-review` はレビュー冒頭にこの機械 pass を必ず走らせる（LLM 照合の前段）。
+
+## 配置の地図（Component/Layer/Concern を「必ず見る」に近づける）
+
+各セッションのエージェントが「今必要な」実装を思い思いの場所に置いていくのが、構造ドリフトの最大の発生源。禁止ではなく**地図を機械的に提示する**ことで配置を枠に寄せる（無所属は正当 — 小さいクラスタは Component を彫らないのが carving の思想なので、「属していない = 悪」とはしない）:
+
+- **ask に area_map が毎回同乗**: 触る領域の登記済み Component/Layer/Concern の一覧。設計時に「見ない方が難しい」状態にする（発火実績のあるトリガーに地図を載せる）。
+- **新規ファイル作成の瞬間に hook が局所地図を注入**（PostToolUse/Write）: そのディレクトリがどの Component の縄張りかをその場で提示。見せる地図が無ければ無音。
+- **`frame-check` verb**: 高精度2判定のみ所見化 — `in-footprint-unwired`（一意の縄張り内に未配線 → 貼れる plan_fragment 同梱）と `component-candidate`（未登記の山が閾値超え = **Component が生まれたがっている**合図）。フラット配置では縄張りが重なるため誤発砲せず沈黙する。pr-review の機械 pass でも diff に対して走る。
+
 ## テスト
 
 ```bash
-node --experimental-strip-types --test graphrag/*.test.ts   # CLI（702 tests）
+node --experimental-strip-types --test graphrag/*.test.ts   # CLI
 node --test hooks/*.test.mjs                                 # フック
 ```

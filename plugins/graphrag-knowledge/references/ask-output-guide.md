@@ -12,6 +12,15 @@ Common principle: null / missing fields are not emitted (no filler like `path: n
 
 Computed from the **final stage**'s result (if brief sufficed, brief's; if it dug down to evidence, evidence's confidence/count). Wording ready to relay to the user as the explanation (translate into the conversation language when relaying).
 
+## `area_map` — the registered structure of the area you are about to touch
+
+Rides along on **every** ask (computed from the hit set: matched Files + Files located by matched knowledge nodes' `documented_by`/`sets_policy_for`/`constrains`/`enforced_by`/`risks_in` edges). This is the design-time reference the crosscut layer exists for — **consult it before choosing where new code lives**; do not fire an extra ask for it.
+
+- `crosscuts[]` — Component/Layer/Concern covering the area: `{id, type, title, files_in_scope, files_total, matched_directly?}`, sorted by relevance, capped at 8. `matched_directly` marks structure nodes that themselves matched the query.
+- `unframed_files[]` — scope Files belonging to no crosscut (capped; `unframed_overflow` counts the rest). **Not a verdict** — small clusters legitimately have no Component.
+- `note` — how to read the map. When `crosscuts` is empty the area genuinely has no registered structure (also legitimate).
+- Placement rules of thumb: new code that belongs to a listed frame goes inside it (wire via `evidenced_by`); a genuinely new concept deserves its own registration instead of squatting. Per-path claimant lookup and paste-ready wiring fragments: `frame-check`.
+
 ## `stages[*].output.query.match_confidence`
 
 - `high` + matches present → adopt; it has stopped at `final_stage: brief`

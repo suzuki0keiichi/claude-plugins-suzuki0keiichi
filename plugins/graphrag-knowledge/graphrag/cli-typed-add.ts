@@ -152,6 +152,17 @@ export type AddConstraintArgs = {
   // E2 add-constraint: --constrains 必須 ≥1。constrains: Constraint → Decision|File|OperationalKnowledge
   // Constraint は documented_by 不可・evidence 不要 (契約)。
   constrains: string[];
+  // 強制の結線 (どちらか一方が必須 — enforcement contract):
+  // enforcedBy: enforced_by: Constraint → File (破ったら落ちる検査: テスト/lint/型)。
+  // unenforceable: 機械強制できない外部条件 (法規/SLA 等) の明示宣言 — 理由文字列。
+  //   node に enforcement:"none" + enforcement_reason を刻み、constraint-check は
+  //   未ガードとして可視化し続ける (登記は許すが、見えなくはしない)。
+  enforcedBy?: string[];
+  unenforceable?: string;
+  // enforcement contract は system プリセット限定 (project vault には File が無く、
+  // Constraint は本来的に外部条件)。呼び出し側 (runAddConstraint) が vault の
+  // schema を解決して渡す。未指定は system (厳格側に倒す)。
+  schemaPreset?: "system" | "project";
 };
 
 export type AddGoalArgs = {
@@ -300,11 +311,49 @@ export function buildAddConstraintPlan(args: AddConstraintArgs) {
     throw new Error("buildAddConstraintPlan: --constrains is required (≥1; prevents orphan Constraint)");
   }
   const id = nodeId("constraint", args.system, args.slug);
-  // Constraint は documented_by 不可・evidence 不要 (契約)。エッジは constrains のみ。
-  const edges = fanOutEdges("constrains", id, "Constraint", constrains, "--constrains");
+  // Enforcement contract: 散文だけの Constraint は、コードが違反しても何も落ちず
+  // 「注意力による強制」に縮退する (書かれても不活性)。新規 Constraint は必ず
+  // 「機械的消費者を結線する」か「機械強制できないと明示宣言する」かのどちらかを選ぶ。
+  const enforcedBy = (args.enforcedBy ?? []).filter((s) => s.trim() !== "");
+  const unenforceable = typeof args.unenforceable === "string" ? args.unenforceable.trim() : "";
+  const preset = args.schemaPreset ?? "system";
+  if (preset === "project" && enforcedBy.length > 0) {
+    throw new Error(
+      "buildAddConstraintPlan: --enforced-by is a system-vault concept (project vaults have no File nodes, " +
+        "and their constraints are external conditions by nature). Drop --enforced-by; optionally declare " +
+        '--unenforceable "<why>" to record the reason.'
+    );
+  }
+  if (enforcedBy.length > 0 && unenforceable !== "") {
+    throw new Error(
+      "buildAddConstraintPlan: --enforced-by and --unenforceable are mutually exclusive " +
+        "(a constraint either has a mechanical enforcer or is declared unenforceable — not both). Drop one."
+    );
+  }
+  if (preset === "system" && enforcedBy.length === 0 && unenforceable === "") {
+    throw new Error(
+      "buildAddConstraintPlan: every new Constraint must choose its enforcement. Either:\n" +
+        `  (a) --enforced-by file:${args.system}:<path/to/check> — the executable check (test / lint config / type ` +
+        "definition) that FAILS when this constraint is violated. Also put a comment marker " +
+        `\`graphrag:enforces ${id}\` inside that file so constraint-check can cross-verify both directions; or\n` +
+        '  (b) --unenforceable "<why>" — this is an external condition (law / SLA / vendor limitation) that no ' +
+        "mechanical check can express. It will stay permanently visible as unguarded in constraint-check.\n" +
+        "A prose-only constraint enforces nothing — it decays into a diary entry that never fires when violated."
+    );
+  }
+  // Constraint は documented_by 不可・evidence 不要 (契約)。エッジは constrains + enforced_by。
+  const edges = [
+    ...fanOutEdges("constrains", id, "Constraint", constrains, "--constrains"),
+    ...fanOutEdges("enforced_by", id, "Constraint", enforcedBy, "--enforced-by")
+  ];
+  const node: Record<string, unknown> = { op: "create", id, type: "Constraint", title: args.title, summary: args.summary };
+  if (unenforceable !== "") {
+    node.enforcement = "none";
+    node.enforcement_reason = unenforceable;
+  }
   return {
     reason: args.reason ?? `新規 Constraint ${args.slug}`,
-    nodes: [withAliases(withDescription({ op: "create", id, type: "Constraint", title: args.title, summary: args.summary }, args.description), args.aliases)],
+    nodes: [withAliases(withDescription(node, args.description), args.aliases)],
     edges
   };
 }

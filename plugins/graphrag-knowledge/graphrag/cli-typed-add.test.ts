@@ -166,7 +166,7 @@ test("aliases は指定時に node に string[] として載る (全 verb)", () 
   assert.deepEqual(inv.nodes[0].aliases, ["e"]);
   const ro = buildAddRejectedOptionPlan({ system: "foo", slug: "x", title: "T", summary: "S", rejectedInFavorOf: "decision:foo:y", aliases: ["f"] });
   assert.deepEqual(ro.nodes[0].aliases, ["f"]);
-  const c = buildAddConstraintPlan({ system: "foo", slug: "x", title: "T", summary: "S", constrains: ["file:foo:a.ts"], aliases: ["g"] });
+  const c = buildAddConstraintPlan({ system: "foo", slug: "x", title: "T", summary: "S", constrains: ["file:foo:a.ts"], aliases: ["g"], unenforceable: "外部条件" });
   assert.deepEqual(c.nodes[0].aliases, ["g"]);
   const g = buildAddGoalPlan({ system: "foo", slug: "x", title: "T", summary: "S", aliases: ["h"] });
   assert.deepEqual(g.nodes[0].aliases, ["h"]);
@@ -314,7 +314,8 @@ test("add-risk --risks-in 文法違反 (Risk 宛先不可: Goal) は throw", () 
 test("add-constraint は Constraint ノード + constrains エッジ (≥1) を作る", () => {
   const plan = buildAddConstraintPlan({
     system: "foo", slug: "no-npm", title: "npm 禁止", summary: "pnpm 一択",
-    constrains: ["decision:foo:d1", "file:foo:a.ts", "operationalknowledge:foo:ok1"]
+    constrains: ["decision:foo:d1", "file:foo:a.ts", "operationalknowledge:foo:ok1"],
+    enforcedBy: ["file:foo:scripts/check-lockfile.test.ts"]
   });
   assert.equal(plan.nodes[0].type, "Constraint");
   assert.equal(plan.nodes[0].id, "constraint:foo:no-npm");
@@ -334,15 +335,79 @@ test("add-constraint は --constrains ≥1 を必須 (空/未指定は throw)", 
 
 test("add-constraint は documented_by を作らない (Constraint は evidence 不可)", () => {
   const plan = buildAddConstraintPlan({
-    system: "foo", slug: "no-npm", title: "T", summary: "S", constrains: ["file:foo:a.ts"]
+    system: "foo", slug: "no-npm", title: "T", summary: "S", constrains: ["file:foo:a.ts"],
+    unenforceable: "外部条件"
   });
   assert.equal(edgeOf(plan, "documented_by").length, 0);
 });
 
 test("add-constraint 文法違反 (constrains 宛先不可: Risk) は throw", () => {
   assert.throws(() => buildAddConstraintPlan({
-    system: "foo", slug: "no-npm", title: "T", summary: "S", constrains: ["risk:foo:r1"]
+    system: "foo", slug: "no-npm", title: "T", summary: "S", constrains: ["risk:foo:r1"],
+    unenforceable: "外部条件"
   }), /--constrains.*risk:foo:r1/);
+});
+
+// ───────────────────────── enforcement contract (登記層) ─────────────────────────
+
+test("add-constraint は enforcement の選択を必須にする (どちらも無ければ両方の処方を示して throw)", () => {
+  assert.throws(() => buildAddConstraintPlan({
+    system: "foo", slug: "no-sync-io", title: "T", summary: "S", constrains: ["file:foo:a.ts"]
+  }), (e: Error) =>
+    /--enforced-by/.test(e.message) &&
+    /--unenforceable/.test(e.message) &&
+    // マーカーリテラルをソースに置かない (この repo 自身の marker 逆走査を汚染しないため)
+    e.message.includes(`graphrag:enforces ${""}constraint:foo:no-sync-io`)
+  );
+});
+
+test("add-constraint --enforced-by は enforced_by (Constraint → File) エッジを作る", () => {
+  const plan = buildAddConstraintPlan({
+    system: "foo", slug: "no-sync-io", title: "T", summary: "S", constrains: ["file:foo:pay.ts"],
+    enforcedBy: ["file:foo:pay-io.test.ts", "file:foo:eslint.config.js"]
+  });
+  const edges = edgeOf(plan, "enforced_by");
+  assert.equal(edges.length, 2);
+  assert.ok(edges.every((e: any) => e.from === "constraint:foo:no-sync-io"));
+  assert.deepEqual(edges.map((e: any) => e.to).sort(), ["file:foo:eslint.config.js", "file:foo:pay-io.test.ts"]);
+  assert.ok(!("enforcement" in plan.nodes[0]), "enforcer 有りのとき enforcement:none を撒かない");
+});
+
+test("add-constraint --enforced-by 文法違反 (File 以外の宛先) は throw", () => {
+  assert.throws(() => buildAddConstraintPlan({
+    system: "foo", slug: "no-sync-io", title: "T", summary: "S", constrains: ["file:foo:a.ts"],
+    enforcedBy: ["decision:foo:d1"]
+  }), /--enforced-by.*decision:foo:d1/);
+});
+
+test("add-constraint --unenforceable は enforcement:none + 理由を刻む (enforced_by は作らない)", () => {
+  const plan = buildAddConstraintPlan({
+    system: "foo", slug: "gdpr", title: "T", summary: "S", constrains: ["decision:foo:d1"],
+    unenforceable: "法規要件はテストレベルで表現できない"
+  });
+  assert.equal(plan.nodes[0].enforcement, "none");
+  assert.equal(plan.nodes[0].enforcement_reason, "法規要件はテストレベルで表現できない");
+  assert.equal(edgeOf(plan, "enforced_by").length, 0);
+});
+
+test("add-constraint --enforced-by と --unenforceable の併用は throw (矛盾)", () => {
+  assert.throws(() => buildAddConstraintPlan({
+    system: "foo", slug: "x", title: "T", summary: "S", constrains: ["file:foo:a.ts"],
+    enforcedBy: ["file:foo:a.test.ts"], unenforceable: "理由"
+  }), /mutually exclusive/);
+});
+
+test("add-constraint project preset は enforcement 選択を要求しない (--enforced-by は拒否)", () => {
+  const plan = buildAddConstraintPlan({
+    system: "proj", slug: "budget-cap", title: "T", summary: "S", constrains: ["decision:proj:d1"],
+    schemaPreset: "project"
+  });
+  assert.equal(plan.nodes[0].type, "Constraint");
+  assert.ok(!("enforcement" in plan.nodes[0]));
+  assert.throws(() => buildAddConstraintPlan({
+    system: "proj", slug: "budget-cap", title: "T", summary: "S", constrains: ["decision:proj:d1"],
+    schemaPreset: "project", enforcedBy: ["file:proj:a.test.ts"]
+  }), /system-vault concept/);
 });
 
 // ───────────────────────── E2 add-goal (新設) ─────────────────────────

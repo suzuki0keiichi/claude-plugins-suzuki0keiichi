@@ -10,7 +10,7 @@ Canonical source: `graphrag/schema.ts`. This file covers the **system** preset (
   - `Decision` = Chose one option among alternatives.
   - `OperationalKnowledge` (abbr. OK) = Learned through operation. **Criterion: chose from alternatives → Decision; learned from operation → OK. When unsure, use Decision.**
   - `RejectedOption` = Considered and rejected alternative. First-class node to prevent repeating the same mistake.
-  - `Constraint` = Immutable external condition (law, SLA, technical limitation).
+  - `Constraint` = Invariant to uphold (design invariant, or an immutable external condition such as law/SLA). **Enforcement contract**: a prose-only constraint enforces nothing — wire the executable check that fails on violation via `enforced_by`, or declare `enforcement: "none"` + `enforcement_reason` for genuinely unenforceable external conditions (stays visible as unguarded in `constraint-check`).
   - `Goal` = Purpose / target state (absorbed v2 Requirement).
   - `Risk` = Future threat. Resolution via `reduces_risk` edge (Risk has no state).
   - `Investigation` = Purposeful inquiry (state: active/closed).
@@ -22,10 +22,12 @@ Canonical source: `graphrag/schema.ts`. This file covers the **system** preset (
   - Geological names (Stratum/Vein/Pocket) are aliases. **Indexer emits canonical names.**
 - **`Deliverable`** (v3.4): Release artifact. Multiple can exist in parallel. Referenced from project vaults via cross-vault ref (`vault:<slug>/deliverable:<sys>:<slug>`).
 
-## Edge Types (14)
+## Edge Types (16)
 
 - `documented_by`: Decision|RejectedOption|Risk|OK|Investigation|Deliverable → File
 - `evidenced_by`: Layer|Concern|Component → File
+- `enforced_by`: Constraint → File (**mechanical consumer** — the executable check (test / lint config / type definition) that FAILS when the constraint is violated. Put a comment marker `graphrag:enforces constraint:<system>:<slug>` inside that file; `constraint-check` cross-verifies both directions and hands back ready-made plan fragments for unregistered markers.)
+- `targets`: Goal → Deliverable
 - `derived_from`: Decision|RejectedOption|Risk|OK|Goal|Investigation → ConversationChunk|Investigation (**provenance** — "where did this knowledge come from". Unlike `has_premise` which is logical dependency.)
 - `discussed_in`: ConversationChunk → Investigation
 - `led_to`: Investigation → Decision
@@ -106,6 +108,16 @@ Strict rules (validated by `xref-check`, surfaced under `parent`):
 | `Investigation` | `"active"` \| `"closed"` |
 | `Decision` / `OperationalKnowledge` | `"superseded"` only (no state = current) |
 | `Goal` | `"planned"` \| `"active"` \| `"achieved"` \| `"abandoned"` |
+
+## Constraint enforcement attributes
+
+| Attribute | Meaning |
+|---|---|
+| (none, has `enforced_by` edge) | Mechanically enforced — violation fails a check. |
+| `enforcement: "none"` + `enforcement_reason` | Declared mechanically unenforceable (external condition: law / SLA / vendor limitation). Stays permanently visible as unenforceable in `constraint-check` instead of silently unguarded. |
+| (none, no `enforced_by`) | **Unguarded** — `constraint-check` warns with a wiring prescription. Legacy constraints land here until wired. |
+
+`add-constraint` requires choosing one: `--enforced-by file:<system>:<path>` (repeatable; auto-creates the File node when the path exists on disk) or `--unenforceable "<why>"`. Both at once is rejected. Project vaults are exempt (no File nodes; their constraints are external conditions by nature).
 
 ## Policy Reversal Recipe
 

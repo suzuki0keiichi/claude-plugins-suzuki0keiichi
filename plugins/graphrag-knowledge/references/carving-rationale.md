@@ -31,7 +31,9 @@ Layer/Concern/Component.
   collapse it into a "note" or "decision," "why it was not adopted" is the information a team most loses, so
   it is made independent. Connected via `rejected_in` (rejected in an investigation) and `supersedes` (a
   Decision overrides a rejected option).
-- **Constraint**: a constraint to uphold. `constrains` binds Decision/File/OperationalKnowledge.
+- **Constraint**: a constraint to uphold. `constrains` binds Decision/File/OperationalKnowledge; `enforced_by`
+  wires the executable check that fails on violation (or declare `enforcement: "none"` + reason for genuinely
+  unenforceable external conditions).
 - **Goal**: the system's final cause / end state (requirement = final cause = end state). Absorbs v2's
   Requirement. `refines` subdivides an upper Goal; grounded to its source via `has_premise` premises and
   `derived_from`.
@@ -94,6 +96,11 @@ contract that keeps the graph from turning to soup. Main intents:
   **source-required contract** (a knowledge node must be traceable to a passing source that holds
   raw_content).
 - `evidenced_by`: crosscut (Layer/Concern/Component) → File only. Intent must always be grounded to substance.
+- `enforced_by`: Constraint → File only — the executable check that fails when the constraint is violated.
+  A prose-only constraint has no mechanical consumer: nothing fails when code breaks it, so it enforces only
+  through attention and decays into an episodic diary entry. `enforced_by` lets a constraint borrow
+  "violate → something fails" from the test/lint/type layer; `constraint-check` audits the wiring both ways
+  (registry layer, distinct from the diary layer).
 - `contains` was **removed in v3.3** (it was the only "organizing edge"). Membership information is already
   held by the vault's existence and the id convention, so it was redundant. The edges that remain in the graph
   are meaning relations only.

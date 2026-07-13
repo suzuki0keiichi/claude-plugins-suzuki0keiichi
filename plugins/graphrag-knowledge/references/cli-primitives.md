@@ -149,7 +149,37 @@ No writes, deterministic extraction only: (1) revert commits → `RejectedOption
 node graphrag/cli.ts staleness-check [--root <repo>] [--vault <dir>] [--threshold-commits N]   # defaults: root=cwd, threshold=5
 ```
 
-For the Files pointed at by a knowledge node's (Decision/Constraint/Risk/OperationalKnowledge) `documented_by` / `sets_policy_for` / `constrains`, counts via git log the commits that touched that path since the node's `generated_at`, and lists those at or above the threshold as candidates (`node_id` / `node_title` / `file_path` / `commits_since` / `last_commit_subject`). Read-only, no semantic judgment — the judgment of whether it is truly stale is left to a human-initiated audit. Vault via `--vault` or `GRAPHRAG_VAULT_DIR`.
+For the Files pointed at by a knowledge node's (Decision/Constraint/Risk/OperationalKnowledge) `documented_by` / `sets_policy_for` / `constrains` / `enforced_by`, counts via git log the commits that touched that path since the node's `generated_at`, and lists those at or above the threshold as candidates (`node_id` / `node_title` / `file_path` / `commits_since` / `last_commit_subject`). Read-only, no semantic judgment — the judgment of whether it is truly stale is left to a human-initiated audit. Vault via `--vault` or `GRAPHRAG_VAULT_DIR`.
+
+## constraint-check — Constraint enforcement-wiring check (read-only)
+
+```sh
+node graphrag/cli.ts constraint-check [--vault <dir>] [--root <repo>] [--strict]   # defaults: root=cwd; exit 0 = ok/warn, 1 = error (--strict: warn also 1)
+```
+
+Walks every Constraint and cross-verifies its `enforced_by` wiring in **both directions** (registry layer walker — running the enforcers themselves stays CI / pre-commit / pr-review's job):
+
+- graph → code: `enforcer-missing` (target check file gone from disk — **error**: the graph promises enforcement that can no longer run) / `enforcer-skipped` (skip markers, best-effort per language) / `marker-missing` (check file lacks the `graphrag:enforces constraint:<system>:<slug>` comment — the `graphrag:` namespace lets readers who don't know the convention trace it: grep → `.graphrag/` → vault; `git grep graphrag:enforces` lists every registered enforcer).
+- code → graph: `orphan-marker` (marker points at a nonexistent Constraint; tombstone ledger traced for a 301 successor) / `unregistered-enforcer` (marker present but no `enforced_by` edge — returns a **ready-made `plan_fragment`** including the File node when absent, paste into commit-mutation).
+- registry hygiene: `unguarded` (no `enforced_by`, no `enforcement:"none"` declaration) / `unenforceable-no-reason` / `contradictory-enforcement`.
+
+Every finding carries `next_step` (what is wrong + concretely how to fix). Summary: `constraints: {total, enforced, unenforceable, unguarded}`. Marker scan uses `git grep` over tracked files, ignoring `*.md` and `.graphrag/`. Project vaults return ok with an explanatory note (enforcement is a system-vault concept). Recommended wiring flow: write the marker into the check file first, re-run — `unregistered-enforcer` hands you the exact fragment.
+
+## frame-check — placement map for new/changed files (read-only)
+
+```sh
+node graphrag/cli.ts frame-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--threshold-files N] [--strict]
+# input default: worktree changes (git diff --name-only HEAD + untracked). exit 0 (--strict: warn → 1)
+```
+
+Matches each input path against Component **footprints** (the directory territory derived from member Files' `evidenced_by` paths) and returns a per-file map: `entries[] = {path, status, claimants}` with `status` ∈ `registered` / `known-unframed` / `exempt` (BUILTIN_ORPHAN_PATTERNS + `.graphrag/carving.json`, same vocabulary as carving-check) / `non-impl` / `unwired` / `unclaimed`. **`unclaimed` is not a verdict** — small clusters legitimately have no Component (carving philosophy); the map shows candidates without accusing.
+
+Findings are limited to two high-precision cases, each with `next_step`:
+
+- `in-footprint-unwired` — the file sits inside exactly **one** component's home directory but has no `evidenced_by`. Either it belongs there (paste the included `plan_fragment` — File node included when absent), it belongs elsewhere (move it while it is cheap), or exempt with a reason. Flat layouts (overlapping footprints) never fire this — silence over friendly fire.
+- `component-candidate` — a touched directory now holds ≥ threshold unregistered implementation files (counted via `git ls-files`, exemptions excluded). Not a violation: the signal that **a Component wants to be born** — register it (+ `evidenced_by` members) or exempt the pile with reasons.
+
+This is carving-check #3/#4's norm applied instantly to arbitrary paths without waiting for a re-carve. Wired consumers: the `graphrag-pr-review` mechanical pass (diff files) and the PostToolUse Write hook (`hooks/frame-map.mjs` — injects the local map right when a new impl file is created; silent when there is nothing to show).
 
 ## world-join — join a vault to a world
 

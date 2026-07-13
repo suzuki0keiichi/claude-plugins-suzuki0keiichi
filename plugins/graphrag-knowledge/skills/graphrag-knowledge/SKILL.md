@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.9.2
+version: 4.10.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -110,21 +110,21 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 | Record operational knowledge | `$CLI add-ok --system <s> --slug <slug> --title "..." --summary "..." --evidence file:<s>:<path>` `[--premise <id,...>] [--refines <id>] [--reduces-risk <id,...>]` |
 | Record a risk | `$CLI add-risk --system <s> --slug <slug> --title "..." --summary "..." --evidence file:<s>:<path>` `[--risks-in <id,...>]` |
 | Record an investigation episode | `$CLI add-investigation --system <s> --slug <slug> --title "..." --summary "..." --raw-content "key commits:\n- 2026-MM-DD <hash> <subject>"` |
-| Record a constraint (invariant) | `$CLI add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` (`--constrains` required ≥1, target Decision\|File\|OK) |
+| Record a constraint (invariant) | `$CLI add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` + **enforcement choice (required)**: `--enforced-by file:<s>:<path/to/check>` (the test/lint/type check that FAILS on violation; also write a comment marker `graphrag:enforces constraint:<s>:<slug>` inside that file) OR `--unenforceable "<why>"` (external condition — law/SLA — no check can express). `--constrains` required ≥1 (target Decision\|File\|OK) |
 | Record a goal | `$CLI add-goal --system <s> --slug <slug> --title "..." --summary "..." [--refines <goal-id>] [--derived-from <id>] [--state planned\|active\|achieved\|abandoned]` |
 | Apply a complex plan (validated write to vault) | `$CLI commit-mutation <plan.json>` |
 | Initial indexing + concept extraction + quality gate | `$CLI carve --root <repo> --system <name>` (see `$REF/indexing-and-carving.md`) |
 | Check status (env / artifacts) | `$CLI inspect` |
 
-`--evidence` is required by schema for `add-*` (Decision/RejectedOption/Risk/OK without source backing get validation-rejected). Provide at least one `file:<system>:<path>`. **Exceptions**: `add-constraint` takes no evidence — requires `--constrains <id,...>` (target Decision|File|OK, ≥1) instead. `add-goal` also needs no evidence.
+`--evidence` is required by schema for `add-*` (Decision/RejectedOption/Risk/OK without source backing get validation-rejected). Provide at least one `file:<system>:<path>`. **Exceptions**: `add-constraint` takes no evidence — requires `--constrains <id,...>` (target Decision|File|OK, ≥1) **plus an enforcement choice** (`--enforced-by` or `--unenforceable`; system vaults only — a prose-only constraint enforces nothing and decays into a diary entry). `add-goal` also needs no evidence.
 
-- `--evidence file:<s>:<path>` **auto-creates the File node** when the path exists on disk (reported as `file_auto_created`); a nonexistent path is an explicit error.
+- `--evidence file:<s>:<path>` / `--enforced-by file:<s>:<path>` **auto-create the File node** when the path exists on disk (reported as `file_auto_created`); a nonexistent path is an explicit error.
 - `--system` and `--slug` are validated against `^[a-z0-9][a-z0-9._-]*$`.
 - All verbs: `[--aliases "a,b,c"]` / `[--description "..."]` / `[--dup-ack <id[,id...]>]`
 
 ## Headline verbs (chained, multi-stage in one command)
 
-- `ask "<q>"` — auto-escalation brief→search→evidence + auto-incrementing `--call-number` (reads vault)
+- `ask "<q>"` — auto-escalation brief→search→evidence + auto-incrementing `--call-number` (reads vault). Every ask carries `area_map` (the touched area's registered Component/Layer/Concern) — **consult it before deciding where new code lives** ($REF/ask-output-guide.md §area_map)
 - `carve --root <repo> --system <name>` — index → concern-hint → policy-suggest → carving-check chain. **Post-index, File and Component/Layer candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes concern-hint rejection / carving-check ERROR). **Concern (crosscut) discovery is driven by LLM conceptual modeling** — concern-hint machine candidates (for Concern discovery) are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
@@ -156,6 +156,8 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `staleness-check` | count commits since `generated_at` for files linked via documented_by/sets_policy_for/constrains, list candidates above threshold (read-only) |
 | `stocktake` | Investigation lifecycle audit (read-only, deterministic): returns suspect Investigations (stateless / active-and-stale / no-generated-at / progress-claiming-summary) as JSON. Adjudication is the `graphrag-stocktake` skill's job, not this verb's |
 | `fsck` | vault integrity check (read-only): parse / duplicate-id / id↔path / edge-endpoint / schema / round-trip / tombstone-ledger / uncommitted-delta (torn-write) checks as single JSON `{status, checks, counts}`; exit 1 only on error |
+| `constraint-check` | Constraint enforcement-wiring check (read-only, deterministic): walks every Constraint and cross-verifies `enforced_by` wiring in both directions — graph→code (enforcer file missing = **error** / skipped / marker-missing) and code→graph (orphan `graphrag:enforces` markers with tombstone 301 tracing / unregistered enforcers **with ready-made plan_fragment**). Every finding carries `next_step` (what is wrong + how to fix); apply `plan_fragment`s via commit-mutation. `git grep graphrag:enforces` = the repo's registered-enforcer list. Flags: `--root <repo>` `--strict` (warn→exit 1, for CI). exit 1 on error |
+| `frame-check` | placement map for new/changed files (read-only, deterministic): matches paths against Component footprints (member-File directories). Shows the map (`entries[].claimants`) and limits findings to two high-precision cases — `in-footprint-unwired` (file inside exactly ONE component's home, not wired; paste-ready plan_fragment) and `component-candidate` (a directory's unregistered pile crossed the threshold = a Component wants to be born). **`unclaimed` is not a verdict** — small clusters legitimately have no Component. Input: `--files <p,...>` / `--diff <range>` / default worktree. Flags: `--root` `--threshold-files N` (default 5) `--strict` |
 
 ## Parallel work and semantic merge (vault branch)
 
@@ -163,7 +165,7 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
 
 ## Schema quick-reference
 
-`graphrag/schema.ts` is canonical. Two presets: **system** (13 node types / 14 edge types, default) and **project** (16 node types / 22 edge types, selected via `schema: project`). The `schema` field in the vault's VAULT.md frontmatter decides the preset. **Run `inspect` to check the vault type first, then read only the matching quickref**: system → `$REF/schema-quickref-system.md`, project → `$REF/schema-quickref-project.md`. Never read both at once. For initial construction of a project vault, see the `graphrag-vault-init` skill. **Judgment criterion: chose from alternatives → Decision; learned from operation → OperationalKnowledge. When unsure, use Decision.**
+`graphrag/schema.ts` is canonical. Two presets: **system** (13 node types / 16 edge types, default) and **project** (16 node types / 22 edge types, selected via `schema: project`). The `schema` field in the vault's VAULT.md frontmatter decides the preset. **Run `inspect` to check the vault type first, then read only the matching quickref**: system → `$REF/schema-quickref-system.md`, project → `$REF/schema-quickref-project.md`. Never read both at once. For initial construction of a project vault, see the `graphrag-vault-init` skill. **Judgment criterion: chose from alternatives → Decision; learned from operation → OperationalKnowledge. When unsure, use Decision.**
 
 ## Mutation Plan
 
@@ -216,6 +218,12 @@ Do not wait for the user to say "remember this." Write via `add-*` immediately w
   "tried approach X, hit constraint Y, had to retreat." **Capture this especially** — the #1 type that leaves no trace outside source code; not writing it means repeating the same failure.
   → `add-rejected-option --title "<tried approach>" --summary "<failure mode>" --rejected-in-favor-of <chosen Decision id>`
   → if the story spans multiple events, also `add-investigation` and connect via led_to
+- **A bug's root cause was a violated invariant (action trigger — fires when you write the regression test)**:
+  the regression test you just wrote IS the invariant's mechanical enforcer — register both in one move.
+  Invariants have no natural write trigger of their own ("ownership is undecided" never *happens* as an event),
+  so this moment — a boundary got crossed and you just pinned it with a test — is the one reliable chance to
+  turn the invariant into a registered, machine-guarded Constraint instead of a diary entry about the fix.
+  → `add-constraint --title "<invariant>" --summary "<what must hold>" --constrains <violated-target-id,...> --enforced-by file:<s>:<path/to/regression.test>` + write the `graphrag:enforces constraint:<s>:<slug>` marker into the test
 
 ### Vault isolation guard
 
@@ -247,7 +255,7 @@ Report graph changes in natural language, **in the conversation language** (what
 
 - `$REF/cli-primitives.md`: full flag reference for all primitives
 - `$REF/mutation-templates.md`: plan templates for Concern / Layer / Component / Update / Delete / policy reversal + suggestions details
-- `$REF/schema-quickref-system.md`: system preset (13+14) / allowed pairs / state vocabulary / policy-reversal recipe
+- `$REF/schema-quickref-system.md`: system preset (13+16) / allowed pairs / state vocabulary / enforcement contract / policy-reversal recipe
 - `$REF/schema-quickref-project.md`: project preset (16+22) / allowed pairs / state vocabulary / cross-vault ref / judgment criteria
 - `$REF/ask-output-guide.md`: detailed ask output field guide (match_confidence / repeat_state / world_hints / standout)
 - `$REF/topology-gap-review.md`: graph structure self-reflection protocol on bug discovery

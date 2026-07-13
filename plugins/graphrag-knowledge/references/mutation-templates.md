@@ -59,9 +59,9 @@ Goals relate to each other via `refines`; connection to grounds is via `derived_
 
 - If there is no parent Goal, `edges` may be empty. To ground it in the originating conversation/investigation, add `Goal -derived_from-> ConversationChunk|Investigation`.
 
-## Constraint (constraint, points at its target via constrains)
+## Constraint (constraint, points at its target via constrains + its enforcer via enforced_by)
 
-> A single Constraint is covered by `add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` (`--constrains` required ≥1, target Decision|File|OK). Constraint disallows documented_by and needs no evidence. The template below is for assembling multiple constrains at once.
+> A single Constraint is covered by `add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` plus an **enforcement choice** — `--enforced-by file:<s>:<path>` or `--unenforceable "<why>"` (`--constrains` required ≥1, target Decision|File|OK). Constraint disallows documented_by and needs no evidence. The template below is for assembling multiple constrains at once.
 
 ```json
 {
@@ -71,13 +71,34 @@ Goals relate to each other via `refines`; connection to grounds is via `derived_
   ],
   "edges": [
     { "op": "create", "id": "constraint_<slug>__constrains__file_<file_slug>",
-      "type": "constrains", "from": "constraint:<system>:<slug>", "to": "file:<system>:<path>" }
+      "type": "constrains", "from": "constraint:<system>:<slug>", "to": "file:<system>:<path>" },
+    { "op": "create", "id": "constraint_<slug>__enforced_by__file_<check_slug>",
+      "type": "enforced_by", "from": "constraint:<system>:<slug>", "to": "file:<system>:<path/to/check>" }
   ]
 }
 ```
 
 - `constrains`: Constraint → Decision / File / OperationalKnowledge.
 - Show "what this constraint binds" with one or more constrains (a specific Decision / a specific File / a specific OK). A norm that applies to the whole vault goes in CLAUDE.md / AGENTS.md, not the graph.
+- `enforced_by`: Constraint → File — the **mechanical consumer** (test / lint config / type definition) that FAILS when the constraint is violated. A prose-only constraint enforces nothing (it decays into a diary entry); note that commit-mutation does **not** auto-create File nodes, so include the File `create` in the same plan when the check file is not yet in the vault. Write the comment marker `graphrag:enforces constraint:<system>:<slug>` inside the check file (recommended: append the constraint title as trailing prose for human readers) — `constraint-check` cross-verifies wiring in both directions and, for a marker without a registered edge, returns a ready-made `plan_fragment` you can paste straight into a plan.
+- Genuinely unenforceable external condition (law / SLA): instead of an enforced_by edge, set `"enforcement": "none", "enforcement_reason": "<why>"` on the node — it stays visible as unenforceable in `constraint-check` instead of silently unguarded.
+
+### Wiring an enforcer onto an EXISTING Constraint (constraint-check `unguarded` の処方)
+
+```json
+{
+  "reason": "wire enforcement for constraint:<system>:<slug>",
+  "nodes": [
+    { "op": "create", "id": "file:<system>:<path/to/check>", "type": "File", "path": "<path/to/check>", "title": "<basename>" }
+  ],
+  "edges": [
+    { "op": "create", "id": "constraint_<slug>__enforced_by__file_<check_slug>",
+      "type": "enforced_by", "from": "constraint:<system>:<slug>", "to": "file:<system>:<path/to/check>" }
+  ]
+}
+```
+
+Drop the File create when the node already exists. Recommended flow: write the `graphrag:enforces` marker into the check file first, then run `constraint-check` — its `unregistered-enforcer` finding hands you this exact fragment with real ids filled in.
 
 ## Update (change the description of an existing node)
 

@@ -1,7 +1,7 @@
 {
   "name": "graphrag-knowledge",
   "description": "プロジェクトの永続知識グラフ(採用判断/却下案/制約/目的/リスク/運用知識/横断関心/File)を vault(Obsidian Markdown)を単一正本として安全に読み書きするスキル + CLI。雑な要求からでも触る領域の Decision/Risk/運用知識を漏れなく把握し、判断の経緯や影響波及を辿り、結論を永続化する。LLM は生クエリを書かず JSON in / mutation plan out のみ扱う。",
-  "version": "1.20.1",
+  "version": "1.21.0",
   "author": {
     "name": "suzuki0keiichi"
   },

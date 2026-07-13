@@ -12,5 +12,6 @@ export const EDGE_LABELS_JA = {
   supersedes: "置き換え",
   reduces_risk: "リスク低減",
   risks_in: "リスクがある",
-  evidenced_by: "根拠"
+  evidenced_by: "根拠",
+  enforced_by: "強制検査"
 };

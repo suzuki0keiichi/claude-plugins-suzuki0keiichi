@@ -1,6 +1,6 @@
 ---
 name: graphrag-pr-review
-version: 1.6.1
+version: 1.7.0
 description: PR や diff を、AI 自身がグラフ（プロジェクトの永続知識）と照合して概念レベルでレビューし、所見(findings)を返す。境界 (Layer/Concern/Component) の確認だけでなく、Constraint 違反・却下案 (RejectedOption) の再導入・運用知識 (OperationalKnowledge) の再踏襲・Risk の再開・Goal との整合・進行中 Investigation との衝突まで、全知見タイプに diff を尋問する。「この PR をレビューして」「この差分をグラフ的に見て」「概念が崩れてない?」「方針に反してない?」と、実装後の変更の是非を問われた時に使う（行レベルのバグ探しが主目的ではない）。人間に渡す説明資料(HTML)が欲しい時は graphrag-review-doc、実装前の設計レビューは graphrag-design-review、変更の記録は graphrag-knowledge。スラッシュ: /graphrag-knowledge:graphrag-pr-review
 ---
 
@@ -19,6 +19,22 @@ For the shared foundation, CLI invocation, the reverse-lookup skeleton, the sema
 If `$ARGUMENTS` carries a base/head (e.g. `main...HEAD`), use it; otherwise target the current working diff.
 
 ## Procedure (execute method §1.5 → §2 → §2.3 → §2.5 → §3 → §4 verbatim)
+
+M. **Mechanical enforcement pass (deterministic — runs BEFORE any LLM matching, never skipped)** — run
+   `$CLI constraint-check --root <repo>`. This is the only step of the review that does not depend on attention:
+   it walks every Constraint's `enforced_by` wiring in both directions (enforcer file deleted/renamed → error;
+   skipped; marker orphaned; enforcer unregistered). Carry into the findings: **every `error`** (top of the ACK
+   band — the graph promises enforcement that can no longer run), plus every `warn` whose `constraint_id` or
+   `file_path` intersects the diff (e.g. the diff deletes or skips an enforcer, or adds a check whose
+   `graphrag:enforces` marker is unregistered — surface its ready-made `plan_fragment` as the resolution). Unguarded
+   constraints outside the diff go to the accounting (§4), not the findings. The LLM interrogation of
+   Constraints in step 5 starts FROM this output, not instead of it.
+   Then run `$CLI frame-check --diff <base>...<head> --root <repo>` (placement pass, same determinism): carry
+   `in-footprint-unwired` findings on added files (a file created inside exactly one component's home without
+   wiring — resolution is the included `plan_fragment`, or moving the file) and `component-candidate` findings
+   (an unregistered pile crossed the threshold — a Component may want to be born) into the advisory band.
+   `unclaimed` entries are NOT findings — placement without a frame is legitimate for small clusters; mention
+   them only in the accounting.
 
 0. **Anchor pass (freshness precheck)** — execute method §1.5 verbatim: one `evidence --types File --limit 1 --neighbors 2` per changed File, **results kept for reuse** (§2 reads the frame off them, §2.5 the impact zone — no re-firing). For Files absent from the graph, surface "stale index" at **the top of the findings** (its cause and prescription differ from the binding gap in §4).
 1. **Get the changed Files and read the diff** — method §2-1: the file list (`git diff --name-only <base>...<head>`) *and* the diff content itself (the current working diff if no range is given). The digests, the interrogation and the corroboration all judge hunks, not file names.

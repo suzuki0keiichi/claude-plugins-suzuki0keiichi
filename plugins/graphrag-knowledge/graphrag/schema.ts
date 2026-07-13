@@ -59,6 +59,7 @@ export const EDGE_TYPES = [
   "reduces_risk",
   "risks_in",
   "evidenced_by",
+  "enforced_by",
   "targets"
 ];
 
@@ -154,6 +155,13 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
   ],
   constrains: [
     ["Constraint", ["Decision", "File", "OperationalKnowledge"]]
+  ],
+  // Constraint の機械的消費者。宛先 File = その不変条件を破ると落ちる実行可能な検査
+  // (テスト / lint 設定 / 型定義)。散文の Constraint はコードが違反しても何も落ちず
+  // 「注意力による強制」に縮退する — enforced_by は「破ったら落ちる」を検査から借りる
+  // 唯一の結線。無い Constraint は constraint-check が未ガードとして可視化し続ける。
+  enforced_by: [
+    ["Constraint", "File"]
   ],
   // 横断構造 (Layer/Concern/Component) を宛先に許すのは「この部品/層/関心の全体に効く」
   // という方針/リスクの正しい高度を schema に用意するため。File 集合に張ると後から

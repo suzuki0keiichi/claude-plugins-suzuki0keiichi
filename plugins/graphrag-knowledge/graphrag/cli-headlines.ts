@@ -52,6 +52,7 @@ import { countBindingDebt } from "./binding-debt.ts";
 import { importVault } from "./import-vault.ts";
 import { resolveSchema } from "./schema-registry.ts";
 import { indexCodebase, resolvePreviousGraph } from "./index-codebase.ts";
+import { buildAreaMap } from "./crosscut-map.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
 import { main as runConcernHint } from "./suggest-concern-hints.ts";
 import { main as runEdgeSuggestPolicy } from "./suggest-policy-edges.ts";
@@ -123,30 +124,38 @@ function asEvidenceArray(flags: Record<string, any>): string[] | undefined {
 }
 
 /**
- * E8: typed-add --evidence が指す File ノードが vault に無いときの摩擦解消。
+ * E8: typed-add --evidence / --enforced-by が指す File ノードが vault に無いときの摩擦解消。
  * 参照 path が repo 上に実在する場合に限り、最小の File ノード
  * {op:create, id, type:"File", path, title} を plan に自動追加する (typo ガード:
- * ディスクに無い path は「そう」と明示して失敗させる)。対象は plan の documented_by
- * エッジ (typed-add の evidence 経路) の宛先 `file:` id のみ。
+ * ディスクに無い path は「そう」と明示して失敗させる)。対象は plan の documented_by /
+ * enforced_by エッジ (typed-add の evidence / enforcer 経路) の宛先 `file:` id のみ。
  * 戻り値 = 自動追加した File (verb 出力・stderr で可視化する)。
  */
+const FILE_TARGET_EDGE_FLAGS: Record<string, string> = {
+  documented_by: "--evidence",
+  enforced_by: "--enforced-by"
+};
+
 export function ensureEvidenceFileNodes(
   plan: any,
   vaultDir: string,
   deps: { loadGraph?: () => any; repoRoot?: string } = {}
 ): { id: string; path: string }[] {
-  const fileTargetIds: string[] = (plan.edges ?? [])
-    .filter(
-      (e: any) =>
-        (e.op ?? "create") === "create" &&
-        e.type === "documented_by" &&
-        typeof e.to === "string" &&
-        e.to.startsWith("file:")
-    )
-    .map((e: any) => e.to);
-  if (fileTargetIds.length === 0) return [];
+  const flagByTargetId = new Map<string, string>();
+  for (const e of plan.edges ?? []) {
+    if (
+      (e.op ?? "create") === "create" &&
+      typeof e.type === "string" &&
+      FILE_TARGET_EDGE_FLAGS[e.type] !== undefined &&
+      typeof e.to === "string" &&
+      e.to.startsWith("file:")
+    ) {
+      if (!flagByTargetId.has(e.to)) flagByTargetId.set(e.to, FILE_TARGET_EDGE_FLAGS[e.type]);
+    }
+  }
+  if (flagByTargetId.size === 0) return [];
   const planNodeIds = new Set((plan.nodes ?? []).map((n: any) => n.id));
-  const candidates = [...new Set(fileTargetIds)].filter((id) => !planNodeIds.has(id));
+  const candidates = [...flagByTargetId.keys()].filter((id) => !planNodeIds.has(id));
   if (candidates.length === 0) return [];
   const graph = deps.loadGraph ? deps.loadGraph() : importVault(vaultDir);
   const existingIds = new Set((graph.nodes ?? []).map((n: any) => n.id));
@@ -160,7 +169,7 @@ export function ensureEvidenceFileNodes(
     const relPath = id.split(":").slice(2).join(":");
     if (!relPath || !existsSync(path.join(repoRoot, relPath))) {
       throw new Error(
-        `--evidence ${id}: File node does not exist in the vault, and path "${relPath}" does not exist on disk ` +
+        `${flagByTargetId.get(id)} ${id}: File node does not exist in the vault, and path "${relPath}" does not exist on disk ` +
           `(repo root: ${repoRoot}). Fix the path if it is a typo; if it genuinely refers to something outside ` +
           `this repo, create the File node manually via commit-mutation.`
       );
@@ -305,8 +314,20 @@ async function runAddRisk(argv: string[]) {
 
 async function runAddConstraint(argv: string[]) {
   const f = parseFlagsArgv(argv);
+  // 値なしの --unenforceable (true) は理由の欠落 — 黙って空扱いにせず具体的に案内する。
+  if (f.unenforceable === true) {
+    throw new Error(
+      '--unenforceable requires a reason: --unenforceable "<why no mechanical check can express this>" ' +
+        "(the reason is recorded as enforcement_reason and shown whenever constraint-check lists the constraint as unguarded)."
+    );
+  }
+  // enforcement contract は system プリセット限定 (project vault の Constraint は外部条件)。
+  // vault 未解決なら厳格側 (system) に倒す — apply 時にどのみち vault 必須で止まる。
+  const vaultDirForSchema = process.env.GRAPHRAG_VAULT_DIR;
+  const schemaPreset = vaultDirForSchema ? (resolveSchema(vaultDirForSchema).id as "system" | "project") : "system";
   // E2 add-constraint: --constrains 必須 ≥1 (builder が空で throw)。
   // Constraint は documented_by 不可・evidence 不要 (契約) → evidence は渡さない。
+  // enforcement contract: --enforced-by (機械的消費者) か --unenforceable (明示宣言) のどちらかが必須。
   const plan = buildAddConstraintPlan({
     system: requireFlag(f, "system"),
     slug: requireFlag(f, "slug"),
@@ -315,7 +336,10 @@ async function runAddConstraint(argv: string[]) {
     description: strFlag(f, "description"),
     reason: strFlag(f, "reason"),
     aliases: csvFlag(f, "aliases"),
-    constrains: csvFlag(f, "constrains") ?? []
+    constrains: csvFlag(f, "constrains") ?? [],
+    enforcedBy: csvFlag(f, "enforced-by"),
+    unenforceable: strFlag(f, "unenforceable"),
+    schemaPreset
   });
   await applyPlanAndReport(plan, f);
 }
@@ -548,10 +572,21 @@ export async function runAsk(argv: string[]) {
       }
     : briefOutcome;
 
+  // ① area_map: 今回触る領域の登記済み横断構造 (Component/Layer/Concern) を毎回同乗させる。
+  // 「設計で必ず参考にする」を新トリガーで作るのは無理 (発火しないトリガーは無いのと同じ) —
+  // 発火実績のある ask に地図を載せ、見ない方が難しい状態にする。失敗しても ask 本体は落とさない。
+  let areaMap: any = undefined;
+  try {
+    areaMap = buildAreaMap(graphData, collectAskScopeIds(briefOut, evidenceOut));
+  } catch (error) {
+    areaMap = { error: error instanceof Error ? error.message : String(error) };
+  }
+
   process.stdout.write(JSON.stringify({
     question,
     call_number: callNumber,
     final_stage: finalStage,
+    area_map: areaMap,
     next_action_hint: shouldEscalate(lastOutcome)
       ? "Try one different keyword → if still empty, switch to reading code/docs directly (the launcher increments --call-number structurally — do not over-trust the excessive signal)"
       : `${finalStage} result is sufficient — proceed to judgment from here`,
@@ -945,6 +980,26 @@ async function runAddTheme(argv: string[]) {
     encompasses: csvFlag(f, "encompasses")
   });
   await applyPlanAndReport(plan, f);
+}
+
+/**
+ * ask の各段出力からヒットしたノード id を防御的に収集する (area_map の scope)。
+ * 対象: brief matches / evidence direct_evidence の本体と、その relations に載る隣接ノード。
+ */
+export function collectAskScopeIds(briefOut: any, evidenceOut: any): string[] {
+  const ids = new Set<string>();
+  const take = (entry: any) => {
+    const id = entry?.node?.id;
+    if (typeof id === "string") ids.add(id);
+    for (const rel of entry?.relations ?? []) {
+      const rid = rel?.node?.id;
+      if (typeof rid === "string") ids.add(rid);
+    }
+  };
+  for (const m of briefOut?.query?.matches ?? []) take(m);
+  for (const ev of evidenceOut?.direct_evidence ?? []) take(ev);
+  for (const gc of evidenceOut?.graph_context ?? []) take(gc);
+  return [...ids];
 }
 
 export async function dispatchHeadline(verb: string, argv: string[]): Promise<void> {
