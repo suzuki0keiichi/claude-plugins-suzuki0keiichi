@@ -53,6 +53,7 @@ import { importVault } from "./import-vault.ts";
 import { resolveSchema } from "./schema-registry.ts";
 import { indexCodebase, resolvePreviousGraph } from "./index-codebase.ts";
 import { buildAreaMap } from "./crosscut-map.ts";
+import { enforcementDebt } from "./constraint-check.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
 import { main as runConcernHint } from "./suggest-concern-hints.ts";
 import { main as runEdgeSuggestPolicy } from "./suggest-policy-edges.ts";
@@ -582,11 +583,33 @@ export async function runAsk(argv: string[]) {
     areaMap = { error: error instanceof Error ? error.message : String(error) };
   }
 
+  // enforcement contract 導入前の vault への移行導線: 未ガード Constraint があれば
+  // ask に同乗して知らせる (stocktake_hint と同じ流儀 — 発火実績のあるトリガーに載せる)。
+  let enforcementDebtOut: any = undefined;
+  if (askSchema?.id === "system") {
+    try {
+      const debt = enforcementDebt(graphData);
+      if (debt.unguarded > 0) {
+        enforcementDebtOut = {
+          unguarded_constraints: debt.unguarded,
+          constraints_total: debt.total,
+          hint:
+            `${debt.unguarded} Constraint(s) in this vault have no mechanical consumer — nothing fails when they are ` +
+            "violated (likely written before the enforcement contract). Run `constraint-check` for per-constraint " +
+            'prescriptions: wire the check that fails on violation via enforced_by, or declare enforcement:"none" with a reason.'
+        };
+      }
+    } catch {
+      // 同乗情報の失敗で ask 本体を落とさない
+    }
+  }
+
   process.stdout.write(JSON.stringify({
     question,
     call_number: callNumber,
     final_stage: finalStage,
     area_map: areaMap,
+    ...(enforcementDebtOut !== undefined ? { enforcement_debt: enforcementDebtOut } : {}),
     next_action_hint: shouldEscalate(lastOutcome)
       ? "Try one different keyword → if still empty, switch to reading code/docs directly (the launcher increments --call-number structurally — do not over-trust the excessive signal)"
       : `${finalStage} result is sufficient — proceed to judgment from here`,
@@ -788,15 +811,27 @@ async function runInspect(_argv: string[]) {
 
   // binding_debt: if vault is readable, output the count of knowledge nodes without bindings as a single integer.
   // Absent vault / read failure is non-fatal: output null + reason honestly (never drop inspect).
+  // enforcement_debt (登記層): 未ガード Constraint 数を同枠で報告 (system スキーマのみ)。
   let bindingDebt: { count: number | null; reason?: string };
+  let enforcementDebtInfo: { unguarded: number | null; total?: number; reason?: string };
   if (!vaultDir) {
     bindingDebt = { count: null, reason: "GRAPHRAG_VAULT_DIR not set" };
+    enforcementDebtInfo = { unguarded: null, reason: "GRAPHRAG_VAULT_DIR not set" };
   } else {
     try {
       const graph = await loadGraph(vaultDir);
       bindingDebt = { count: countBindingDebt(graph) };
+      const schemaId = resolveSchema(vaultDir).id;
+      if (schemaId === "system") {
+        const debt = enforcementDebt(graph);
+        enforcementDebtInfo = { unguarded: debt.unguarded, total: debt.total };
+      } else {
+        enforcementDebtInfo = { unguarded: null, reason: `schema ${schemaId} — enforcement is a system-vault concept` };
+      }
     } catch (error) {
-      bindingDebt = { count: null, reason: error instanceof Error ? error.message : String(error) };
+      const reason = error instanceof Error ? error.message : String(error);
+      bindingDebt = { count: null, reason };
+      enforcementDebtInfo = { unguarded: null, reason };
     }
   }
 
@@ -824,7 +859,8 @@ async function runInspect(_argv: string[]) {
       world_cache: inspectFileInfo(worldDir ? worldCachePath(worldDir) : undefined)
     },
     vault_isolation: detectVaultIsolation(),
-    binding_debt: bindingDebt
+    binding_debt: bindingDebt,
+    enforcement_debt: enforcementDebtInfo
   }, null, 2) + "\n");
 }
 

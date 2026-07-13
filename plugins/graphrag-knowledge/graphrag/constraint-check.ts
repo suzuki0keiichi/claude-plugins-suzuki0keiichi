@@ -488,6 +488,27 @@ export function constraintCheck(
   };
 }
 
+/**
+ * ask / inspect 同乗用の軽量集計: 未ガード Constraint 数。
+ * enforcement contract 導入前に作られた vault を新版で開いた時の移行導線 —
+ * 「新バージョンでは繋がないとな」を、利用者が constraint-check を知らなくても
+ * 普段の読み (ask) で気づける形にする。system スキーマ前提 (呼び出し側でゲート)。
+ */
+export function enforcementDebt(graph: { nodes: any[]; edges: any[] }): { total: number; unguarded: number } {
+  const enforced = new Set<string>();
+  for (const e of graph.edges ?? []) {
+    if (e?.type === "enforced_by" && typeof e.from === "string") enforced.add(e.from);
+  }
+  let total = 0;
+  let unguarded = 0;
+  for (const n of graph.nodes ?? []) {
+    if (canonicalType(n?.type as string) !== "Constraint") continue;
+    total += 1;
+    if (!enforced.has(String(n.id)) && n.enforcement !== "none") unguarded += 1;
+  }
+  return { total, unguarded };
+}
+
 function parseArgs(argv: string[]) {
   const p: Record<string, string | true> = {};
   for (let i = 0; i < argv.length; i += 1) {

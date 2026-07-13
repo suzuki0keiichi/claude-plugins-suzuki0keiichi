@@ -80,6 +80,7 @@
 - **検査ファイル側にはマーカー** `// graphrag:enforces constraint:<system>:<slug> — <題>` を書く。グラフを引かない人がテストを消す/骨抜きにする瞬間に、現場で効く警告になる。規約を知らない読者も `graphrag` で辿れる（grep → `.graphrag/` → vault）し、`git grep graphrag:enforces` の1発でリポジトリの登記済み enforcer 一覧が出る。
 - **`constraint-check` verb（walker）** が全 Constraint の配線を双方向で突合する: enforcer の消滅（error）・skip・マーカー孤児（tombstone 301 追跡）・未登記 enforcer（そのまま貼れる plan_fragment を返す）。全 finding が `next_step`（何が駄目か・どうすれば直るか）を持つ。CI では `--strict` で warn も赤にできる。
 - `graphrag-pr-review` はレビュー冒頭にこの機械 pass を必ず走らせる（LLM 照合の前段）。
+- **旧バージョンで作った vault の移行導線**: 未ガードの Constraint が残っている vault を新版で開くと、普段の `ask` に `enforcement_debt`（未ガード件数 + 案内）が毎回同乗する（`inspect` にも同項目）。`constraint-check` を知らなくても「繋がないとな」に気づける。既存 Constraint は invalid にはならない — 可視化されるだけ。
 
 ## 配置の地図（Component/Layer/Concern を「必ず見る」に近づける）
 

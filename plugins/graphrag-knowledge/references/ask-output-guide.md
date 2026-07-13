@@ -21,6 +21,10 @@ Rides along on **every** ask (computed from the hit set: matched Files + Files l
 - `note` — how to read the map. When `crosscuts` is empty the area genuinely has no registered structure (also legitimate).
 - Placement rules of thumb: new code that belongs to a listed frame goes inside it (wire via `evidenced_by`); a genuinely new concept deserves its own registration instead of squatting. Per-path claimant lookup and paste-ready wiring fragments: `frame-check`.
 
+## `enforcement_debt` (only when > 0, system vaults)
+
+Migration rail for vaults written before the enforcement contract: when the vault holds Constraints with neither an `enforced_by` edge nor an `enforcement:"none"` declaration, every ask carries `{unguarded_constraints, constraints_total, hint}`. **Relay this to the user once per session** — those constraints enforce nothing until wired. The prescription lives in `constraint-check` (per-constraint next_step + paste-ready plan_fragment). Absent key = no debt.
+
 ## `stages[*].output.query.match_confidence`
 
 - `high` + matches present → adopt; it has stopped at `final_stage: brief`

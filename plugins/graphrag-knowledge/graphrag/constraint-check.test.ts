@@ -238,6 +238,21 @@ test("マーカー走査不能 (git 無し等) は orphan/unregistered を skip 
   assert.equal(res.status, "ok");
 });
 
+test("enforcementDebt: enforced_by も enforcement:none も無い Constraint だけを数える (ask/inspect 同乗用)", async () => {
+  const { enforcementDebt } = await import("./constraint-check.ts");
+  const graph = {
+    nodes: [
+      { id: "constraint:s:wired", type: "Constraint", title: "a" },
+      { id: "constraint:s:declared", type: "Constraint", title: "b", enforcement: "none" },
+      { id: "constraint:s:naked", type: "Constraint", title: "c" },
+      { id: "decision:s:d", type: "Decision", title: "d" },
+      { id: "file:s:t.ts", type: "File", path: "t.ts", title: "t" }
+    ],
+    edges: [{ id: "e1", type: "enforced_by", from: "constraint:s:wired", to: "file:s:t.ts" }]
+  };
+  assert.deepEqual(enforcementDebt(graph as any), { total: 3, unguarded: 1 });
+});
+
 test("ENFORCES_MARKER_RE はコメント記法非依存でマーカーを抜く (プレースホルダは拾わない)", () => {
   const text = [
     MARKER,

@@ -260,6 +260,8 @@ test("defaultVectorIndexPath resolves to the vault's .graphrag/cache (in retriev
   assert.equal(defaultVectorIndexPath("/a/b/v"), expected);
 });
 
+// graphrag:enforces constraint:graphrag-skill-dev:semantic-non-negotiable — semantic 検索は非交渉、
+// lexical 単独フォールバックは設計しない (索引が無ければ ask は明示エラーで止まる)
 test("loadRequiredVectorIndex throws when the index file is absent (semantic required)", async () => {
   await assert.rejects(
     () => loadRequiredVectorIndex("/no/such/vault", undefined),

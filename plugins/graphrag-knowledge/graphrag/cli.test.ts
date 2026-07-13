@@ -37,6 +37,9 @@ test("cli has expected headline verbs", () => {
   }
 });
 
+// graphrag:enforces constraint:graphrag-skill-dev:llm-interface-three — LLM 接面は ranked JSON /
+// typed-add / mutation plan の3つのみ。verb 一覧の pin により、接面が増える変更は必ずこのテストを
+// 触る = 生クエリ経路の混入を意識的レビューに乗せる。
 test("listKnownVerbs returns all 41 verbs (21 primitive + 20 headline)", () => {
   const all = listKnownVerbs();
   assert.equal(all.length, 41);
