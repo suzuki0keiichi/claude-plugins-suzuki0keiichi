@@ -1020,21 +1020,31 @@ async function runAddTheme(argv: string[]) {
 
 /**
  * ask の各段出力からヒットしたノード id を防御的に収集する (area_map の scope)。
- * 対象: brief matches / evidence direct_evidence の本体と、その relations に載る隣接ノード。
+ * 対象: brief matches / evidence direct_evidence の本体と、その relations に載る隣接
+ * ノード、および evidence graph_context の nodes 表 (id キーの表であって配列ではない —
+ * evidence-packet.ts buildGraphContext の形状)。
  */
 export function collectAskScopeIds(briefOut: any, evidenceOut: any): string[] {
   const ids = new Set<string>();
   const take = (entry: any) => {
     const id = entry?.node?.id;
     if (typeof id === "string") ids.add(id);
-    for (const rel of entry?.relations ?? []) {
-      const rid = rel?.node?.id;
+    const rels = entry?.relations;
+    if (!Array.isArray(rels)) return;
+    for (const rel of rels) {
+      // relations は隣接ノードを node 埋め込みか裸の id のどちらかで持つ
+      const rid = rel?.node?.id ?? rel?.id;
       if (typeof rid === "string") ids.add(rid);
     }
   };
-  for (const m of briefOut?.query?.matches ?? []) take(m);
-  for (const ev of evidenceOut?.direct_evidence ?? []) take(ev);
-  for (const gc of evidenceOut?.graph_context ?? []) take(gc);
+  const matches = briefOut?.query?.matches;
+  if (Array.isArray(matches)) for (const m of matches) take(m);
+  const direct = evidenceOut?.direct_evidence;
+  if (Array.isArray(direct)) for (const ev of direct) take(ev);
+  const contextNodes = evidenceOut?.graph_context?.nodes;
+  if (contextNodes && typeof contextNodes === "object" && !Array.isArray(contextNodes)) {
+    for (const id of Object.keys(contextNodes)) ids.add(id);
+  }
   return [...ids];
 }
 
