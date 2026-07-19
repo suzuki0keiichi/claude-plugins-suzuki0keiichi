@@ -50,8 +50,13 @@ Deferred work ("later" / "Step N") is registered as a Goal (state: planned) wire
 
 6. **Report** what got wired where, what was declared unenforceable and why, and what remains prose-only (process rules the project must hold by its own definition of done).
 
+## Plugin-side asks (the ONE thing this skill does bring up on its own)
+
+This skill never proposes doctrine — but it DOES proactively present the plugin's **operating conditions** (`${CLAUDE_PLUGIN_ROOT}/docs/operating-conditions.md`) at the end of a wiring session, as a separate frame from the project's rules: "aside from your doctrine, here is what the tool itself asks of the project, and which feature dies without each." These are not design opinions; they are the tool's care instructions (a refrigerator maker doesn't tell you what to eat, but does say "keep the door closed"): wire knowledge to files or the read lanes stay empty; write enforcers or constraints stay decorative; include old-side removal in the definition of done; commission periodic audits; keep the verification environment clean; run delta-check over the full range after big squashes; register "later" the moment it is said. Present them with their feature-death causality — the project decides, informed.
+
 ## What this skill must never do
 
 - Propose or rank principles; import defaults; judge merit (see the line above).
 - Hard-gate anything: every check it wires is advisory or the project's own CI decision. Declining enforcement with a recorded reason is a legitimate outcome.
 - Absorb OOP/style vocabularies into the plugin: examples in conversations stay examples; nothing gets baked into templates or checks as "the right design".
+- Blur the two frames: the project's doctrine and the plugin's operating conditions are presented separately, never merged into one list (the former is theirs to define, the latter is ours to state).

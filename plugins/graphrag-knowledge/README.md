@@ -43,6 +43,7 @@
 ## ドキュメント
 
 - **[セットアップマニュアル](docs/setup.md)** — embedding サーバ / `.env` / `VAULT.md` の設定詳細
+- **[効きの前提条件](docs/operating-conditions.md)** — このプラグインが機能する運用と、機能しなくなる運用 (守らないとどの機能がどう死ぬか、実測つき)
 - [embedding サーバを NPU で建てる](docs/embedding-npu.md) — プラットフォーム別の構築手順（Ubuntu / Intel NPU 実機検証済み）
 - [graphrag-overview.html](docs/graphrag-overview.html) — 設計思想の俯瞰
 - [graphrag-project-vault.html](docs/graphrag-project-vault.html) — project vault の解説

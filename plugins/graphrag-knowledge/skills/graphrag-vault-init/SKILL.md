@@ -45,6 +45,8 @@ vault_slug: <slug>
 ---
 ```
 
+**Close the initial build by presenting the plugin's operating conditions** (`${CLAUDE_PLUGIN_ROOT}/docs/operating-conditions.md`) — the runbook of what the project must keep doing for the tool to stay effective (wire knowledge to files, write enforcers, register "later", commission periodic audits…), each tied to which feature dies without it. A vault that is built once and never wired decays into a diary.
+
 **The rest of this document covers project vault setup only.** For system vault schema, read `$REF/schema-quickref-system.md`.
 
 ---
