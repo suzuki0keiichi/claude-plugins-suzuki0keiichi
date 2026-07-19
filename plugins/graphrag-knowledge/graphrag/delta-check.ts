@@ -1,5 +1,6 @@
 /**
  * delta-check: diff スコープの「登記済み知識の決定的逆引き」— commit 境界の読みの導線。
+ * graphrag:see decision:graphrag-skill-dev:delta-check-commit-read-lane
  *
  * 背景 (VDU/MOT 実測): 知識が効かなかった事例は全部同じ機序だった — 知識は正本側
  * (OK・Constraint・正本宣言コメント) に存在したが、破る側の作業経路上に無かった。
@@ -162,12 +163,26 @@ function defaultGitAddedLines(
   range: string | null,
   paths: string[]
 ): Map<string, { line: number; text: string }[]> {
+  // core.quotepath=false: 非 ASCII パスをオクタル引用 ("b/\346…") にさせない —
+  // 引用されたパスは echo/connected の突合から黙って外れる。
   const args = range === null
     ? ["diff", "HEAD", "--unified=0", "--no-color", "--", ...paths]
     : ["diff", range, "--unified=0", "--no-color", "--", ...paths];
-  const out = execFileSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const out = execFileSync("git", ["-C", root, "-c", "core.quotepath=false", ...args], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024
+  });
   return parseUnifiedAddedLines(out);
 }
+
+/**
+ * import/依存宣言らしき行 (言語別ベストエフォート — constraint-check の skip 検出と同じ流儀)。
+ * 権威を正しく import して使う行は「再実装の疑い」ではないので echo の occurrence から
+ * 除外する: 正当利用のたびに鳴る echo は「無視してよい警告」を学習させ、導線ごと殺す。
+ * 行形状の判定は意味判断ではない (漏れても行内容が添えられるので書き手が判別できる)。
+ */
+export const IMPORT_LINE_RE =
+  /^\s*(?:import\b|from\s+\S+\s+import\b|export\s+(?:\{[^}]*\}|\*)\s+from\b|(?:const|let|var)\s+.+=\s*(?:await\s+)?(?:require|import)\s*\(|require\s*\(|use\s+[A-Za-z_]|using\s+[A-Za-z_]|#include\b|package\s+\w|import\s*\()/;
 
 /**
  * echo 対象の alias: コード識別子形式 (先頭英字・4文字以上)、ただし単一の全小文字英単語
@@ -203,6 +218,9 @@ export function deltaCheck(
     inputSource: "files" | "diff" | "worktree";
     /** inputSource="diff" のときの range (authority echo が追加行を取るのに使う)。 */
     diffRange?: string;
+    /** cap 解除 (connected/echo/occurrence)。大 squash 直後の範囲一括検査用 — cap で
+     *  埋もれるなら operating-conditions の「範囲 delta-check」処方が成立しないため。 */
+    full?: boolean;
   },
   deps: DeltaCheckDeps = {}
 ): DeltaCheckResult {
@@ -256,7 +274,7 @@ export function deltaCheck(
       (b.via.length + (b.via_overflow ?? 0)) - (a.via.length + (a.via_overflow ?? 0)) ||
       a.id.localeCompare(b.id)
   );
-  const connected = connectedAll.slice(0, CONNECTED_CAP);
+  const connected = options.full ? connectedAll : connectedAll.slice(0, CONNECTED_CAP);
   const connectedOverflow = connectedAll.length - connected.length;
 
   // ── authority_echoes: 権威の語彙指紋が家の外の追加行に現れた ─────────────────
@@ -311,14 +329,15 @@ export function deltaCheck(
       addedByPath = new Map(); // git 不能環境では echo を静かに諦める (他の検査は生きる)
     }
 
-    const ECHO_CAP = 10;
-    const ECHO_OCCURRENCE_CAP = 5;
+    const ECHO_CAP = options.full ? Number.POSITIVE_INFINITY : 10;
+    const ECHO_OCCURRENCE_CAP = options.full ? Number.POSITIVE_INFINITY : 5;
     for (const [knowledgeId, target] of echoTargets) {
       for (const alias of target.aliases) {
         const occurrences: { path: string; line: number; text: string }[] = [];
         for (const [rel, lines] of addedByPath) {
           if (target.homes.has(rel)) continue; // 家の中は権威自身の変更 — echo ではない
           for (const { line, text } of lines) {
+            if (IMPORT_LINE_RE.test(text)) continue; // 正当な依存宣言 — 再実装の疑いではない
             if (lineHasToken(text, alias)) occurrences.push({ path: rel, line, text: truncate(text.trim(), 120) });
           }
         }
@@ -330,13 +349,13 @@ export function deltaCheck(
           knowledge_type: type,
           title: String(target.node.title ?? knowledgeId),
           authority_paths: [...target.homes].sort(),
-          occurrences: occurrences.slice(0, ECHO_OCCURRENCE_CAP),
+          occurrences: occurrences.slice(0, ECHO_OCCURRENCE_CAP === Number.POSITIVE_INFINITY ? occurrences.length : ECHO_OCCURRENCE_CAP),
           ...(occurrences.length > ECHO_OCCURRENCE_CAP ? { occurrences_overflow: occurrences.length - ECHO_OCCURRENCE_CAP } : {})
         });
       }
     }
     authorityEchoes.sort((a, b) => b.occurrences.length - a.occurrences.length || a.knowledge_id.localeCompare(b.knowledge_id));
-    authorityEchoes.splice(ECHO_CAP);
+    if (ECHO_CAP !== Number.POSITIVE_INFINITY) authorityEchoes.splice(ECHO_CAP);
   }
 
   // ── marker_findings: 変更ファイル内マーカーの参照先生存検証 ─────────────────
@@ -358,8 +377,9 @@ export function deltaCheck(
 
   // ── placement_findings: frame-check の高精度2判定を転載 ─────────────────────
   // entries (per-file 地図) は載せない — 出力契約を薄く保つ。地図が要る時は frame-check 直呼び。
+  // graphData を渡して vault の二重パースを避ける (commit hook 経路のレイテンシ対策)。
   const frame = frameCheck(
-    { vaultDir: options.vaultDir, root: options.root, paths, inputSource: options.inputSource },
+    { vaultDir: options.vaultDir, root: options.root, paths, inputSource: options.inputSource, graphData: graph },
     deps
   );
   const placementFindings = frame.findings;
@@ -430,7 +450,8 @@ function parseArgs(argv: string[]) {
     root: typeof p.root === "string" ? p.root : process.cwd(),
     files,
     diff: typeof p.diff === "string" ? p.diff : undefined,
-    strict: p.strict === true
+    strict: p.strict === true,
+    full: p.full === true
   };
 }
 
@@ -455,7 +476,14 @@ export function runDeltaCheck(
     inputSource = "worktree";
   }
   const result = deltaCheck(
-    { vaultDir: args.vault, root: args.root, paths, inputSource, ...(args.diff ? { diffRange: args.diff } : {}) },
+    {
+      vaultDir: args.vault,
+      root: args.root,
+      paths,
+      inputSource,
+      ...(args.diff ? { diffRange: args.diff } : {}),
+      ...(args.full ? { full: true } : {})
+    },
     deps
   );
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

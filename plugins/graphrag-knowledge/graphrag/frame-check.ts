@@ -84,7 +84,12 @@ export interface FrameCheckDeps {
 }
 
 function gitLines(root: string, args: string[]): string[] {
-  const out = execFileSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  // core.quotepath=false: 非 ASCII パスのオクタル引用を防ぐ (引用されたパスは
+  // vault の File path と突合できず黙って外れる)。
+  const out = execFileSync("git", ["-C", root, "-c", "core.quotepath=false", ...args], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024
+  });
   return out.split("\n").filter((l) => l.length > 0);
 }
 
@@ -134,12 +139,14 @@ export function frameCheck(
     paths: string[];
     inputSource: "files" | "diff" | "worktree";
     thresholdFiles?: number;
+    /** ロード済み graph の受け渡し (delta-check が同一 vault を二重パースしないため)。 */
+    graphData?: { nodes: any[]; edges: any[] };
   },
   deps: FrameCheckDeps = {}
 ): FrameCheckResult {
   const threshold = options.thresholdFiles ?? DEFAULT_CLUSTER_THRESHOLD;
   const gitLsDir = deps.gitLsDir ?? defaultGitLsDir;
-  const graph = importVault(options.vaultDir);
+  const graph = options.graphData ?? importVault(options.vaultDir);
   const index: CrosscutIndex = buildCrosscutIndex(graph);
 
   const configLoad = loadCarvingConfig(path.join(options.root, ".graphrag", "carving.json"));

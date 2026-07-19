@@ -179,3 +179,32 @@ test("composeDeltaInjection: authority echo は権威の所在と追加行を添
   assert.match(text, /src\/ui\/SsdTable\.tsx:479/);
   assert.match(text, /use the authority instead/);
 });
+
+// --- レビュー指摘 #1: worktree 境界と -C スキップ ---
+
+test("linked worktree (.git ファイル) では親 checkout の .graphrag に到達しない — 別ツリー検査の防止", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ppr-wt-"));
+  try {
+    mkdirSync(path.join(root, ".graphrag", "vault"), { recursive: true });
+    const wt = path.join(root, "wt");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(path.join(wt, ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
+    // 親 root には .graphrag があるが、worktree 側から hook を打つと delta 成分なし =
+    // findRepoRoot が .git ファイル境界で止まる (壊れたスタブを渡し、呼ばれたら fail させる)
+    const stub = path.join(root, "must-not-run.mjs");
+    writeFileSync(stub, "process.exit(9);\n");
+    const out = runHook(hookInput("git commit -m x", wt), { GRAPHRAG_DELTA_CHECK_CLI: stub });
+    writeBackOnly(out);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("git -C <dir> commit は cwd と別の場所への commit — delta 成分をスキップして促しのみ", () => {
+  withGraphragRepo((root) => {
+    const stub = path.join(root, "must-not-run.mjs");
+    writeFileSync(stub, "process.exit(9);\n");
+    const out = runHook(hookInput("git -C /tmp/other-repo commit -m x", root), { GRAPHRAG_DELTA_CHECK_CLI: stub });
+    writeBackOnly(out);
+  });
+});

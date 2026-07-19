@@ -143,26 +143,40 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
       }
     : {};
 
-  // 予約作業の再水和: planned/active な Goal をセッション再開の視野に入れる。
+  // 予約作業の再水和: open な Goal をセッション再開の視野に入れる。
+  // graphrag:see decision:graphrag-skill-dev:deferred-work-lives-in-places
   // 「あとで/Step N」は言ったセッションと共に消えるのが AI 開発の記憶喪失の最も痛い形 —
   // resume は「前回の続き」を読む瞬間なので、未完の予約を見せる正しい場所。
-  // 出すのは見出しだけ (古い順, cap 5)。裁定 (やる/achieved/abandoned) は迫らない。
-  const openGoals = (graph.nodes ?? [])
-    .filter((node) => node.type === "Goal" && (node.state === "planned" || node.state === "active"))
-    .sort((a, b) => (cleanScalar(a.generated_at)).localeCompare(cleanScalar(b.generated_at)) || String(a.id).localeCompare(String(b.id)));
-  const goalNotice = openGoals.length > 0
+  // planned (残債) を優先して古い順に出す — active はロードマップ語彙で意図的に長期
+  // open になるため、混ぜて oldest-first にすると長命 active が枠を恒久占有し、本改修が
+  // 救いたい対象 (直近の残債) ほど沈む。active は件数と最古1件のみ。
+  // 裁定 (やる/achieved/abandoned) は迫らない。
+  const byOldest = (a: any, b: any) =>
+    (cleanScalar(a.generated_at)).localeCompare(cleanScalar(b.generated_at)) || String(a.id).localeCompare(String(b.id));
+  const plannedGoals = (graph.nodes ?? [])
+    .filter((node) => node.type === "Goal" && node.state === "planned")
+    .sort(byOldest);
+  const activeGoals = (graph.nodes ?? [])
+    .filter((node) => node.type === "Goal" && node.state === "active")
+    .sort(byOldest);
+  const goalHeadline = (node: any) => ({
+    id: node.id,
+    title: node.title,
+    state: node.state,
+    generated_at: cleanScalar(node.generated_at) || null
+  });
+  const goalNotice = plannedGoals.length > 0 || activeGoals.length > 0
     ? {
         open_goals: {
-          count: openGoals.length,
-          oldest_first: openGoals.slice(0, 5).map((node) => ({
-            id: node.id,
-            title: node.title,
-            state: node.state,
-            generated_at: cleanScalar(node.generated_at) || null
-          })),
+          planned_count: plannedGoals.length,
+          active_count: activeGoals.length,
+          planned_oldest_first: plannedGoals.slice(0, 5).map(goalHeadline),
+          ...(activeGoals.length > 0 ? { oldest_active: goalHeadline(activeGoals[0]) } : {}),
           note:
-            "Deferred / in-flight work registered as Goals. If one of these is what you are about to continue, " +
-            "start there; when one gets done or dies, update its state (achieved / abandoned) at the write-back boundary."
+            "Deferred work (planned) registered as Goals, oldest first — the most forgotten debt leads. " +
+            "active Goals are roadmap items (counted, oldest shown). If one of these is what you are about to " +
+            "continue, start there; when one gets done or dies, update its state (achieved / abandoned) at the " +
+            "write-back boundary."
         }
       }
     : {};

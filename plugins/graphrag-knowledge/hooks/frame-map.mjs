@@ -31,11 +31,15 @@ const looksLikeCreation = (toolResponse) => {
 };
 
 // file の祖先方向に .graphrag (vault/ か .env を持つ) を探す = graphrag リポジトリ判定。
+// git 境界 (.git ディレクトリ/ファイル) を越えない — linked worktree で親 checkout の
+// vault に到達すると別ツリー基準の地図を注入してしまう (proactive-persistence-reminder
+// と同じ理由)。worktree に .graphrag が無ければ無音が正しい。
 const findRepoRoot = (fileDir) => {
   let dir = fileDir;
   for (;;) {
     const anchor = path.join(dir, ".graphrag");
     if (existsSync(path.join(anchor, "vault")) || existsSync(path.join(anchor, ".env"))) return dir;
+    if (existsSync(path.join(dir, ".git"))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;

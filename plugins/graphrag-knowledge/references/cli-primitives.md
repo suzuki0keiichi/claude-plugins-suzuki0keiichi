@@ -184,8 +184,11 @@ This is carving-check #3/#4's norm applied instantly to arbitrary paths without 
 ## delta-check — the read-side of the commit boundary (read-only)
 
 ```sh
-node graphrag/cli.ts delta-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--strict]
+node graphrag/cli.ts delta-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--strict] [--full]
 # input default: worktree changes (same contract as frame-check). exit 0 (--strict: warn → 1)
+# --full: remove the display caps (connected 20 / echoes 10 / occurrences 5) — REQUIRED for the
+#         post-squash full-range sweep (operating-conditions #5); without it a 195-commit range
+#         drowns in overflow counters you cannot expand.
 ```
 
 Deterministic reverse lookup from the diff to the registered knowledge wired to it — no embedding, no similarity, only edges and grep. Motivation (VDU/MOT field reports): every case where knowledge "existed but did not help" had the same shape — the knowledge lived on the canonical side (an OK, a Constraint, an authority declaration) while the session that broke it never walked past it. The one moment every session reliably passes is the commit boundary; this verb makes that moment read.
@@ -193,7 +196,7 @@ Deterministic reverse lookup from the diff to the registered knowledge wired to 
 Four sections:
 
 - `connected_knowledge` — headlines (id / type / title / state / summary-line / via edges) of every Decision / Constraint / OK / Risk / Goal / Investigation reaching the changed files via `constrains` / `documented_by` / `sets_policy_for` / `enforced_by` / `risks_in`. Sorted Constraint-first, capped at 20. **A reading list, not a diagnosis** — superseded nodes appear with their state (the successor hint is your cue to check). Goals with `state: planned` wired to a file resurface deferred work the moment a commit touches that place.
-- `authority_echoes` — identifier-shaped aliases (`ERROR_STATUSES` / `zero_bytes` style; plain lowercase words are skipped) of File-wired knowledge nodes, found in the diff's **added lines** outside the node's home files. This catches the second implementation in the act of being written. A legitimate import triggers it too — the added line is attached so the writer can tell in one glance; nothing is judged.
+- `authority_echoes` — identifier-shaped aliases (`ERROR_STATUSES` / `zero_bytes` style; plain lowercase words are skipped) of File-wired knowledge nodes, found in the diff's **added lines** outside the node's home files. This catches the second implementation in the act of being written. Import/dependency-declaration lines are excluded (best-effort per language — a legitimate `import { X }` is not a re-implementation; precision economics: an echo that fires on every legitimate use teaches "ignore echoes" and kills the lane). Alias discipline matters twice here: put the OWNED vocabulary (the literals), not example vocabulary from discussions — an example word in aliases makes every future mention of it echo forever. Known accepted loss: continuation lines of multi-line imports (a bare `TOKEN,` line) still echo.
 - `marker_findings` — `graphrag:see` / `graphrag:enforces` markers inside changed files whose target is missing (`marker-broken-ref`), deleted with ledger trace (`marker-tombstoned-ref`, 301 successor named), or superseded (`marker-superseded-ref`, refines-successors named). String-literal occurrences are ignored (test fixtures don't false-positive). Marker grammar: `graphrag:see <type>:<system>:<slug>` — slug charset only, no file ids.
 - `placement_findings` — frame-check's two high-precision findings for the same paths (entries map is NOT included; call frame-check directly when you want the per-file map).
 
@@ -205,7 +208,7 @@ Four sections:
 node graphrag/cli.ts stocktake [--vault <dir>] [--days N]   # default threshold 14 days
 ```
 
-Deterministic suspect extraction, no semantic judgment (adjudication belongs to the `graphrag-stocktake` skill). Investigations: `stateless` (legacy, no state) / `stale-active` (+ `no-generated-at`) / `progress-claim` (title+summary claims WIP). Goals: `stale-planned-goal` / `stale-active-goal` (open Goals past the threshold — deferred work needs a periodic surfacing device or "later" means "never"; fresh open Goals and terminal/stateless Goals stay silent). Constraints: `settled-premise` (a live Constraint whose has_premise targets are ALL terminal — the debt-shadow's premise Goal settled, so the "until X is done, Y cannot be trusted" warning is no longer true; carries `settled_premises`). Each suspect carries `type` (`Investigation` | `Goal` | `Constraint`), `state`, `generated_at`, `signals`.
+Deterministic suspect extraction, no semantic judgment (adjudication belongs to the `graphrag-stocktake` skill). Investigations: `stateless` (legacy, no state) / `stale-active` (+ `no-generated-at`) / `progress-claim` (title+summary claims WIP). Goals: `stale-planned-goal` / `stale-active-goal` (open Goals past the threshold — deferred work needs a periodic surfacing device or "later" means "never"; fresh open Goals and terminal/stateless Goals stay silent). Constraints: `settled-premise` — a live Constraint whose **Goal-typed** has_premise targets exist and are ALL terminal (achieved/abandoned). Only Goal premises count: Decision/Risk premises are logical dependencies, not unsettledness premises (Risk has no state vocabulary and a live Decision would otherwise silence the check forever). `abandoned-premise` rides along when any premise was abandoned — the breakage became permanent; the prescription is conversion (premise-less Constraint or Risk), NOT deletion. Carries `settled_premises`. Each suspect carries `type` (`Investigation` | `Goal` | `Constraint`), `state`, `generated_at`, `signals`.
 
 ## world-join — join a vault to a world
 

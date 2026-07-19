@@ -237,6 +237,10 @@ Do not wait for the user to say "remember this." Write via `add-*` immediately w
   the moment any commit touches that place; `brief --mode resume` lists open Goals at session start; `stocktake`
   catches the ones that sat too long. When the work gets done or dies, update state (achieved / abandoned) at the
   write-back boundary.
+  → Fallback when the debt has no existing home (e.g. a reservation for a NEW capability): wire `--evidence` to
+  the extension seed file — the file you would inevitably touch first when starting the work — or, if truly
+  placeless, register without evidence and note that it rides only the resume/stocktake lanes (2 of 3). A
+  placeless Goal is legitimate; an unwired Goal that HAD a findable home is a lost delta-check lane.
   → **If something cannot be trusted until this settles** ("until X is done, Y misbehaves"), also register the
   debt-shadow: `add-constraint --premise goal:<s>:<slug> --constrains <the untrustworthy side> --unenforceable "<transient — see premise goal>"`.
   The Goal reaches whoever touches the WORK's home; the shadow Constraint reaches whoever touches the side that

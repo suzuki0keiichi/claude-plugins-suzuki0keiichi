@@ -43,9 +43,13 @@ export const REF_MARKER_RE = /graphrag:(see|enforces)\s+([a-z][a-z0-9_-]*:[a-z0-
  * あるので偽陰性は実質起きない。完璧な字句解析は不要 (hook の stripQuoted と同じ近似)。
  */
 function stripQuotedInLine(line: string): string {
+  // シングルクォートは「直前が識別子文字でない」場合のみ文字列開始とみなす — 散文
+  // コメント中の縮約 (don't / it's) がマーカーを文字列として飲み込む偽陰性を防ぐ。
+  // Python 等の接頭辞つき文字列 (f'…' r'…' b'…' / 2文字組) は接頭辞ごと潰す
+  // (接頭辞の直前は非識別子、という同じ規則で拾える)。
   return line
     .replace(/"(?:\\.|[^"\\])*"/g, '""')
-    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/(?<![A-Za-z0-9_])[frbuFRBU]{0,2}'(?:\\.|[^'\\])*'/g, "''")
     .replace(/`(?:\\.|[^`\\])*`/g, "``");
 }
 
@@ -90,7 +94,7 @@ export function grepMarkersInRepo(root: string): RefMarkerHit[] {
   try {
     out = execFileSync(
       "git",
-      ["-C", root, "grep", "-n", "-I", "-E", "graphrag:(see|enforces)", "--", "."],
+      ["-C", root, "-c", "core.quotepath=false", "grep", "-n", "-I", "-E", "graphrag:(see|enforces)", "--", "."],
       { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
     );
   } catch (e: any) {

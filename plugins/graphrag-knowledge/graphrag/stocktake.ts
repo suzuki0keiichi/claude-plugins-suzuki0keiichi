@@ -147,39 +147,47 @@ export function stocktake(
   }
 
   // ── Constraint: settled-premise (debt-shadow の解消漏れ) ────────────────────
-  // 『〇〇を片付けるまで△△は正しく動かない』型の一時制約は、premise の Goal (等) が
-  // terminal になった時点で前提が消えている。残っていれば「もう真でない警告」が
-  // 届き続ける — 生きた Constraint のうち、premise が全て張られた上で terminal に
-  // なったものを浮上させる (achieved も対象: Goal が片付いた = 未達前提の消滅)。
-  const TERMINAL_PREMISE_STATES = new Set(["achieved", "abandoned", "closed", "superseded"]);
+  // graphrag:see decision:graphrag-skill-dev:debt-shadow-constraint-pattern
+  // 『〇〇を片付けるまで△△は正しく動かない』型の一時制約は、premise の Goal が
+  // terminal になった時点で「未達」という前提が消えている。残っていれば「もう真で
+  // ない警告」が届き続ける。判定は **Goal 型の premise のみ** を見る — has_premise は
+  // Decision/Risk 等も宛先に取れるが、それらは「制約の論理的前提」であって「未達性の
+  // 前提」ではない (Risk は state を持たず Decision の終端は superseded のみなので、
+  // 混ぜると現役 Decision 1本で永久に沈黙する)。
+  // achieved と abandoned は別の意味を持つ: achieved = 残債が片付いた (shadow を消す)、
+  // abandoned = 誰もやらないと決めた = 破れの恒久化 (shadow は消すのではなく、premise
+  // なしの恒久 Constraint か Risk へ転換する) — signals で区別して裁定側に渡す。
+  const TERMINAL_GOAL_STATES = new Set(["achieved", "abandoned"]);
   const nodeById = new Map<string, Record<string, unknown>>();
   for (const n of graph.nodes ?? []) {
     if (typeof n.id === "string") nodeById.set(n.id, n);
   }
-  const premisesByConstraint = new Map<string, { id: string; state: string | null }[]>();
+  const goalPremisesByConstraint = new Map<string, { id: string; state: string | null }[]>();
   for (const e of graph.edges ?? []) {
     if (e.type !== "has_premise" || typeof e.from !== "string" || typeof e.to !== "string") continue;
     const from = nodeById.get(e.from);
     if (!from || from.type !== "Constraint") continue;
     const to = nodeById.get(e.to);
-    if (!premisesByConstraint.has(e.from)) premisesByConstraint.set(e.from, []);
-    premisesByConstraint.get(e.from)!.push({
+    if (!to || to.type !== "Goal") continue;
+    if (!goalPremisesByConstraint.has(e.from)) goalPremisesByConstraint.set(e.from, []);
+    goalPremisesByConstraint.get(e.from)!.push({
       id: e.to,
-      state: to && typeof to.state === "string" && to.state.length > 0 ? to.state : null
+      state: typeof to.state === "string" && to.state.length > 0 ? to.state : null
     });
   }
-  for (const [cid, premises] of premisesByConstraint) {
-    const settled = premises.filter((p) => p.state !== null && TERMINAL_PREMISE_STATES.has(p.state));
-    if (settled.length === 0 || settled.length < premises.length) continue; // 全前提が片付いた時だけ
+  for (const [cid, premises] of goalPremisesByConstraint) {
+    const settled = premises.filter((p) => p.state !== null && TERMINAL_GOAL_STATES.has(p.state));
+    if (settled.length === 0 || settled.length < premises.length) continue; // 全 Goal 前提が片付いた時だけ
     const node = nodeById.get(cid)!;
     const generatedAtRaw = cleanScalar(node.generated_at);
+    const hasAbandoned = settled.some((p) => p.state === "abandoned");
     suspects.push({
       id: cid,
       type: "Constraint",
       title: typeof node.title === "string" ? node.title : cid,
       state: null,
       generated_at: generatedAtRaw.length > 0 ? generatedAtRaw : null,
-      signals: ["settled-premise"],
+      signals: hasAbandoned ? ["settled-premise", "abandoned-premise"] : ["settled-premise"],
       settled_premises: settled.map((p) => ({ id: p.id, state: p.state! }))
     });
   }
@@ -201,7 +209,7 @@ export function stocktake(
     suspects,
     next_action_hint:
       suspects.length > 0
-        ? "Adjudicate with the graphrag-stocktake skill (corroboration against code/tests/track record beats the summary's self-report. Investigations: never delete — only set closed. Goals: still wanted → keep; done → achieved; dead → abandoned. Constraints with settled-premise: the debt they warned about is gone — delete with 301 successor if replaced, or re-examine if the constraint outlived its premise)"
+        ? "Adjudicate with the graphrag-stocktake skill (corroboration against code/tests/track record beats the summary's self-report. Investigations: never delete — only set closed. Goals: still wanted → keep; done → achieved; dead → abandoned. Constraints with settled-premise: if the premise Goals were ACHIEVED, verify the debt is really gone and delete the shadow (301 if replaced); if any were ABANDONED (abandoned-premise signal), the breakage became permanent — do NOT just delete: convert the shadow into a premise-less permanent Constraint or a Risk)"
         : "Investigation/Goal lifecycle is healthy. No stocktake needed"
   };
 }

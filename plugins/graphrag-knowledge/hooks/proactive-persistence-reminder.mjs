@@ -30,17 +30,34 @@ const GIT_COMMIT_RE = /\bgit(?:\s+-[Cc]\s+\S+|\s+-\S+)*\s+commit\b/;
 export const isGitCommitCommand = (command) =>
   typeof command === "string" && GIT_COMMIT_RE.test(stripQuoted(command));
 
+// `git -C <dir> commit` = cwd と別の場所への commit。delta-check は cwd 基準で root を
+// 解決するため、この形では「別 repo の diff で読みの導線」を作りかねない — 検出と検査
+// 対象の非対称を仕様化するより、非対称になるケースで黙る (write-back 促しのみ出す)。
+const GIT_DASH_C_RE = /\bgit\s+-C\s+\S+/i;
+
+export const commitsOutsideCwd = (command) =>
+  typeof command === "string" && GIT_DASH_C_RE.test(stripQuoted(command));
+
 const WRITE_BACK_TEXT =
   "<graphrag write-back check, on commit boundary: (1) Have you written back the adoption decision behind this change, the alternatives you rejected, the risks you hit, and the operational gotchas? If not, write them back via add-* right after the commit (run the duplicate pre-check first). (2) If you wrote or said \"later\" / \"in a separate step\" / \"Step N\" anywhere in this change, that IS deferred work — register it now as a Goal (state: planned) or it dies with this session. (3) If this focus is now settled, include an op:update setting its active Investigation to state:closed in the same write-back plan — no other natural closing trigger exists; this commit boundary IS the closing moment.>";
 
 // ── delta-check 同乗 ─────────────────────────────────────────────────────────
 
 // cwd の祖先方向に .graphrag (vault/ か .env を持つ) を探す = graphrag リポジトリ判定。
-const findRepoRoot = (startDir) => {
+// git 境界 (メイン checkout の .git ディレクトリ / linked worktree の .git ファイル) を
+// 越えて探索しない: .graphrag は通常 gitignore されるので linked worktree には存在せず、
+// 境界を越えると親 checkout に到達して「別の working tree の diff」で読みの導線を
+// 作ってしまう (メインが clean なら偽 clean、dirty なら無関係な見出し)。worktree に
+// .graphrag が無ければ無音が正しい。
+// なお cwd が git repo の外なら .git に出会わないので従来どおり無制限に walk する
+// (repo 外からの利用は従来互換)。非サポートになるのは「git repo 内で、toplevel より
+// 上の親ディレクトリに .graphrag を置く」配置のみ (意図的 — それは別 repo の vault)。
+export const findRepoRoot = (startDir) => {
   let dir = startDir;
   for (;;) {
     const anchor = path.join(dir, ".graphrag");
     if (existsSync(path.join(anchor, "vault")) || existsSync(path.join(anchor, ".env"))) return dir;
+    if (existsSync(path.join(dir, ".git"))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -59,7 +76,9 @@ const runDeltaCheck = (root) => {
   const out = execFileSync(process.execPath, argv, {
     encoding: "utf8",
     cwd: root,
-    timeout: 10000,
+    // hooks.json の外側 timeout (10s) より内側が先に諦める: 同値だと遅いテールで
+    // delta 成分どころか従来の write-back 促しごと harness に殺される。
+    timeout: 8000,
     maxBuffer: 16 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"]
   });
@@ -128,9 +147,12 @@ const main = async () => {
 
   let deltaText = null;
   try {
-    const startDir = typeof input?.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd();
-    const root = findRepoRoot(path.resolve(startDir));
-    if (root) deltaText = composeDeltaInjection(runDeltaCheck(root));
+    // git -C <dir> の commit は cwd と別の場所 — 誤った repo の読み物を注入するより黙る。
+    if (!commitsOutsideCwd(input?.tool_input?.command)) {
+      const startDir = typeof input?.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd();
+      const root = findRepoRoot(path.resolve(startDir));
+      if (root) deltaText = composeDeltaInjection(runDeltaCheck(root));
+    }
   } catch {
     // 読みの導線は完全にベストエフォート — 失敗は無音で書き戻し促しだけ出す
   }
