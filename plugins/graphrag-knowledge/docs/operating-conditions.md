@@ -13,7 +13,7 @@
 Decision や OperationalKnowledge を登記しても、対象ファイルへの `documented_by` / `constrains` / `sets_policy_for` エッジが無ければ、**読みの導線 (delta-check / area_map / frame-check) には一切乗りません**。権威を宣言する知識に、守りたい語彙 (シンボル名・リテラル) を `aliases` として入れなければ、authority echo (重複実装の現行犯検出) は発火しません。
 
 - **死ぬ機能**: delta-check の connected_knowledge / authority_echoes、frame-map hook、area_map
-- **実測**: 同型事故の運用知識が vault に在ったのに再発した事例は、知識がファイルに配線されていなかった。エッジがある知識は誤修正40件を止めた
+- **実測**: エッジがある知識は精査で誤修正40件を止めた。逆側の注意も正直に: 資産の梱包漏れ型の事故 (違反 diff が梱包定義側を**触らない**「脱落型」) は、どこに配線しても diff 逆引きには乗らない — その類型は enforcer (実行時参照と梱包定義の機械突合) の領分で、導線では守れない (「解決しないこと」節参照)
 
 ## 2. Constraint には enforcer を書く (書けないなら正直に unenforceable)
 
