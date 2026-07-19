@@ -68,19 +68,27 @@ function collectProgressMarkers(node: Record<string, unknown>): string[] {
 
 export function stocktake(
   graph: { nodes?: Record<string, unknown>[]; edges?: Record<string, unknown>[] },
-  options: { vaultDir: string; staleDays: number; now?: number }
+  options: { vaultDir: string; staleDays: number; activeGoalStaleDays?: number; now?: number }
 ): StocktakeResult {
   const now = options.now ?? Date.now();
-  const staleCutoff = now - options.staleDays * 24 * 60 * 60 * 1000;
+  const DAY = 24 * 60 * 60 * 1000;
+  const staleCutoff = now - options.staleDays * DAY;
+  // active Goal は planned と閾値を分ける: planned = 「あとで」の残債 (2週間で浮上が妥当)、
+  // active = ロードマップ語彙で年単位の open が正当 — 同じ14日で催促すると長期ゴールが
+  // 恒常ノイズ源になる。90日 = 「四半期動きのないロードマップにまだ追ってるかと一度聞く」。
+  // なお催促は「裁定されるまで」であって無限ではない: keep 裁定の op:update が
+  // generated_at を now に進め、閾値期間は静かになる (staleness-check と同じ収束設計)。
+  const activeGoalStaleDays = options.activeGoalStaleDays ?? 90;
+  const activeGoalCutoff = now - activeGoalStaleDays * DAY;
   const suspects: StocktakeSuspect[] = [];
 
   // stale 判定 (共通): generated_at が閾値より古い。欠損/parse 不能は測れないが
   // 「放置の疑い」として stale 扱いにし、no-generated-at も併記する
   // (黙って見逃さない — 基準時刻が無いこと自体が可視化に値する)。
-  const staleSignals = (generatedAt: string | null, staleSignal: string): string[] => {
+  const staleSignals = (generatedAt: string | null, staleSignal: string, cutoff: number = staleCutoff): string[] => {
     const t = generatedAt !== null ? Date.parse(generatedAt) : NaN;
     if (Number.isNaN(t)) return [staleSignal, "no-generated-at"];
-    if (t < staleCutoff) return [staleSignal];
+    if (t < cutoff) return [staleSignal];
     return [];
   };
 
@@ -134,7 +142,11 @@ export function stocktake(
 
     const generatedAtRaw = cleanScalar(node.generated_at);
     const generatedAt = generatedAtRaw.length > 0 ? generatedAtRaw : null;
-    const signals = staleSignals(generatedAt, `stale-${state}-goal`);
+    const signals = staleSignals(
+      generatedAt,
+      `stale-${state}-goal`,
+      state === "active" ? activeGoalCutoff : staleCutoff
+    );
     if (signals.length === 0) continue;
     suspects.push({
       id: String(node.id),
@@ -198,7 +210,7 @@ export function stocktake(
   return {
     generated_by: "graphrag/stocktake.ts",
     vault_dir: options.vaultDir,
-    thresholds: { stale_days: options.staleDays },
+    thresholds: { stale_days: options.staleDays, active_goal_stale_days: activeGoalStaleDays },
     counts: {
       investigations: investigations.length,
       active: activeCount,
@@ -224,9 +236,11 @@ function parseArgs(argv: string[]) {
     if (v && !v.startsWith("--")) { p[k] = v; i += 1; } else p[k] = true;
   }
   const days = Number(p.days);
+  const activeGoalDays = Number(p["active-goal-days"]);
   return {
     vault: typeof p.vault === "string" ? p.vault : process.env.GRAPHRAG_VAULT_DIR,
-    staleDays: Number.isFinite(days) && days > 0 ? days : 14
+    staleDays: Number.isFinite(days) && days > 0 ? days : 14,
+    activeGoalStaleDays: Number.isFinite(activeGoalDays) && activeGoalDays > 0 ? activeGoalDays : 90
   };
 }
 
@@ -238,7 +252,7 @@ export async function runStocktake(
     throw new Error("stocktake requires a vault: pass --vault <dir> or set GRAPHRAG_VAULT_DIR");
   }
   const graph = await loadGraph(args.vault);
-  const result = stocktake(graph, { vaultDir: args.vault, staleDays: args.staleDays });
+  const result = stocktake(graph, { vaultDir: args.vault, staleDays: args.staleDays, activeGoalStaleDays: args.activeGoalStaleDays });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return result;
 }

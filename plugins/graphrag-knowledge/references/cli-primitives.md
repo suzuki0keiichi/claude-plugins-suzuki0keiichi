@@ -205,7 +205,11 @@ Four sections:
 ## stocktake — Investigation + Goal lifecycle audit (read-only)
 
 ```sh
-node graphrag/cli.ts stocktake [--vault <dir>] [--days N]   # default threshold 14 days
+node graphrag/cli.ts stocktake [--vault <dir>] [--days N] [--active-goal-days N]
+# thresholds: 14 days (Investigations, planned Goals) / 90 days (active Goals — roadmap
+# vocabulary legitimately stays open for quarters; a 14d nag would make long-term goals
+# permanent noise). Prompting stops when adjudicated: achieved / abandoned / or a keep
+# expressed as op:update (refreshes generated_at → silent for the threshold window).
 ```
 
 Deterministic suspect extraction, no semantic judgment (adjudication belongs to the `graphrag-stocktake` skill). Investigations: `stateless` (legacy, no state) / `stale-active` (+ `no-generated-at`) / `progress-claim` (title+summary claims WIP). Goals: `stale-planned-goal` / `stale-active-goal` (open Goals past the threshold — deferred work needs a periodic surfacing device or "later" means "never"; fresh open Goals and terminal/stateless Goals stay silent). Constraints: `settled-premise` — a live Constraint whose **Goal-typed** has_premise targets exist and are ALL terminal (achieved/abandoned). Only Goal premises count: Decision/Risk premises are logical dependencies, not unsettledness premises (Risk has no state vocabulary and a live Decision would otherwise silence the check forever). `abandoned-premise` rides along when any premise was abandoned — the breakage became permanent; the prescription is conversion (premise-less Constraint or Risk), NOT deletion. Carries `settled_premises`. Each suspect carries `type` (`Investigation` | `Goal` | `Constraint`), `state`, `generated_at`, `signals`.
