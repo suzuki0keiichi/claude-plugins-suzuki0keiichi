@@ -218,6 +218,22 @@ Why each piece exists:
 - **`sets_policy_for` → old Component** — the migration Decision visibly owns the old generation's fate. Keep the old Component alive while its files exist: "what still belongs to the dead generation" stays a single evidenced_by query instead of an archaeology investigation.
 - **Completion** — Goal → `achieved`; delete the old Component with a `successors` entry (301, §Delete + replace) so the tombstone ledger permanently answers "when did this generation die, why, what replaced it, and what belonged to it" (cascaded_edges).
 
+**Optional debt-shadow** — when the half-migrated state makes something actively untrustworthy ("until the removal is done, Y misbehaves" — e.g. a completed-definition split across processes during an authority migration), add a Constraint whose premise is the removal Goal, constraining the side that currently lies:
+
+```json
+  { "op": "create", "id": "constraint:<system>:<y>-unreliable-until-<old-slug>-removed", "type": "Constraint",
+    "title": "<Y> は <旧側> 撤去まで正しく動かない", "summary": "<何がどう嘘をつくか>",
+    "enforcement": "none", "enforcement_reason": "transient — see premise goal" }
+```
+```json
+  { "op": "create", "id": "c_<y>-unreliable__has_premise__goal_remove-<old-slug>",
+    "type": "has_premise", "from": "constraint:<system>:<y>-unreliable-until-<old-slug>-removed", "to": "goal:<system>:remove-<old-slug>" },
+  { "op": "create", "id": "c_<y>-unreliable__constrains__<y-target>",
+    "type": "constrains", "from": "constraint:<system>:<y>-unreliable-until-<old-slug>-removed", "to": "<the Y-side Decision|File|OK id>" }
+```
+
+The Goal reaches whoever touches the work's home; the shadow reaches whoever touches the side that lies — different audiences, both needed. It also keeps the Goal from decaying into an "indefinite someday" item: the shadow states what stays broken meanwhile. When the Goal settles, delete the shadow (stocktake's `settled-premise` catches leftovers).
+
 ---
 
 ## Compaction checkpoint (bundles flush A + rescue B into one)

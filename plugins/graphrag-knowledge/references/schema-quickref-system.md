@@ -34,7 +34,7 @@ Canonical source: `graphrag/schema.ts`. This file covers the **system** preset (
 - `rejected_in`: RejectedOption → Investigation
 - `supersedes`: Decision|OK → RejectedOption / Deliverable → Deliverable
 - `refines`: Decision|OK → Decision|OK / Goal → Goal
-- `has_premise`: Decision|OK|Investigation → Decision|OK|Constraint|Risk|Goal
+- `has_premise`: Decision|OK|Investigation|Constraint → Decision|OK|Constraint|Risk|Goal (Constraint → Goal is the **debt-shadow** pattern: "until goal X settles, Y cannot be trusted" — the constraint's premise is the Goal being UNSETTLED. `add-constraint --premise goal:<s>:<slug>`. When the Goal reaches a terminal state, stocktake flags the leftover shadow as `settled-premise`.)
 - `constrains`: Constraint → Decision|File|OK
 - `sets_policy_for`: Decision → File|Investigation|OK|Layer|Concern|Component|Deliverable (pick the lowest honest altitude: File→Component→Layer/Concern)
 - `reduces_risk`: Decision|OK → Risk

@@ -1,10 +1,14 @@
-// Investigation / Goal ライフサイクルの棚卸し候補の機械抽出 (読み取り専用・意味判断なし)
+// Investigation / Goal / Constraint ライフサイクルの棚卸し候補の機械抽出 (読み取り専用・意味判断なし)
 //
 // 目的: Investigation は「開くトリガは自然にあるが閉じるトリガが無い」ため、
 // state 無しレガシーや決着済みなのに active のまま残った調査が黙って溜まる。
 // Goal (state: planned/active) も同型 — 「あとで/別段階で」と予約された将来作業は、
 // 定期的に浮上する装置が無ければ書かれなかったのと同じになる (VDU の Step2 残債:
 // コミットメッセージの「別段階で」が2週間、誰の視野にも入らなかった)。
+// debt-shadow Constraint (『〇〇を片付けるまで△△は正しく動かない』 = has_premise → Goal)
+// も同型 — premise の Goal が片付いた (terminal になった) のに制約が残っていれば、
+// もう真でない警告が届き続ける。閉じるトリガは Goal 側の write-back だが、取りこぼしを
+// ここで拾う (settled-premise)。
 // 掃除を LLM の全読みにさせず、決定的な検出だけをここで行い suspect JSON を吐く。
 // 「本当に閉じてよいか / まだやるのか」の裁定 (summary の自己申告よりコード/テスト/
 // 実績の裏取りが勝つ) は人間起動の graphrag-stocktake skill に委ねる — 機械は候補提示のみ。
@@ -19,12 +23,14 @@ const PROGRESS_MARKER_RE = /(進行中|未実装|未了|未対応|実装前|WIP|
 
 export interface StocktakeSuspect {
   id: string;
-  type: "Investigation" | "Goal";
+  type: "Investigation" | "Goal" | "Constraint";
   title: string;
   state: string | null;
   generated_at: string | null;
   signals: string[];
   progress_markers?: string[];
+  /** settled-premise のみ: 片付いた premise の一覧 (id と state)。 */
+  settled_premises?: { id: string; state: string }[];
 }
 
 export interface StocktakeResult {
@@ -61,7 +67,7 @@ function collectProgressMarkers(node: Record<string, unknown>): string[] {
 }
 
 export function stocktake(
-  graph: { nodes?: Record<string, unknown>[] },
+  graph: { nodes?: Record<string, unknown>[]; edges?: Record<string, unknown>[] },
   options: { vaultDir: string; staleDays: number; now?: number }
 ): StocktakeResult {
   const now = options.now ?? Date.now();
@@ -140,6 +146,44 @@ export function stocktake(
     });
   }
 
+  // ── Constraint: settled-premise (debt-shadow の解消漏れ) ────────────────────
+  // 『〇〇を片付けるまで△△は正しく動かない』型の一時制約は、premise の Goal (等) が
+  // terminal になった時点で前提が消えている。残っていれば「もう真でない警告」が
+  // 届き続ける — 生きた Constraint のうち、premise が全て張られた上で terminal に
+  // なったものを浮上させる (achieved も対象: Goal が片付いた = 未達前提の消滅)。
+  const TERMINAL_PREMISE_STATES = new Set(["achieved", "abandoned", "closed", "superseded"]);
+  const nodeById = new Map<string, Record<string, unknown>>();
+  for (const n of graph.nodes ?? []) {
+    if (typeof n.id === "string") nodeById.set(n.id, n);
+  }
+  const premisesByConstraint = new Map<string, { id: string; state: string | null }[]>();
+  for (const e of graph.edges ?? []) {
+    if (e.type !== "has_premise" || typeof e.from !== "string" || typeof e.to !== "string") continue;
+    const from = nodeById.get(e.from);
+    if (!from || from.type !== "Constraint") continue;
+    const to = nodeById.get(e.to);
+    if (!premisesByConstraint.has(e.from)) premisesByConstraint.set(e.from, []);
+    premisesByConstraint.get(e.from)!.push({
+      id: e.to,
+      state: to && typeof to.state === "string" && to.state.length > 0 ? to.state : null
+    });
+  }
+  for (const [cid, premises] of premisesByConstraint) {
+    const settled = premises.filter((p) => p.state !== null && TERMINAL_PREMISE_STATES.has(p.state));
+    if (settled.length === 0 || settled.length < premises.length) continue; // 全前提が片付いた時だけ
+    const node = nodeById.get(cid)!;
+    const generatedAtRaw = cleanScalar(node.generated_at);
+    suspects.push({
+      id: cid,
+      type: "Constraint",
+      title: typeof node.title === "string" ? node.title : cid,
+      state: null,
+      generated_at: generatedAtRaw.length > 0 ? generatedAtRaw : null,
+      signals: ["settled-premise"],
+      settled_premises: settled.map((p) => ({ id: p.id, state: p.state! }))
+    });
+  }
+
   // signals 数の多い順 → id 昇順で安定ソート。
   suspects.sort((a, b) => b.signals.length - a.signals.length || a.id.localeCompare(b.id));
 
@@ -157,7 +201,7 @@ export function stocktake(
     suspects,
     next_action_hint:
       suspects.length > 0
-        ? "Adjudicate with the graphrag-stocktake skill (corroboration against code/tests/track record beats the summary's self-report. Investigations: never delete — only set closed. Goals: still wanted → keep; done → achieved; dead → abandoned)"
+        ? "Adjudicate with the graphrag-stocktake skill (corroboration against code/tests/track record beats the summary's self-report. Investigations: never delete — only set closed. Goals: still wanted → keep; done → achieved; dead → abandoned. Constraints with settled-premise: the debt they warned about is gone — delete with 301 successor if replaced, or re-examine if the constraint outlived its premise)"
         : "Investigation/Goal lifecycle is healthy. No stocktake needed"
   };
 }

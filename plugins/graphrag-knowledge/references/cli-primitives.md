@@ -205,7 +205,7 @@ Four sections:
 node graphrag/cli.ts stocktake [--vault <dir>] [--days N]   # default threshold 14 days
 ```
 
-Deterministic suspect extraction, no semantic judgment (adjudication belongs to the `graphrag-stocktake` skill). Investigations: `stateless` (legacy, no state) / `stale-active` (+ `no-generated-at`) / `progress-claim` (title+summary claims WIP). Goals: `stale-planned-goal` / `stale-active-goal` (open Goals past the threshold — deferred work needs a periodic surfacing device or "later" means "never"; fresh open Goals and terminal/stateless Goals stay silent). Each suspect carries `type` (`Investigation` | `Goal`), `state`, `generated_at`, `signals`.
+Deterministic suspect extraction, no semantic judgment (adjudication belongs to the `graphrag-stocktake` skill). Investigations: `stateless` (legacy, no state) / `stale-active` (+ `no-generated-at`) / `progress-claim` (title+summary claims WIP). Goals: `stale-planned-goal` / `stale-active-goal` (open Goals past the threshold — deferred work needs a periodic surfacing device or "later" means "never"; fresh open Goals and terminal/stateless Goals stay silent). Constraints: `settled-premise` (a live Constraint whose has_premise targets are ALL terminal — the debt-shadow's premise Goal settled, so the "until X is done, Y cannot be trusted" warning is no longer true; carries `settled_premises`). Each suspect carries `type` (`Investigation` | `Goal` | `Constraint`), `state`, `generated_at`, `signals`.
 
 ## world-join — join a vault to a world
 

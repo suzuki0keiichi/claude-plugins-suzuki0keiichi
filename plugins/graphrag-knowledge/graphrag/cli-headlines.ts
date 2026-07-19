@@ -340,6 +340,7 @@ async function runAddConstraint(argv: string[]) {
     constrains: csvFlag(f, "constrains") ?? [],
     enforcedBy: csvFlag(f, "enforced-by"),
     unenforceable: strFlag(f, "unenforceable"),
+    premise: csvFlag(f, "premise"),
     schemaPreset
   });
   await applyPlanAndReport(plan, f);

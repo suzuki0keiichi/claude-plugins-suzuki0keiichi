@@ -235,3 +235,45 @@ test("Investigation suspect には type=Investigation が付く (後方互換の
   const res = run([{ id: "investigation:s:legacy", type: "Investigation", title: "旧" }]);
   assert.equal(res.suspects[0]!.type, "Investigation");
 });
+
+// --- Constraint: settled-premise (debt-shadow の解消漏れ) ---
+
+test("settled-premise: premise の Goal が achieved になった生きた Constraint が浮上する", () => {
+  const graph = {
+    nodes: [
+      { id: "constraint:s:ui-lies-until-step2", type: "Constraint",
+        title: "Step2 が済むまで UI の完了表示は信じられない", generated_at: "2026-07-01T00:00:00.000Z" },
+      { id: "goal:s:step2", type: "Goal", title: "Step2: 権威委譲", state: "achieved" }
+    ],
+    edges: [
+      { id: "e1", type: "has_premise", from: "constraint:s:ui-lies-until-step2", to: "goal:s:step2" }
+    ]
+  };
+  const res = stocktake(graph, { vaultDir: "/x", staleDays: 14, now: NOW });
+  const c = res.suspects.find((s) => s.id === "constraint:s:ui-lies-until-step2");
+  assert.ok(c, "前提が片付いた debt-shadow が浮上する");
+  assert.equal(c!.type, "Constraint");
+  assert.deepEqual(c!.signals, ["settled-premise"]);
+  assert.deepEqual(c!.settled_premises, [{ id: "goal:s:step2", state: "achieved" }]);
+});
+
+test("settled-premise: premise がまだ open / 一部のみ terminal なら浮上しない。Decision の premise は対象外", () => {
+  const graph = {
+    nodes: [
+      { id: "constraint:s:c1", type: "Constraint", title: "c1" },
+      { id: "constraint:s:c2", type: "Constraint", title: "c2" },
+      { id: "decision:s:d1", type: "Decision", title: "d1" },
+      { id: "goal:s:open", type: "Goal", title: "open", state: "planned" },
+      { id: "goal:s:done", type: "Goal", title: "done", state: "achieved" }
+    ],
+    edges: [
+      { id: "e1", type: "has_premise", from: "constraint:s:c1", to: "goal:s:open" },
+      { id: "e2", type: "has_premise", from: "constraint:s:c2", to: "goal:s:open" },
+      { id: "e3", type: "has_premise", from: "constraint:s:c2", to: "goal:s:done" },
+      { id: "e4", type: "has_premise", from: "decision:s:d1", to: "goal:s:done" }
+    ]
+  };
+  const res = stocktake(graph, { vaultDir: "/x", staleDays: 14, now: NOW });
+  assert.ok(!res.suspects.some((s) => s.type === "Constraint"),
+    "open な前提が残る Constraint と、Decision 側の premise は浮上しない");
+});

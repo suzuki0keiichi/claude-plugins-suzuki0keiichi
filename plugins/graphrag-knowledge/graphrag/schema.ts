@@ -141,8 +141,13 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
   evidenced_by: [
     [ANY_CROSSCUT_NODE, "File"]
   ],
+  // from に Constraint を許すのは debt-shadow パターン (v1.24.0): 「この制約は Goal の
+  // 未達を前提とする」— 移行途中の凍結が生む一時制約 (『〇〇を片付けるまで△△は正しく
+  // 動かない』) を、作業が宿る場所 (Goal 側) と信じてはいけない場所 (Constraint の
+  // constrains 側) の両方に配線するための文法。premise Goal が terminal になったのに
+  // 生きている Constraint は stocktake が settled-premise として浮上させる。
   has_premise: [
-    [["Decision", "OperationalKnowledge", "Investigation", "Goal"], ["Decision", "OperationalKnowledge", "Constraint", "Risk", "Goal"]]
+    [["Decision", "OperationalKnowledge", "Investigation", "Goal", "Constraint"], ["Decision", "OperationalKnowledge", "Constraint", "Risk", "Goal"]]
   ],
   refines: [
     [["Decision", "OperationalKnowledge"], ["Decision", "OperationalKnowledge"]],

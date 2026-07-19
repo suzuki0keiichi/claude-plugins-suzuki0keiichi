@@ -159,6 +159,11 @@ export type AddConstraintArgs = {
   //   未ガードとして可視化し続ける (登記は許すが、見えなくはしない)。
   enforcedBy?: string[];
   unenforceable?: string;
+  // has_premise: Constraint → Decision|OK|Constraint|Risk|Goal。debt-shadow パターンの
+  // 中核: --premise goal:<s>:<slug> で「この制約は Goal の未達を前提とする」を配線する
+  // (『〇〇を片付けるまで△△は正しく動かない』)。Goal が terminal になったのに制約が
+  // 残っていれば stocktake が settled-premise として浮上させる。
+  premise?: string[];
   // enforcement contract は system プリセット限定 (project vault には File が無く、
   // Constraint は本来的に外部条件)。呼び出し側 (runAddConstraint) が vault の
   // schema を解決して渡す。未指定は system (厳格側に倒す)。
@@ -344,10 +349,11 @@ export function buildAddConstraintPlan(args: AddConstraintArgs) {
         "A prose-only constraint enforces nothing — it decays into a diary entry that never fires when violated."
     );
   }
-  // Constraint は documented_by 不可・evidence 不要 (契約)。エッジは constrains + enforced_by。
+  // Constraint は documented_by 不可・evidence 不要 (契約)。エッジは constrains + enforced_by + has_premise。
   const edges = [
     ...fanOutEdges("constrains", id, "Constraint", constrains, "--constrains"),
-    ...fanOutEdges("enforced_by", id, "Constraint", enforcedBy, "--enforced-by")
+    ...fanOutEdges("enforced_by", id, "Constraint", enforcedBy, "--enforced-by"),
+    ...fanOutEdges("has_premise", id, "Constraint", args.premise, "--premise")
   ];
   const node: Record<string, unknown> = { op: "create", id, type: "Constraint", title: args.title, summary: args.summary };
   if (unenforceable !== "") {
