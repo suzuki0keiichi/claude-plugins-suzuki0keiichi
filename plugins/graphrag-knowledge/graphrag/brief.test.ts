@@ -126,8 +126,9 @@ test("resume does not count closed Investigations as legacy stateless", () => {
   assert.ok(!("legacy_stateless_investigations" in resume), "closed は意図的な終端、注記不要");
 });
 
-// 棚卸し誘導: state 無しレガシーが混じる、または active が溜まり気味なら stocktake_hint を出す。
-test("resume adds stocktake_hint when stateless Investigations coexist", () => {
+// 棚卸しの発注提案 (initiative の仮実装): suspects / stateless / active 溜まりを統合判定し、
+// 「ユーザーに提案せよ」の行動指示として出す。
+test("resume adds stocktake_hint when stateless Investigations coexist — as a PROPOSE instruction", () => {
   const graph = {
     nodes: [
       { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active" },
@@ -137,7 +138,8 @@ test("resume adds stocktake_hint when stateless Investigations coexist", () => {
   };
   const resume = buildResumeBrief(graph, nodesById(graph));
   assert.match(resume.stocktake_hint, /stocktake/);
-  assert.match(resume.stocktake_hint, /1 stateless Investigation/);
+  assert.match(resume.stocktake_hint, /1 stateless/);
+  assert.match(resume.stocktake_hint, /PROPOSE it to the user/, "情報の同乗でなく発注提案の行動指示");
 });
 
 test("resume adds stocktake_hint when active piles up (>= 3)", () => {
@@ -154,10 +156,13 @@ test("resume adds stocktake_hint when active piles up (>= 3)", () => {
 });
 
 test("resume omits stocktake_hint when healthy (1-2 active, no stateless)", () => {
+  // generated_at は新鮮な値を刻む (typed-add の実挙動): 無いと stocktake の
+  // no-generated-at suspect になり「健全」の前提が壊れる。
+  const fresh = new Date().toISOString();
   const graph = {
     nodes: [
-      { id: "investigation:s:a", type: "Investigation", title: "a", state: "active" },
-      { id: "investigation:s:b", type: "Investigation", title: "b", state: "active" }
+      { id: "investigation:s:a", type: "Investigation", title: "a", state: "active", generated_at: fresh },
+      { id: "investigation:s:b", type: "Investigation", title: "b", state: "active", generated_at: fresh }
     ],
     edges: []
   };

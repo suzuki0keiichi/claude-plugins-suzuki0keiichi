@@ -3,6 +3,7 @@ import { confidenceMessage, gradeConfidence, judgeMatchConfidence } from "./conf
 import { edgePriority, loadGraph, loadRequiredVectorIndex, prepareVectorSearch, searchGraph } from "./retrieval.ts";
 import { validateGraph } from "./schema.ts";
 import { describeVectorIndex } from "./vector.ts";
+import { stocktake } from "./stocktake.ts";
 
 // Score thresholds + judgeMatchConfidence/confidenceMessage now live in
 // ./confidence.ts so brief and evidence-packet share one tuned copy. Re-export
@@ -132,14 +133,26 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
       }
     : {};
 
-  // 棚卸し誘導: state 無しレガシーが居る、または active が溜まり気味 (3 件以上) のとき、
-  // 決定的な検出 verb (stocktake) の存在を思い出させる。閾値未満なら埋め草を出さない
-  // (null 埋め禁止 — 既存の legacy_note と同じく「出す時だけ出す」流儀)。
-  const stocktakeNotice = stateless.length > 0 || active.length >= 3
+  // 棚卸しの発注提案 (initiative の仮実装): 「そろそろ掃除」を人間の嗅覚に頼らず、
+  // 閾値と時計で系の側から言い出す。suspects (停滞 Goal / settled-premise / stateless /
+  // stale-active) を統合判定し、居れば resume を読んだセッションに「ユーザーへ棚卸しを
+  // 提案せよ」と行動指示する — 情報の同乗 (読まれるだけ) からの格上げ。人間のベテランも
+  // 嗅覚だけでなく習慣 (定期掃除) で回している: 嗅覚の機械化を待たず、習慣を先に機械化する。
+  // 閾値は当面の勘 — 発注ログ (何件で発注され、何件回収されたか) が溜まったら実測で調整する。
+  // 閾値未満なら埋め草を出さない (null 埋め禁止 — 「出す時だけ出す」流儀)。
+  const st = stocktake({ nodes: graph.nodes, edges: graph.edges }, { vaultDir: "(resume-inline)", staleDays: 14 });
+  const byType = (t: string) => st.suspects.filter((s) => s.type === t).length;
+  const stocktakeNotice = st.suspects.length > 0 || stateless.length > 0 || active.length >= 3
     ? {
         stocktake_hint:
-          `${stateless.length} stateless Investigation(s) / ${active.length} active. ` +
-          "Run $CLI stocktake to review stocktake candidates"
+          `${st.suspects.length} stocktake suspect(s)` +
+          (st.suspects.length > 0
+            ? ` (${byType("Investigation")} Investigation / ${byType("Goal")} Goal / ${byType("Constraint")} Constraint)`
+            : "") +
+          ` — plus ${stateless.length} stateless / ${active.length} active Investigation(s). ` +
+          "This vault is due for a stocktake: PROPOSE it to the user in your first reply " +
+          "(surfacing this is the system's job, not the user's — do not wait to be asked). " +
+          "Adjudication stays with the graphrag-stocktake skill; never clean up silently."
       }
     : {};
 
