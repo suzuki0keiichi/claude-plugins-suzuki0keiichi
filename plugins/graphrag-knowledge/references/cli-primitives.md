@@ -16,7 +16,7 @@ Every verb reads `.env` once at cli.ts launcher startup, so `GRAPHRAG_*` env is 
 node graphrag/cli.ts brief --mode <resume|query> [--query "<text>"] [--limit N] [--neighbors N] [--call-number N]
 ```
 
-- `--mode resume`: returns the active Investigation (for focus continuity, read-only)
+- `--mode resume`: returns the active Investigation (for focus continuity, read-only). When the vault holds open Goals (`state: planned|active`), also returns `open_goals` (count + oldest-first headlines, cap 5) — deferred work resurfaces at the moment you are deciding what to continue; absent when there are none ("emit only when there is something" convention)
 - `--mode query`: returns the top-N of ranked search as 280-char summaries
 - `--query`: required in query mode
 - `--limit`: matches cap (default 5)
@@ -181,6 +181,32 @@ Findings are limited to two high-precision cases, each with `next_step`:
 
 This is carving-check #3/#4's norm applied instantly to arbitrary paths without waiting for a re-carve. Wired consumers: the `graphrag-pr-review` mechanical pass (diff files) and the PostToolUse Write hook (`hooks/frame-map.mjs` — injects the local map right when a new impl file is created; silent when there is nothing to show).
 
+## delta-check — the read-side of the commit boundary (read-only)
+
+```sh
+node graphrag/cli.ts delta-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--strict]
+# input default: worktree changes (same contract as frame-check). exit 0 (--strict: warn → 1)
+```
+
+Deterministic reverse lookup from the diff to the registered knowledge wired to it — no embedding, no similarity, only edges and grep. Motivation (VDU/MOT field reports): every case where knowledge "existed but did not help" had the same shape — the knowledge lived on the canonical side (an OK, a Constraint, an authority declaration) while the session that broke it never walked past it. The one moment every session reliably passes is the commit boundary; this verb makes that moment read.
+
+Four sections:
+
+- `connected_knowledge` — headlines (id / type / title / state / summary-line / via edges) of every Decision / Constraint / OK / Risk / Goal / Investigation reaching the changed files via `constrains` / `documented_by` / `sets_policy_for` / `enforced_by` / `risks_in`. Sorted Constraint-first, capped at 20. **A reading list, not a diagnosis** — superseded nodes appear with their state (the successor hint is your cue to check). Goals with `state: planned` wired to a file resurface deferred work the moment a commit touches that place.
+- `authority_echoes` — identifier-shaped aliases (`ERROR_STATUSES` / `zero_bytes` style; plain lowercase words are skipped) of File-wired knowledge nodes, found in the diff's **added lines** outside the node's home files. This catches the second implementation in the act of being written. A legitimate import triggers it too — the added line is attached so the writer can tell in one glance; nothing is judged.
+- `marker_findings` — `graphrag:see` / `graphrag:enforces` markers inside changed files whose target is missing (`marker-broken-ref`), deleted with ledger trace (`marker-tombstoned-ref`, 301 successor named), or superseded (`marker-superseded-ref`, refines-successors named). String-literal occurrences are ignored (test fixtures don't false-positive). Marker grammar: `graphrag:see <type>:<system>:<slug>` — slug charset only, no file ids.
+- `placement_findings` — frame-check's two high-precision findings for the same paths (entries map is NOT included; call frame-check directly when you want the per-file map).
+
+**Output contract: clean = a one-line summary and nothing else.** This is what makes it safe to wire into the commit-boundary hook (`hooks/proactive-persistence-reminder.mjs` runs it on every `git commit` and injects headlines only when there is something to read). `status`: `clean` / `info` (connected knowledge or echoes — read it) / `warn` (marker/placement findings). Remember what clean does NOT mean: knowledge without edges cannot appear here — the lookup is only as good as the wiring.
+
+## stocktake — Investigation + Goal lifecycle audit (read-only)
+
+```sh
+node graphrag/cli.ts stocktake [--vault <dir>] [--days N]   # default threshold 14 days
+```
+
+Deterministic suspect extraction, no semantic judgment (adjudication belongs to the `graphrag-stocktake` skill). Investigations: `stateless` (legacy, no state) / `stale-active` (+ `no-generated-at`) / `progress-claim` (title+summary claims WIP). Goals: `stale-planned-goal` / `stale-active-goal` (open Goals past the threshold — deferred work needs a periodic surfacing device or "later" means "never"; fresh open Goals and terminal/stateless Goals stay silent). Each suspect carries `type` (`Investigation` | `Goal`), `state`, `generated_at`, `signals`.
+
 ## world-join — join a vault to a world
 
 ```sh
@@ -190,13 +216,15 @@ node graphrag/cli.ts world-join --world <dir> --vault <dir>  # explicit
 
 Deterministic two-step: ① add this vault's path and `vault_slug` to world.json (no-op if already present), ② write `GRAPHRAG_WORLD_DIR=<dir>` to `.graphrag/.env` (overwrites existing value). Creates the world directory and world.json if absent. Warns when VAULT.md is missing; warns when `vault_slug` is not set (cross-vault refs will not resolve to this vault).
 
-## xref-check — diagnose cross-vault refs / parent integrity (read-only)
+## xref-check — diagnose cross-vault refs / parent integrity / code markers (read-only)
 
 ```sh
-node graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>]
+node graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>] [--root <repo>]
 ```
 
 Scans every edge in the vault for a `vault:`-prefixed `to`, tries to resolve it via world.json (slug lookup), and classifies each reference as `resolved` (both vault and node exist) / `broken` (the vault exists but the node is missing) / `orphan` (the slug's vault does not exist) / `unresolvable` (`GRAPHRAG_WORLD_DIR` unset). It also inspects VAULT.md's `parent` (vault containment) and emits `parent_status` (`none` / `resolved` / `orphan` / `self` / `schema-mismatch` / `cycle` / `unresolvable`) in the summary. Read-only — it changes no vault. When `--vault` is omitted, uses the resolved `GRAPHRAG_VAULT_DIR` (including auto-discovery); when `--world` is omitted, uses `GRAPHRAG_WORLD_DIR`.
+
+With `--root <repo>`, additionally sweeps the repo's `graphrag:see` / `graphrag:enforces` comment markers (git grep, `*.md` and `.graphrag/` excluded, string literals stripped) and verifies each target against the vault + tombstone ledger — same three finding kinds as delta-check's `marker_findings` (`marker-broken-ref` / `marker-tombstoned-ref` with 301 successor / `marker-superseded-ref` with refines-successors). Same reference-rot check, opposite direction: vault-side refs above, code-side refs here. delta-check covers the diff-scoped write-moment; this is the periodic full sweep (a natural stocktake companion). Sweep failure (not a git repo) is reported in `code_markers.error`, never fatal.
 
 ## fsck — vault integrity check (read-only)
 

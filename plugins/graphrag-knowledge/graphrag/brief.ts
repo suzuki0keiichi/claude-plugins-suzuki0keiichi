@@ -143,12 +143,37 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
       }
     : {};
 
+  // 予約作業の再水和: planned/active な Goal をセッション再開の視野に入れる。
+  // 「あとで/Step N」は言ったセッションと共に消えるのが AI 開発の記憶喪失の最も痛い形 —
+  // resume は「前回の続き」を読む瞬間なので、未完の予約を見せる正しい場所。
+  // 出すのは見出しだけ (古い順, cap 5)。裁定 (やる/achieved/abandoned) は迫らない。
+  const openGoals = (graph.nodes ?? [])
+    .filter((node) => node.type === "Goal" && (node.state === "planned" || node.state === "active"))
+    .sort((a, b) => (cleanScalar(a.generated_at)).localeCompare(cleanScalar(b.generated_at)) || String(a.id).localeCompare(String(b.id)));
+  const goalNotice = openGoals.length > 0
+    ? {
+        open_goals: {
+          count: openGoals.length,
+          oldest_first: openGoals.slice(0, 5).map((node) => ({
+            id: node.id,
+            title: node.title,
+            state: node.state,
+            generated_at: cleanScalar(node.generated_at) || null
+          })),
+          note:
+            "Deferred / in-flight work registered as Goals. If one of these is what you are about to continue, " +
+            "start there; when one gets done or dies, update its state (achieved / abandoned) at the write-back boundary."
+        }
+      }
+    : {};
+
   return {
     primary,
     candidates: options.includeCandidates ? active.slice(0, options.limit ?? 3) : undefined,
     active_count: active.length,
     ...legacyNotice,
-    ...stocktakeNotice
+    ...stocktakeNotice,
+    ...goalNotice
   };
 }
 

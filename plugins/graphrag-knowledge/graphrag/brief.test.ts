@@ -328,3 +328,26 @@ test("query brief exposes standout (relative gap) next to match_confidence", asy
   assert.ok(["clear", "none", "single"].includes(out.standout.state));
   assert.ok("gap_above_next" in out.standout);
 });
+
+test("resume: planned/active Goal が open_goals として古い順に浮上する (無ければキー自体なし)", () => {
+  const graph = {
+    nodes: [
+      { id: "goal:s:newer", type: "Goal", title: "新しい予約", state: "planned", generated_at: "2026-07-10T00:00:00.000Z" },
+      { id: "goal:s:older", type: "Goal", title: "古い予約", state: "planned", generated_at: "2026-06-01T00:00:00.000Z" },
+      { id: "goal:s:doing", type: "Goal", title: "進行中", state: "active", generated_at: "2026-07-01T00:00:00.000Z" },
+      { id: "goal:s:done", type: "Goal", title: "済み", state: "achieved", generated_at: "2026-05-01T00:00:00.000Z" },
+      { id: "goal:s:nostate", type: "Goal", title: "state なし" }
+    ],
+    edges: []
+  };
+  const nodesById = new Map(graph.nodes.map((n) => [n.id, n]));
+  const out = buildResumeBrief(graph, nodesById);
+  assert.equal(out.open_goals.count, 3, "planned/active のみ (achieved / state 無しは含めない)");
+  assert.deepEqual(
+    out.open_goals.oldest_first.map((g) => g.id),
+    ["goal:s:older", "goal:s:doing", "goal:s:newer"],
+    "古い順 — 一番忘れられているものが先頭"
+  );
+  const empty = buildResumeBrief({ nodes: [], edges: [] }, new Map());
+  assert.equal("open_goals" in empty, false, "出す時だけ出す (null 埋め禁止)");
+});

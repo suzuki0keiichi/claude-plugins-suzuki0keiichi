@@ -530,3 +530,17 @@ test("nodeId 入口検証: 正当な kebab-case (数字始まり・. _ - 含む)
   });
   assert.equal(plan.nodes[0].id, "decision:graphrag-skill-dev:2026-06-17.state_dir-v2");
 });
+
+test("buildAddGoalPlan: --evidence (任意) で documented_by を張る — 予約作業を場所に宿らせる", () => {
+  const plan = buildAddGoalPlan({
+    system: "foo", slug: "step2-debt", title: "Step2: 権威委譲の残り", summary: "completed/errors の全面委譲",
+    state: "planned", evidence: ["file:foo:src/heartbeat.ts"]
+  });
+  const edge = plan.edges.find((e: any) => e.type === "documented_by");
+  assert.ok(edge, "documented_by エッジが張られる");
+  assert.equal((edge as any).from, "goal:foo:step2-debt");
+  assert.equal((edge as any).to, "file:foo:src/heartbeat.ts");
+  // evidence 無しは従来どおりエッジなしで通る (Goal は evidence 必須ではない)
+  const bare = buildAddGoalPlan({ system: "foo", slug: "y", title: "T", summary: "S" });
+  assert.equal(bare.edges.filter((e: any) => e.type === "documented_by").length, 0);
+});

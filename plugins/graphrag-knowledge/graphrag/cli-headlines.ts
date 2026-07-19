@@ -348,11 +348,14 @@ async function runAddConstraint(argv: string[]) {
 async function runAddGoal(argv: string[]) {
   const f = parseFlagsArgv(argv);
   // E2 add-goal: --state は任意 (既定 state なし)。指定時のみ builder が語彙検証。
+  // --evidence も任意 (他 verb と違い必須にしない): 予約作業 (planned) を場所に宿らせる
+  // documented_by。張ると delta-check がその場所を触った commit で見出しを浮上させる。
   const plan = buildAddGoalPlan({
     system: requireFlag(f, "system"),
     slug: requireFlag(f, "slug"),
     title: requireFlag(f, "title"),
     summary: requireFlag(f, "summary"),
+    evidence: asEvidenceArray(f),
     description: strFlag(f, "description"),
     reason: strFlag(f, "reason"),
     aliases: csvFlag(f, "aliases"),

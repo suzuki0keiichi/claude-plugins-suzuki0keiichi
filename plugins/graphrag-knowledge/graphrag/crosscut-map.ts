@@ -41,9 +41,10 @@ export interface CrosscutIndex {
 
 const CROSSCUT_TYPES = new Set(["Component", "Layer", "Concern"]);
 
-/** 知識ノード → File の「所在を示す」エッジ (area 展開に使う)。evidenced_by は含めない
- *  (crosscut がマッチした場合にメンバー全 File へ膨らませない — crosscut 自体を地図に載せる)。 */
-const KNOWLEDGE_TO_FILE_EDGES = new Set(["documented_by", "sets_policy_for", "constrains", "enforced_by", "risks_in"]);
+/** 知識ノード → File の「所在を示す」エッジ (area 展開・delta-check の逆引きに使う)。
+ *  evidenced_by は含めない (crosscut がマッチした場合にメンバー全 File へ膨らませない —
+ *  crosscut 自体を地図に載せる。delta-check でも配置は placement 側の守備範囲)。 */
+export const KNOWLEDGE_TO_FILE_EDGES = new Set(["documented_by", "sets_policy_for", "constrains", "enforced_by", "risks_in"]);
 
 function posixDirname(p: string): string {
   const i = p.lastIndexOf("/");

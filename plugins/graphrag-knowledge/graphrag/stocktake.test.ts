@@ -199,3 +199,39 @@ test("vault 未指定で hard-error", async () => {
     if (saved !== undefined) process.env.GRAPHRAG_VAULT_DIR = saved;
   }
 });
+
+// --- Goal (planned/active) の停滞検出 ---
+
+test("Goal: planned のまま stale なら suspect、新鮮/terminal/stateless は対象外", () => {
+  const res = run([
+    { id: "goal:s:old-planned", type: "Goal", title: "撤去: 旧トポロジ残骸", state: "planned",
+      generated_at: new Date(NOW - 30 * DAY).toISOString() },
+    { id: "goal:s:fresh-planned", type: "Goal", title: "新しい予約", state: "planned",
+      generated_at: new Date(NOW - 2 * DAY).toISOString() },
+    { id: "goal:s:old-active", type: "Goal", title: "進行中の目標", state: "active",
+      generated_at: new Date(NOW - 30 * DAY).toISOString() },
+    { id: "goal:s:done", type: "Goal", title: "済み", state: "achieved",
+      generated_at: new Date(NOW - 300 * DAY).toISOString() },
+    { id: "goal:s:no-state", type: "Goal", title: "分類意図なし",
+      generated_at: new Date(NOW - 300 * DAY).toISOString() }
+  ]);
+  const byId = new Map(res.suspects.map((s) => [s.id, s]));
+  assert.ok(byId.has("goal:s:old-planned"), "planned 停滞は浮上する");
+  assert.deepEqual(byId.get("goal:s:old-planned")!.signals, ["stale-planned-goal"]);
+  assert.equal(byId.get("goal:s:old-planned")!.type, "Goal");
+  assert.deepEqual(byId.get("goal:s:old-active")!.signals, ["stale-active-goal"]);
+  assert.ok(!byId.has("goal:s:fresh-planned"), "閾値内は静か");
+  assert.ok(!byId.has("goal:s:done"), "terminal は対象外");
+  assert.ok(!byId.has("goal:s:no-state"), "state 無し Goal は対象外");
+  assert.equal(res.counts.goals_open, 3, "planned/active の総数 (fresh 含む)");
+});
+
+test("Goal: planned で generated_at 欠損は stale + no-generated-at 併記", () => {
+  const res = run([{ id: "goal:s:undated", type: "Goal", title: "いつからか不明の予約", state: "planned" }]);
+  assert.deepEqual(res.suspects[0]!.signals, ["stale-planned-goal", "no-generated-at"]);
+});
+
+test("Investigation suspect には type=Investigation が付く (後方互換の形状拡張)", () => {
+  const res = run([{ id: "investigation:s:legacy", type: "Investigation", title: "旧" }]);
+  assert.equal(res.suspects[0]!.type, "Investigation");
+});

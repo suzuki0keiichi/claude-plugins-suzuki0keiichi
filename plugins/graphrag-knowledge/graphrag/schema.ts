@@ -128,8 +128,12 @@ export const STATE_VOCABULARY: Partial<Record<NodeType, readonly string[]>> = {
 };
 
 export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
+  // Goal → File は「予約作業は場所に宿る」の配線 (v1.23.0)。「あとで/Step N」を Goal
+  // (state: planned) で登記する時、残債が宿るファイルへ documented_by を張ると、
+  // その場所を触った commit の delta-check で見出しが浮上する — 「あとでやる、と
+  // 言った記憶を毎回失う」への構造的手当て。タスク属性 (期限/担当) は持たせない。
   documented_by: [
-    [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Investigation", "Deliverable"], "File"]
+    [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Investigation", "Deliverable", "Goal"], "File"]
   ],
   derived_from: [
     [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Goal", "Investigation"], ["ConversationChunk", "Investigation"]]

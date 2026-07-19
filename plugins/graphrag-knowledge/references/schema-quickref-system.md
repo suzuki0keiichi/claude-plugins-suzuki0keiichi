@@ -24,7 +24,7 @@ Canonical source: `graphrag/schema.ts`. This file covers the **system** preset (
 
 ## Edge Types (16)
 
-- `documented_by`: Decision|RejectedOption|Risk|OK|Investigation|Deliverable → File
+- `documented_by`: Decision|RejectedOption|Risk|OK|Investigation|Deliverable|Goal → File (Goal → File is the "deferred work lives HERE" wiring: a `state: planned` Goal wired to the files where the debt sits gets resurfaced by `delta-check` the moment a commit touches them. `add-goal --evidence file:<s>:<path>` — optional, unlike other typed-adds)
 - `evidenced_by`: Layer|Concern|Component → File
 - `enforced_by`: Constraint → File (**mechanical consumer** — the executable check (test / lint config / type definition) that FAILS when the constraint is violated. Put a comment marker `graphrag:enforces constraint:<system>:<slug>` inside that file; `constraint-check` cross-verifies both directions and hands back ready-made plan fragments for unregistered markers.)
 - `targets`: Goal → Deliverable
@@ -119,6 +119,17 @@ Strict rules (validated by `xref-check`, surfaced under `parent`):
 
 `add-constraint` requires choosing one: `--enforced-by file:<system>:<path>` (repeatable; auto-creates the File node when the path exists on disk) or `--unenforceable "<why>"`. Both at once is rejected. Project vaults are exempt (no File nodes; their constraints are external conditions by nature).
 
+## Comment markers (code → graph references)
+
+Two `graphrag:` namespaced comment markers connect code to the graph. Comments reach only whoever opens the file; the graph reaches only whoever asks — markers bridge the two, and unlike prose comments their targets are **machine-verified** (delta-check on the diff at every commit, xref-check --root as the periodic full sweep):
+
+| Marker | Meaning | Verified by |
+|---|---|---|
+| `graphrag:enforces constraint:<s>:<slug>` | this executable check IS the constraint's enforcer (pairs with the `enforced_by` edge) | constraint-check (bidirectional wiring) + delta-check/xref-check (target alive) |
+| `graphrag:see <type>:<s>:<slug>` | the reasoning behind this spot lives in the graph — **one-line conclusion here, full why/history/rejections in the node** | delta-check/xref-check (target alive: broken / tombstoned 301 / superseded with successors) |
+
+Placement rule for `graphrag:see`: put it on the **violation-prone side**, not the canonical side (a canonical-side declaration reaches nobody — the session that breaks the rule never opens the canonical file). Grammar: slug charset only (`[a-z0-9._-]`), no file ids; string-literal occurrences are ignored by the scanners.
+
 ## Policy Reversal Recipe
 
 1. Create new Decision, add `refines`: new→old (lineage).
@@ -126,3 +137,14 @@ Strict rules (validated by `xref-check`, surfaced under `parent`):
 3. Optionally create RejectedOption and wire `supersedes`.
 
 Incoming `has_premise` edges to old node survive (lineage preserved). Plan template: `mutation-templates.md`.
+
+## Staged Migration Recipe (topology / generation replacement)
+
+Staged migrations rot when the old side's removal is nobody's job (the #1 debt pattern in both field reports: the new side ships, the old side's units/routes/installer lines linger for weeks). Express the whole lifecycle in existing vocabulary — no Era type needed:
+
+1. **Migration Decision** — `sets_policy_for` → the old-generation Component ("this decision decides that component's fate"). Supersede the old policy Decision as usual.
+2. **Removal Goal** (`state: planned`) in the SAME plan — titled "remove <old side>", `documented_by` → the files where the leftovers live. delta-check resurfaces it whenever a commit touches them; `brief --mode resume` lists it; stocktake catches it if it stalls.
+3. Keep the old Component alive while its files exist — `ask` / evidenced_by is your removal worklist ("what still belongs to the dead generation" is one query, not an investigation).
+4. On completion: Goal → `achieved`, delete the old Component with a `successors` entry (301) — the tombstone ledger keeps the full removal record (cascaded_edges = what belonged to it) permanently answerable.
+
+Plan template: `mutation-templates.md` §Staged migration.

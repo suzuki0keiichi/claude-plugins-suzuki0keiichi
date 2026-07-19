@@ -92,6 +92,8 @@ Search combines lexical + semantic (§Invariants #3), so **query vocabulary dete
 
 Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact match on alias) — **aliasExact is the strongest lexical signal**. Add aliases via `--aliases "a,b,c"` (comma-separated, available on all typed-add verbs) for nodes you want to be easily retrievable. Include both natural-language and code-language terms.
 
+**Authority nodes MUST carry their code vocabulary as aliases.** When a Decision/OK/Constraint declares an authority ("the authority for X is function/constant Y"), put the authority symbol AND the literals it owns into `aliases` (e.g. `ERROR_STATUSES`, `zero_bytes`). This is not just for retrieval: `delta-check` uses identifier-shaped aliases as the authority's **vocabulary fingerprint** — when a commit adds those tokens outside the authority's home files, it flags the second implementation in the act (`authority_echoes`). Plain lowercase English words (`migration`) don't work as fingerprints; distinctive identifiers (`zero_bytes`, `decideAutoUnmount`, `constraint-check`) do.
+
 ### Cutoff judgment (reading `ask` output)
 
 - If auto-escalation reaches `evidence` and returns empty, the knowledge truly does not exist. **Try one different keyword only.** Do not repeat.
@@ -111,7 +113,7 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 | Record a risk | `$CLI add-risk --system <s> --slug <slug> --title "..." --summary "..." --evidence file:<s>:<path>` `[--risks-in <id,...>]` |
 | Record an investigation episode | `$CLI add-investigation --system <s> --slug <slug> --title "..." --summary "..." --raw-content "key commits:\n- 2026-MM-DD <hash> <subject>"` |
 | Record a constraint (invariant) | `$CLI add-constraint --system <s> --slug <slug> --title "..." --summary "..." --constrains <id,...>` + **enforcement choice (required)**: `--enforced-by file:<s>:<path/to/check>` (the test/lint/type check that FAILS on violation; also write a comment marker `graphrag:enforces constraint:<s>:<slug>` inside that file) OR `--unenforceable "<why>"` (external condition — law/SLA — no check can express). `--constrains` required ≥1 (target Decision\|File\|OK) |
-| Record a goal | `$CLI add-goal --system <s> --slug <slug> --title "..." --summary "..." [--refines <goal-id>] [--derived-from <id>] [--state planned\|active\|achieved\|abandoned]` |
+| Record a goal | `$CLI add-goal --system <s> --slug <slug> --title "..." --summary "..." [--refines <goal-id>] [--derived-from <id>] [--state planned\|active\|achieved\|abandoned] [--evidence file:<s>:<path>]` — for deferred work ("later" / "Step N"), use `--state planned` + `--evidence` pointing at the files where the debt lives, so delta-check resurfaces it when a commit touches them |
 | Apply a complex plan (validated write to vault) | `$CLI commit-mutation <plan.json>` |
 | Initial indexing + concept extraction + quality gate | `$CLI carve --root <repo> --system <name>` (see `$REF/indexing-and-carving.md`) |
 | Check status (env / artifacts) | `$CLI inspect` |
@@ -147,17 +149,18 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `concern-hint` | machine hints for Concerns (embedding proximity clustering). For blind-spot checking after LLM modeling |
 | `edge-suggest-policy` | sets_policy_for candidate extraction |
 | `carving-check` | carving quality gate |
-| `xref-check` | cross-vault ref + VAULT.md `parent` integrity check (read-only): resolves each `vault:` edge, reports resolved/tombstoned (deleted per ledger — 301 with successor / 410 without)/broken/orphan/unresolvable + parent status |
+| `xref-check` | cross-vault ref + VAULT.md `parent` integrity check (read-only): resolves each `vault:` edge, reports resolved/tombstoned (deleted per ledger — 301 with successor / 410 without)/broken/orphan/unresolvable + parent status. With `--root <repo>`, also sweeps the repo's `graphrag:see` / `graphrag:enforces` comment markers and verifies each target is alive (broken / tombstoned 301 / superseded) — the periodic full sweep; the diff-scoped variant lives in `delta-check` |
 | `branch-merge` | semantic merge analysis of vault git branches (read-only). Procedure: `$REF/branch-merge.md` |
 | `world-join` | join a world: add this vault to world.json + write `GRAPHRAG_WORLD_DIR` to `.graphrag/.env`. Flags: `--world <dir>` `--vault <dir>` |
 | `world-refresh` | rebuild cross-vault world-cache. When `GRAPHRAG_WORLD_DIR` is set, `ask` includes `world_hints` |
 | `carving-allow` | manage `.graphrag/carving.json` (carving exemptions): `add` / `remove` / `list` / `migrate` |
 | `harvest-history` | deterministic extraction from git history (no writes): reverts → RejectedOption candidates, HACK/FIXME markers → OK/Risk candidates |
 | `staleness-check` | count commits since `generated_at` for files linked via documented_by/sets_policy_for/constrains, list candidates above threshold (read-only) |
-| `stocktake` | Investigation lifecycle audit (read-only, deterministic): returns suspect Investigations (stateless / active-and-stale / no-generated-at / progress-claiming-summary) as JSON. Adjudication is the `graphrag-stocktake` skill's job, not this verb's |
+| `stocktake` | Investigation + Goal lifecycle audit (read-only, deterministic): returns suspect Investigations (stateless / active-and-stale / no-generated-at / progress-claiming-summary) AND stalled open Goals (`stale-planned-goal` / `stale-active-goal` — deferred work that has sat past the threshold) as JSON. Adjudication is the `graphrag-stocktake` skill's job, not this verb's |
 | `fsck` | vault integrity check (read-only): parse / duplicate-id / id↔path / edge-endpoint / schema / round-trip / tombstone-ledger / uncommitted-delta (torn-write) checks as single JSON `{status, checks, counts}`; exit 1 only on error |
 | `constraint-check` | Constraint enforcement-wiring check (read-only, deterministic): walks every Constraint and cross-verifies `enforced_by` wiring in both directions — graph→code (enforcer file missing = **error** / skipped / marker-missing) and code→graph (orphan `graphrag:enforces` markers with tombstone 301 tracing / unregistered enforcers **with ready-made plan_fragment**). Every finding carries `next_step` (what is wrong + how to fix); apply `plan_fragment`s via commit-mutation. `git grep graphrag:enforces` = the repo's registered-enforcer list. Flags: `--root <repo>` `--strict` (warn→exit 1, for CI). exit 1 on error |
 | `frame-check` | placement map for new/changed files (read-only, deterministic): matches paths against Component footprints (member-File directories). Shows the map (`entries[].claimants`) and limits findings to two high-precision cases — `in-footprint-unwired` (file inside exactly ONE component's home, not wired; paste-ready plan_fragment) and `component-candidate` (a directory's unregistered pile crossed the threshold = a Component wants to be born). **`unclaimed` is not a verdict** — small clusters legitimately have no Component. Input: `--files <p,...>` / `--diff <range>` / default worktree. Flags: `--root` `--threshold-files N` (default 5) `--strict` |
+| `delta-check` | **the read-side of the commit boundary** (read-only, deterministic, no embedding): reverse-looks-up the knowledge wired to the files you changed. 4 checks — `connected_knowledge` (headlines of Decision/Constraint/OK/Risk/Goal reaching these files via constrains/documented_by/sets_policy_for/enforced_by/risks_in — a reading list, not a diagnosis), `authority_echoes` (identifier aliases of registered authorities appearing in ADDED lines outside their home files = second-implementation caught in the act; legit imports also trigger, the added line is attached so you can tell), `marker_findings` (graphrag:see/enforces targets dead/301/superseded), `placement_findings` (frame-check's two). **Output contract: clean = one line** — wired into the commit-boundary hook, so it costs nothing when it has nothing to say. 'clean' means *no registered knowledge is wired here*, NOT that the diff is safe. Input: `--files` / `--diff <range>` / default worktree. Flags: `--root` `--strict` |
 
 ## Parallel work and semantic merge (vault branch)
 
@@ -224,6 +227,16 @@ Do not wait for the user to say "remember this." Write via `add-*` immediately w
   so this moment — a boundary got crossed and you just pinned it with a test — is the one reliable chance to
   turn the invariant into a registered, machine-guarded Constraint instead of a diary entry about the fix.
   → `add-constraint --title "<invariant>" --summary "<what must hold>" --constrains <violated-target-id,...> --enforced-by file:<s>:<path/to/regression.test>` + write the `graphrag:enforces constraint:<s>:<slug>` marker into the test
+- **You deferred work (action trigger — fires the moment you write "later")**:
+  the words "later" / "in a separate step" / "Step 2" / "別段階で" / "あとで" — in a commit message, a code
+  comment, or your own report — ARE deferred work being created. This is the single most reliably lost knowledge
+  type: the session that says "later" is the one that just decided NOT to do it, so motivation to register is at
+  its minimum, and a promise living only in a commit message dies with the session ("あとでやる、って記憶を毎回失う").
+  → `add-goal --state planned --title "<the deferred work>" --summary "<what remains and why it was deferred>" --evidence file:<s>:<path/where/the/debt/lives>`
+  → `--evidence` wires the Goal to the files where the debt lives (documented_by), so `delta-check` resurfaces it
+  the moment any commit touches that place; `brief --mode resume` lists open Goals at session start; `stocktake`
+  catches the ones that sat too long. When the work gets done or dies, update state (achieved / abandoned) at the
+  write-back boundary.
 
 ### Vault isolation guard
 

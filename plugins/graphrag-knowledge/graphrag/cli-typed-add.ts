@@ -177,6 +177,9 @@ export type AddGoalArgs = {
   refines?: string; // refines: Goal → Goal
   derivedFrom?: string; // derived_from: Goal → ConversationChunk|Investigation
   state?: string; // 任意。語彙は STATE_VOCABULARY.Goal。未指定なら state 無し
+  // 任意 (他 verb と違い必須ではない): 予約作業 (state: planned) が宿る場所への
+  // documented_by。張っておくと、その場所を触った commit の delta-check で浮上する。
+  evidence?: string[];
 };
 
 export type AddInvestigationArgs = AddDecisionArgs & {
@@ -383,7 +386,7 @@ export function buildAddGoalPlan(args: AddGoalArgs) {
   return {
     reason: args.reason ?? `新規 Goal ${args.slug}`,
     nodes: [withAliases(withDescription(node, args.description), args.aliases)],
-    edges
+    edges: [...edges, ...makeDocumentedByEdges(id, args.evidence)]
   };
 }
 

@@ -186,6 +186,40 @@ Create a new Decision, (1) wire `refines`: new→old, and (2) set the old Decisi
 
 ---
 
+## Staged migration (topology / generation replacement — removal is part of the plan)
+
+Staged migrations rot when the old side's removal is nobody's job: the new side ships and the migration is declared done, while the old side's units / routes / installer lines survive as unowned corpses (the dominant debt pattern in both long-run field reports). The migration Decision alone only governs *what will be built* — it does not clean up *what already exists*. So the template makes removal a first-class citizen of the SAME plan:
+
+```json
+{
+  "reason": "移行: <旧トポロジ> → <新トポロジ>。撤去を予約作業として同時登記する",
+  "nodes": [
+    { "op": "create", "id": "decision:<system>:<migration-slug>", "type": "Decision",
+      "title": "<新トポロジ> へ移行する", "summary": "...",
+      "description": "なぜ移行するか + 旧側の何が残る想定か" },
+    { "op": "update", "id": "decision:<system>:<old-policy-slug>", "updates": { "state": "superseded" } },
+    { "op": "create", "id": "goal:<system>:remove-<old-slug>", "type": "Goal", "state": "planned",
+      "title": "撤去: <旧側> の残骸", "summary": "<何を消せば完了か — 参照ゼロの定義>" }
+  ],
+  "edges": [
+    { "op": "create", "id": "decision_<migration-slug>__refines__decision_<old-policy-slug>",
+      "type": "refines", "from": "decision:<system>:<migration-slug>", "to": "decision:<system>:<old-policy-slug>" },
+    { "op": "create", "id": "decision_<migration-slug>__sets_policy_for__component_<old-component-slug>",
+      "type": "sets_policy_for", "from": "decision:<system>:<migration-slug>", "to": "component:<system>:<old-component-slug>" },
+    { "op": "create", "id": "goal_remove-<old-slug>__documented_by__file_<leftover_slug>",
+      "type": "documented_by", "from": "goal:<system>:remove-<old-slug>", "to": "file:<system>:<path/where/leftovers/live>" }
+  ]
+}
+```
+
+Why each piece exists:
+
+- **Removal Goal (`state: planned`), same plan** — "later" registered at the only moment it reliably exists. Its `documented_by` edges point at the files where the leftovers live, so `delta-check` resurfaces it whenever a commit touches them, `brief --mode resume` lists it at session start, and `stocktake` flags it if it stalls past the threshold.
+- **`sets_policy_for` → old Component** — the migration Decision visibly owns the old generation's fate. Keep the old Component alive while its files exist: "what still belongs to the dead generation" stays a single evidenced_by query instead of an archaeology investigation.
+- **Completion** — Goal → `achieved`; delete the old Component with a `successors` entry (301, §Delete + replace) so the tombstone ledger permanently answers "when did this generation die, why, what replaced it, and what belonged to it" (cascaded_edges).
+
+---
+
 ## Compaction checkpoint (bundles flush A + rescue B into one)
 
 The batch plan that the `graphrag-checkpoint` skill fires just before compact. It applies **A (flushing the work state) and B (rescuing unwritten durable knowledge) as equals in a single plan**. Common to both presets (only the rescue-target knowledge types and the presence of Assumption/Agreement vary by preset).

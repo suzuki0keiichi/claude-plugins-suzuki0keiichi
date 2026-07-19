@@ -88,14 +88,15 @@ function gitLines(root: string, args: string[]): string[] {
   return out.split("\n").filter((l) => l.length > 0);
 }
 
-function defaultGitWorktreePaths(root: string): string[] {
+// delta-check と共有する変更ファイル列挙 (入力契約 files > diff > worktree も共有)。
+export function defaultGitWorktreePaths(root: string): string[] {
   return [
     ...gitLines(root, ["diff", "--name-only", "HEAD"]),
     ...gitLines(root, ["ls-files", "--others", "--exclude-standard"])
   ];
 }
 
-function defaultGitDiffPaths(root: string, range: string): string[] {
+export function defaultGitDiffPaths(root: string, range: string): string[] {
   return gitLines(root, ["diff", "--name-only", range]);
 }
 

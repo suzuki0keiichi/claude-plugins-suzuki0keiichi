@@ -1,5 +1,5 @@
 /**
- * xref-check: diagnostic CLI verb for cross-vault references.
+ * xref-check: diagnostic CLI verb for reference integrity.
  *
  * Scans all edges in the current vault for `vault:` prefixed `to` fields,
  * attempts to resolve each one via xref-resolver, and reports:
@@ -10,10 +10,17 @@
  *   orphan     — no vault with the given slug found
  *   unresolvable — GRAPHRAG_WORLD_DIR not configured
  *
+ * With `--root <repo>`, additionally sweeps the repo's `graphrag:see` /
+ * `graphrag:enforces` comment markers (code → graph references) and verifies
+ * each target is alive (broken / tombstoned 301 / superseded — markers.ts).
+ * Same reference-rot check, opposite direction: vault-side refs above,
+ * code-side refs here. The diff-scoped variant of the same sweep lives in
+ * delta-check (the write-moment path); this is the periodic full sweep.
+ *
  * Read-only. Never mutates any vault.
  *
  * Usage:
- *   node --experimental-strip-types graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>]
+ *   node --experimental-strip-types graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>] [--root <repo>]
  */
 
 import path from "node:path";
@@ -21,6 +28,7 @@ import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
 import { checkCrossVaultRefs, checkVaultParent } from "./xref-resolver.ts";
 import { resolveWorldDir } from "./world.ts";
+import { grepMarkersInRepo, verifyMarkerRefs, type MarkerRefFinding } from "./markers.ts";
 
 export async function runXRefCheck(argv: string[]): Promise<void> {
   // Simple flag parsing (no dependency on cli-headlines parseFlagsArgv to keep this minimal)
@@ -79,6 +87,31 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
   const parent = checkVaultParent(resolvedVaultDir, worldDir);
   const parentOk = parent.status === "none" || parent.status === "resolved";
 
+  // Optional code-side sweep: repo-wide graphrag:see / graphrag:enforces markers.
+  // Failure of the sweep (no git, not a repo) is reported, never fatal — the
+  // vault-side check above still stands on its own.
+  const rootFlag = typeof flags.root === "string" ? path.resolve(flags.root) : null;
+  let codeMarkers:
+    | { root: string; markers_scanned: number; findings: MarkerRefFinding[]; error?: string }
+    | undefined;
+  if (rootFlag) {
+    try {
+      const hits = grepMarkersInRepo(rootFlag);
+      codeMarkers = {
+        root: rootFlag,
+        markers_scanned: hits.length,
+        findings: verifyMarkerRefs(hits, graph, resolvedVaultDir)
+      };
+    } catch (err) {
+      codeMarkers = {
+        root: rootFlag,
+        markers_scanned: 0,
+        findings: [],
+        error: err instanceof Error ? err.message : String(err)
+      };
+    }
+  }
+
   const output = {
     vault: resolvedVaultDir,
     world_dir: worldDir ?? null,
@@ -94,9 +127,11 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
       orphan: orphan.length,
       unresolvable: unresolvable.length,
       parent_status: parent.status,
-      parent_ok: parentOk
+      parent_ok: parentOk,
+      ...(codeMarkers ? { code_marker_findings: codeMarkers.findings.length } : {})
     },
     parent,
+    ...(codeMarkers ? { code_markers: codeMarkers } : {}),
     results
   };
 
