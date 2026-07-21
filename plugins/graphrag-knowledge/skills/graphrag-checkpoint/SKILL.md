@@ -1,6 +1,6 @@
 ---
 name: graphrag-checkpoint
-version: 1.4.0
+version: 1.5.0
 description: context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、`/clear` で綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。退避後に `/clear` すると SessionStart フックが直前の作業状態を自動で戻す (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
 ---
 
@@ -33,7 +33,7 @@ Run `$CLI inspect` to check the vault type → read only the matching system / p
    - `next:` the concrete next action (granular enough to resume without re-deriving; drop finished branches). **The first item is the "unique first action"** — always place at the head one action concretized down to its target (file:line or command to run) and expected result, so the agent right after restore can start without hesitation. Writing that can only start with exploration, like "investigate ~" or "clean up around ~", is forbidden (that is the main cause of post-restore wandering and ctx waste).
    - `blocker:` sticking points, unresolved dependencies, waits
    - `touched:` files being edited / targeted (file:line and "what you are trying to change" where possible)
-3. Deep raw logs (failed paths / exact commands / non-obvious findings / constraints the user stated this session / mid-flight state of multi-step changes) go into a **ConversationChunk**, **update-in-place with a fixed slug** (avoid bloat; high-value fragments only). Wire it to the Investigation via `discussed_in`.
+3. Deep raw logs (failed paths / exact commands / non-obvious findings / constraints the user stated this session / mid-flight state of multi-step changes) go into a **ConversationChunk**, **update-in-place with a fixed slug** (avoid bloat; high-value fragments only). Wire it to the Investigation via `discussed_in`. **Sanitize on write** (parent skill §Content hygiene): no verbatim abusive language / insults / personal information, even when "quoting the user" — flush the substance (constraint, decision, cause), not the phrasing.
 4. **Pre-flush self-check** (ask yourself before writing work_state):
    - Reading only the head of next, can you enter the first edit/command without exploration?
    - Are there contradictions or stale statements among current focus / next / touched (did you drop finished branches)?

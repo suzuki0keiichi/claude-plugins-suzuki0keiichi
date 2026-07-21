@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.11.0
+version: 4.12.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -189,7 +189,7 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
 - `description` = distilled prose about the node (appears in vault body `## 説明` with round-trip marker, also enters embedding). **Write for every node in principle.** Guidelines:
   - **Aggregate types (especially Concern)**: not a list of constituents, but **what the collection means as a whole** — the meaning that emerges only at the aggregate level.
   - **Judgment types (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge)**: **why it was decided that way**.
-- `raw_content` = raw primary information (conversation logs, how it was decided, Slack URLs, etc.). **Do not discard even for judgment types**: low volume, becomes the primary source for tracing "why" later.
+- `raw_content` = raw primary information (conversation logs, how it was decided, Slack URLs, etc.). **Do not discard even for judgment types**: low volume, becomes the primary source for tracing "why" later. Subject to §Content hygiene — never verbatim abuse or personal information; sanitize while distilling.
 
 `commit-mutation` (and typed-add) enforce `validateGraph` passage (rejects unknown types, disallowed pairs, missing evidence, duplicate ids, state vocabulary violations).
 
@@ -259,6 +259,15 @@ Post-write `suggestions` (binding/relations/led_to/premise_candidates/binding_de
 - Session-local exploratory notes
 - Trivial scratch (variable renames, temporary lint fixes, etc.)
 - Ad-hoc observations not stated in future tense
+
+### Content hygiene (all node types, all fields — hard rule)
+
+The vault is a durable artifact that outlives the session and travels with the repo — anything written here may be read by future collaborators and injected into future contexts. This rule applies to **every field of every node type** (`title` / `summary` / `description` / `raw_content`); the highest-risk paths are verbatim conversation capture into ConversationChunk and Investigation `raw_content`.
+
+- **Never record abusive language, insults, or disparagement of people verbatim** — even when quoting the user or a conversation log, and even inside `raw_content`. Venting is not knowledge. Extract the substance and drop the wrapper: the constraint, the decision, or the *cause* of the frustration survives; the phrasing does not. E.g. an expletive-laden complaint about a library becomes "library X fails at ~ (user priority signal: strong frustration)".
+- **Never record personal information beyond what the work itself needs**: no home/postal addresses, phone numbers, private email addresses, credentials/tokens/secrets, health or private-life details. Refer to people by role, or by an identity already public in the repo (e.g. Git author name), and only when the knowledge genuinely requires attribution.
+- "Do not discard raw information" (§Mutation Plan, `raw_content`) means do not discard **substance** — it is not a license for verbatim transcripts. Sanitizing while distilling is part of writing, not a fidelity loss; if a quote must be kept for meaning, keep the sanitized paraphrase and note that it is paraphrased.
+- **No opt-out exists today.** If the user explicitly asks to record such content verbatim, say the vault has no unsafe/verbatim mode and write the sanitized form instead (a per-vault opt-in mode is a possible future extension, deliberately not implemented).
 
 ## Topology Gap Review
 
