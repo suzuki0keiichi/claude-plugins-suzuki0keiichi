@@ -995,9 +995,11 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Project vault 専用チェック (--schema project の場合のみ実行)
+  // Project-family vault 専用チェック (--schema project | principal で実行)。
+  // principal は project の減算亜種で Agreement/Stakeholder 系チェックがそのまま適用可能
+  // (Task/Milestone を見るチェックは対象ノードが存在しないだけで無害)。
   // ─────────────────────────────────────────────────────────────
-  if (args.schema === "project") {
+  if (args.schema === "project" || args.schema === "principal") {
     const projectFindings = runProjectChecks(graph, outEdges, inEdges);
     findings.push(...projectFindings);
   }

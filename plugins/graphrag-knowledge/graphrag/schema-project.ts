@@ -37,8 +37,12 @@ const KNOWLEDGE_NODES: ProjectNodeType[] = [
 
 const PROJECT_EDGE_TYPES = [
   // --- provenance (出自・根拠) ---
-  "documented_by",       // Decision/RejectedOption/Risk/OK/Agreement → Source
-  "derived_from",        // Decision/RejectedOption/Risk/OK/Goal/Assumption/Task → ConversationChunk/Investigation/Source
+  "documented_by",       // Decision/RejectedOption/Risk/OK/Agreement/Constraint/Stakeholder/Resource → Source
+                         //   Constraint: 与件 (unenforceable な外部条件) には enforcer が原理的に無く、
+                         //   出典が接地の代替。無いと「規制改正時にどの Constraint を再点検するか」の
+                         //   逆引きが立たない (2026-07-26 実データ反例A)。
+                         //   Stakeholder/Resource: 外部正本 (組織図・人事) への鮮度付きポインタ。
+  "derived_from",        // Decision/RejectedOption/Risk/OK/Goal/Assumption/Task/Constraint → ConversationChunk/Investigation/Source
 
   // --- judgment / knowledge (判断・知識) ---
   "supersedes",          // Decision/OK → RejectedOption
@@ -50,6 +54,9 @@ const PROJECT_EDGE_TYPES = [
 
   // --- constraint / risk (制約・リスク) ---
   "constrains",          // Constraint/Agreement → Decision/Task/Goal/OK
+  "excepts",             // Constraint(例外) → Constraint(原則)。原則と「確定した但し書き」は
+                         //   片方だけ読むと誤答する構造なのに、従来は辿る辺が無かった (2026-07-26 実データ反例B)。
+                         //   未確定の可能性は excepts でなく Assumption + has_premise で書く。
   "risks_in",            // Risk → Task/Goal/Milestone
   "reduces_risk",        // Decision/Task → Risk
 
@@ -58,7 +65,8 @@ const PROJECT_EDGE_TYPES = [
   "depends_on",          // Task→Task, Milestone→Milestone
   "targets",             // Task/Goal → Milestone
   "falls_back_to",       // Task→Task, Goal→Goal (PlanB)
-  "requires",            // Task → Resource (period_start/end/allocation optional)
+  "requires",            // Task → Resource, Decision → Resource (period_start/end/allocation optional)
+                         //   Decision → Resource: 恒久方針がリソースを前提とする形 (principal で唯一残る requires)。
 
   // --- stakeholder (利害関係者) ---
   "concerned_with",      // Stakeholder → Goal/Decision/Risk/Task/Milestone/Theme
@@ -82,10 +90,12 @@ type TypeRule = [AllowedType, AllowedType];
 
 const EDGE_TYPE_RULES: Record<ProjectEdgeType, TypeRule[]> = {
   documented_by: [
-    [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Investigation", "Agreement"], "Source"]
+    [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Investigation", "Agreement",
+      "Constraint", "Stakeholder", "Resource"], "Source"]
   ],
   derived_from: [
-    [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Goal", "Assumption", "Task", "Investigation"],
+    [["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Goal", "Assumption", "Task", "Investigation",
+      "Constraint"],
      ["ConversationChunk", "Investigation", "Source"]]
   ],
   supersedes: [
@@ -112,6 +122,9 @@ const EDGE_TYPE_RULES: Record<ProjectEdgeType, TypeRule[]> = {
   constrains: [
     [["Constraint", "Agreement"], ["Decision", "Task", "Goal", "OperationalKnowledge"]]
   ],
+  excepts: [
+    ["Constraint", "Constraint"]
+  ],
   risks_in: [
     ["Risk", ["Task", "Goal", "Milestone"]]
   ],
@@ -133,7 +146,8 @@ const EDGE_TYPE_RULES: Record<ProjectEdgeType, TypeRule[]> = {
     ["Goal", "Goal"]
   ],
   requires: [
-    ["Task", "Resource"]
+    ["Task", "Resource"],
+    ["Decision", "Resource"]
   ],
   concerned_with: [
     ["Stakeholder", ["Goal", "Decision", "Risk", "Task", "Milestone", "Theme"]]

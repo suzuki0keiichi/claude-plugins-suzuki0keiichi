@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateGraph, NODE_TYPES, EDGE_TYPES, STATE_VOCABULARY } from "./schema.ts";
 import { PROJECT_SCHEMA } from "./schema-project.ts";
+import { PRINCIPAL_SCHEMA } from "./schema-principal.ts";
 
 // graphrag:enforces constraint:graphrag-skill-dev:edge-types-frozen — edge 型は固定
-// (system 16 / project 22)、勝手に増やさない。増やすなら vault の Constraint を先に更新し、
-// この pin を同じ変更で動かす (empirical 判定を経る — 許容ペアの拡張は型増加に当たらない)。
-test("EDGE_TYPES は固定 (system 16 / project 22) — 無断で増えたらここで落ちる", () => {
+// (system 16 / project 23 / principal 20)、勝手に増やさない。増やすなら vault の Constraint を
+// 先に更新し、この pin を同じ変更で動かす (empirical 判定を経る — 許容ペアの拡張は型増加に
+// 当たらない)。2026-07-26: excepts を project へ追加 (実データ反例B)。principal は減算亜種。
+test("EDGE_TYPES は固定 (system 16 / project 23 / principal 20) — 無断で増えたらここで落ちる", () => {
   assert.equal(EDGE_TYPES.length, 16);
-  assert.equal(PROJECT_SCHEMA.edgeTypes.length, 22);
+  assert.equal(PROJECT_SCHEMA.edgeTypes.length, 23);
+  assert.equal(PRINCIPAL_SCHEMA.edgeTypes.length, 20);
 });
 
 test("validateGraph rejects invalid edge source and target type pairs", () => {
@@ -39,7 +42,7 @@ test("root scope types and contains are removed (vault=scope)", () => {
       nodes: [{ id: `${t.toLowerCase()}:acme:x`, type: t }],
       edges: []
     });
-    assert.deepEqual(failures, [`unknown node type: ${t}`]);
+    assert.deepEqual(failures, [`unknown node type: ${t} (schema: system)`]);
   }
   const containsFailures = validateGraph({
     nodes: [

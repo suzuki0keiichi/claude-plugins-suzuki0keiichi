@@ -24,11 +24,13 @@ For time-bounded initiatives (business projects). Differences from system vault:
   - `Agreement` = External commitment. Track negotiation progress via state. No backward transitions — expire old, create new.
   - `Task` = Judgment-relevant work unit. Do NOT put Jira-ticket-level items.
 
-## Edge Types (22)
+## Edge Types (23)
 
 ### Provenance
-- `documented_by`: Decision|RejectedOption|Risk|OK|Investigation|Agreement → **Source**
-- `derived_from`: Decision|RejectedOption|Risk|OK|Goal|Assumption|Task|Investigation → ConversationChunk|Investigation|**Source**
+- `documented_by`: Decision|RejectedOption|Risk|OK|Investigation|Agreement|**Constraint**|**Stakeholder**|**Resource** → **Source**
+  - Constraint → Source: a given's grounding is its citation (no test can enforce a law — the citation substitutes for `enforced_by`). Enables reverse lookup "regulation changed → which Constraints to re-examine".
+  - Stakeholder/Resource → Source: freshness-tracked pointer to external masters (org charts, HR/accounting systems). Never copy the numbers.
+- `derived_from`: Decision|RejectedOption|Risk|OK|Goal|Assumption|Task|Investigation|**Constraint** → ConversationChunk|Investigation|**Source**
 
 ### Judgment / Knowledge
 - `supersedes`: Decision|OK → RejectedOption
@@ -40,6 +42,7 @@ For time-bounded initiatives (business projects). Differences from system vault:
 
 ### Constraint / Risk
 - `constrains`: Constraint|**Agreement** → Decision|**Task**|Goal|OK
+- `excepts`: **Constraint(例外) → Constraint(原則)** — a determinate carve-out that partially defeats a principle ("原則 support 完了までに支払 / 特例 翌々月払いは条件付きで認められる"). Reading either side alone yields a wrong answer, so wire them. A merely *possible* exception is an Assumption + `has_premise`, not `excepts`. Not `refines` (elaboration ≠ defeat).
 - `risks_in`: Risk → **Task**|Goal|**Milestone**
 - `reduces_risk`: Decision|**Task**|OK → Risk
 
@@ -48,7 +51,7 @@ For time-bounded initiatives (business projects). Differences from system vault:
 - `depends_on`: **Task → Task** / **Milestone → Milestone**
 - `targets`: **Task**|Goal → **Milestone**
 - `falls_back_to`: **Task → Task** / Goal → Goal (PlanB, chainable)
-- `requires`: **Task** → **Resource** (`period_start`/`period_end`/`allocation` optional attrs)
+- `requires`: **Task** → **Resource** / **Decision** → **Resource** (`period_start`/`period_end`/`allocation` optional attrs). Decision → Resource = a standing policy premising a resource (the only `requires` that survives in the principal preset).
 
 ### Stakeholder
 - `concerned_with`: **Stakeholder** → Goal|Decision|Risk|**Task**|**Milestone**|**Theme**

@@ -95,6 +95,55 @@ describe("project schema preset", () => {
     assert.deepStrictEqual(validateGraph(g, S), []);
   });
 
+  it("requires: Decision → Resource (恒久方針がリソースを前提とする形)", () => {
+    const g = {
+      nodes: [
+        { id: "decision:p:a", type: "Decision" },
+        { id: "resource:p:b", type: "Resource" },
+      ],
+      edges: [{ id: "e1", type: "requires", from: "decision:p:a", to: "resource:p:b" }],
+    };
+    assert.deepStrictEqual(validateGraph(g, S), []);
+  });
+
+  it("excepts: Constraint(例外) → Constraint(原則)", () => {
+    const g = {
+      nodes: [
+        { id: "constraint:p:carve-out", type: "Constraint" },
+        { id: "constraint:p:principle", type: "Constraint" },
+      ],
+      edges: [{ id: "e1", type: "excepts", from: "constraint:p:carve-out", to: "constraint:p:principle" }],
+    };
+    assert.deepStrictEqual(validateGraph(g, S), []);
+    const bad = {
+      nodes: [
+        { id: "constraint:p:a", type: "Constraint" },
+        { id: "goal:p:b", type: "Goal" },
+      ],
+      edges: [{ id: "e1", type: "excepts", from: "constraint:p:a", to: "goal:p:b" }],
+    };
+    assert.ok(validateGraph(bad, S).length > 0);
+  });
+
+  it("Constraint / Stakeholder / Resource can cite Source (反例A: 与件の接地は出典)", () => {
+    const g = {
+      nodes: [
+        { id: "constraint:p:c", type: "Constraint" },
+        { id: "stakeholder:p:st", type: "Stakeholder" },
+        { id: "resource:p:r", type: "Resource" },
+        { id: "source:p:reg", type: "Source", source_kind: "regulation" },
+        { id: "conversation:p:cc", type: "ConversationChunk" },
+      ],
+      edges: [
+        { id: "e1", type: "documented_by", from: "constraint:p:c", to: "source:p:reg" },
+        { id: "e2", type: "documented_by", from: "stakeholder:p:st", to: "source:p:reg" },
+        { id: "e3", type: "documented_by", from: "resource:p:r", to: "source:p:reg" },
+        { id: "e4", type: "derived_from", from: "constraint:p:c", to: "conversation:p:cc" },
+      ],
+    };
+    assert.deepStrictEqual(validateGraph(g, S), []);
+  });
+
   it("party_to: Stakeholder → Agreement", () => {
     const g = {
       nodes: [

@@ -207,7 +207,11 @@ export function validateGraph(graph: GraphLike = {}, schema?: SchemaDefinition):
   for (const node of graph.nodes ?? []) {
     if (!node.id) failures.push("node id is required");
     const nodeType = canonicalType(node.type, s);
-    if (node.type && !s.nodeTypes.includes(nodeType as string)) failures.push(`unknown node type: ${node.type}`);
+    if (node.type && !s.nodeTypes.includes(nodeType as string)) {
+      // preset 名を添える: 亜種 preset (principal 等) では「型が存在しない」ことが仕様であり、
+      // 書き手 (特に機械 writer) への一次シグナルがこのエラーになる。
+      failures.push(`unknown node type: ${node.type} (schema: ${s.id})`);
+    }
     if (ids.has(node.id)) failures.push(`duplicate node id: ${node.id}`);
     ids.add(node.id);
     nodesById.set(node.id, { ...node, type: nodeType });

@@ -1,8 +1,10 @@
 /**
- * Pure functions for assembling CLI plans for typed-add commands — project vault only.
- * Called from runAdd* (project) functions in cli-headlines.ts.
+ * Pure functions for assembling CLI plans for typed-add commands — project-family
+ * (project / principal) vaults. Called from runAdd* (project) functions in cli-headlines.ts.
+ * Task / Milestone builders are project-only: principal rejects them at dispatch
+ * (requireTimeboxedTypesAllowed) and at validateGraph (unknown node type).
  *
- * Target node types (exist only in project vaults):
+ * Target node types (exist only in project-family vaults):
  *   Stakeholder / Resource / Milestone / Assumption / Agreement / Task / Source / Theme
  *
  * Edge types used follow EDGE_TYPE_RULES in schema-project.ts.

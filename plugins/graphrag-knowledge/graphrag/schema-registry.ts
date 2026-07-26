@@ -22,6 +22,9 @@ registerPreset(DEFAULT_SCHEMA);
 import { PROJECT_SCHEMA } from "./schema-project.ts";
 registerPreset(PROJECT_SCHEMA);
 
+import { PRINCIPAL_SCHEMA } from "./schema-principal.ts";
+registerPreset(PRINCIPAL_SCHEMA);
+
 /**
  * vault の VAULT.md から schema プリセットを解決する。
  * 優先順位:

@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.12.0
+version: 4.13.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -168,7 +168,13 @@ Parallel knowledge graph work is isolated via **vault git branches**; merging us
 
 ## Schema quick-reference
 
-`graphrag/schema.ts` is canonical. Two presets: **system** (13 node types / 16 edge types, default) and **project** (16 node types / 22 edge types, selected via `schema: project`). The `schema` field in the vault's VAULT.md frontmatter decides the preset. **Run `inspect` to check the vault type first, then read only the matching quickref**: system → `$REF/schema-quickref-system.md`, project → `$REF/schema-quickref-project.md`. Never read both at once. For initial construction of a project vault, see the `graphrag-vault-init` skill. **Judgment criterion: chose from alternatives → Decision; learned from operation → OperationalKnowledge. When unsure, use Decision.**
+`graphrag/schema.ts` is canonical. Three presets — the axis is lifecycle × grounding (拠り所), and the enumeration is closed at three (a fourth "mandate/与件" preset was rejected: external givens are written as Source pointers + entity-authored interpretation, see `$REF/schema-quickref-principal.md` §与件 pattern):
+
+- **system** (13 node types / 16 edge types, default) — 人工物: knowledge grounded in code you own.
+- **project** (16 / 23, `schema: project`) — 企て: a time-bounded initiative; the vault closes with its Goal.
+- **principal** (14 / 20, `schema: principal`) — 当事者: the deciding/signing entity (company, subsidiary, standing unit); perpetual, = project minus Task/Milestone. Admission test: is the author/signer/allocator of the knowledge the operating entity itself?
+
+The `schema` field in the vault's VAULT.md frontmatter decides the preset. **Run `inspect` to check the vault type first, then read only the matching quickref**: system → `$REF/schema-quickref-system.md`, project → `$REF/schema-quickref-project.md`, principal → `$REF/schema-quickref-principal.md`. Never read more than one at once. For initial construction of a project/principal vault, see the `graphrag-vault-init` skill. **Judgment criterion: chose from alternatives → Decision; learned from operation → OperationalKnowledge. When unsure, use Decision.**
 
 ## Mutation Plan
 
@@ -286,7 +292,8 @@ Report graph changes in natural language, **in the conversation language** (what
 - `$REF/cli-primitives.md`: full flag reference for all primitives
 - `$REF/mutation-templates.md`: plan templates for Concern / Layer / Component / Update / Delete / policy reversal + suggestions details
 - `$REF/schema-quickref-system.md`: system preset (13+16) / allowed pairs / state vocabulary / enforcement contract / policy-reversal recipe
-- `$REF/schema-quickref-project.md`: project preset (16+22) / allowed pairs / state vocabulary / cross-vault ref / judgment criteria
+- `$REF/schema-quickref-project.md`: project preset (16+23) / allowed pairs / state vocabulary / cross-vault ref / judgment criteria
+- `$REF/schema-quickref-principal.md`: principal preset (14+20) / 与件 (mandate) pattern / excepts / admission test / bootstrap consumption events
 - `$REF/ask-output-guide.md`: detailed ask output field guide (match_confidence / repeat_state / world_hints / standout)
 - `$REF/topology-gap-review.md`: graph structure self-reflection protocol on bug discovery
 - `$REF/branch-merge.md`: semantic merge procedure for vault branches

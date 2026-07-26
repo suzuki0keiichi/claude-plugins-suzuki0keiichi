@@ -322,10 +322,10 @@ async function runAddConstraint(argv: string[]) {
         "(the reason is recorded as enforcement_reason and shown whenever constraint-check lists the constraint as unguarded)."
     );
   }
-  // enforcement contract は system プリセット限定 (project vault の Constraint は外部条件)。
+  // enforcement contract は system プリセット限定 (project/principal vault の Constraint は外部条件)。
   // vault 未解決なら厳格側 (system) に倒す — apply 時にどのみち vault 必須で止まる。
   const vaultDirForSchema = process.env.GRAPHRAG_VAULT_DIR;
-  const schemaPreset = vaultDirForSchema ? (resolveSchema(vaultDirForSchema).id as "system" | "project") : "system";
+  const schemaPreset = vaultDirForSchema ? resolveSchema(vaultDirForSchema).id : "system";
   // E2 add-constraint: --constrains 必須 ≥1 (builder が空で throw)。
   // Constraint は documented_by 不可・evidence 不要 (契約) → evidence は渡さない。
   // enforcement contract: --enforced-by (機械的消費者) か --unenforceable (明示宣言) のどちらかが必須。
@@ -868,24 +868,38 @@ async function runInspect(_argv: string[]) {
   }, null, 2) + "\n");
 }
 
-// Schema guard for project vault-only commands.
-// Emits a clear error if the vault is not the project preset.
-function requireProjectSchema(): void {
+// Schema guard for project-family (project / principal) typed-add commands.
+// Emits a clear error if the vault is not in the family.
+function requireProjectFamilySchema(): string {
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
   if (!vaultDir) {
     throw new Error("project typed-add requires a vault: GRAPHRAG_VAULT_DIR env not set (required in .env)");
   }
   const schema = resolveSchema(vaultDir);
-  if (schema.id !== "project") {
+  if (schema.id !== "project" && schema.id !== "principal") {
     throw new Error(
-      `This command is only for project vaults (schema: ${schema.id}). ` +
-      `Set schema: project in VAULT.md.`
+      `This command is only for project/principal vaults (schema: ${schema.id}). ` +
+      `Set schema: project (or principal) in VAULT.md.`
+    );
+  }
+  return schema.id;
+}
+
+// Task / Milestone are time-bounded types: project preset only.
+// principal (perpetual) rejects them with a routing hint — the vessel's side of 型別ルーティング.
+function requireTimeboxedTypesAllowed(commandLabel: string): void {
+  const schemaId = requireProjectFamilySchema();
+  if (schemaId === "principal") {
+    throw new Error(
+      `${commandLabel}: Task/Milestone are not part of the principal preset (perpetual vault). ` +
+      `Time-bounded work belongs in a project vault — route this item to the nearest child project vault; ` +
+      `principal keeps only the judgment layer (Decision/Constraint/OK/Risk/Goal/Agreement...).`
     );
   }
 }
 
 async function runAddStakeholder(argv: string[]) {
-  requireProjectSchema();
+  requireProjectFamilySchema();
   const f = parseFlagsArgv(argv);
   const plan = buildAddStakeholderPlan({
     system: requireFlag(f, "system"),
@@ -902,7 +916,7 @@ async function runAddStakeholder(argv: string[]) {
 }
 
 async function runAddResource(argv: string[]) {
-  requireProjectSchema();
+  requireProjectFamilySchema();
   const f = parseFlagsArgv(argv);
   const plan = buildAddResourcePlan({
     system: requireFlag(f, "system"),
@@ -918,7 +932,7 @@ async function runAddResource(argv: string[]) {
 }
 
 async function runAddMilestone(argv: string[]) {
-  requireProjectSchema();
+  requireTimeboxedTypesAllowed("add-milestone");
   const f = parseFlagsArgv(argv);
   const plan = buildAddMilestonePlan({
     system: requireFlag(f, "system"),
@@ -935,7 +949,7 @@ async function runAddMilestone(argv: string[]) {
 }
 
 async function runAddAssumption(argv: string[]) {
-  requireProjectSchema();
+  requireProjectFamilySchema();
   const f = parseFlagsArgv(argv);
   const certainty = requireFlag(f, "certainty");
   const plan = buildAddAssumptionPlan({
@@ -953,7 +967,7 @@ async function runAddAssumption(argv: string[]) {
 }
 
 async function runAddAgreement(argv: string[]) {
-  requireProjectSchema();
+  requireProjectFamilySchema();
   const f = parseFlagsArgv(argv);
   const plan = buildAddAgreementPlan({
     system: requireFlag(f, "system"),
@@ -971,7 +985,7 @@ async function runAddAgreement(argv: string[]) {
 }
 
 async function runAddTask(argv: string[]) {
-  requireProjectSchema();
+  requireTimeboxedTypesAllowed("add-task");
   const f = parseFlagsArgv(argv);
   const plan = buildAddTaskPlan({
     system: requireFlag(f, "system"),
@@ -991,7 +1005,7 @@ async function runAddTask(argv: string[]) {
 }
 
 async function runAddSource(argv: string[]) {
-  requireProjectSchema();
+  requireProjectFamilySchema();
   const f = parseFlagsArgv(argv);
   const plan = buildAddSourcePlan({
     system: requireFlag(f, "system"),
@@ -1007,7 +1021,7 @@ async function runAddSource(argv: string[]) {
 }
 
 async function runAddTheme(argv: string[]) {
-  requireProjectSchema();
+  requireProjectFamilySchema();
   const f = parseFlagsArgv(argv);
   const plan = buildAddThemePlan({
     system: requireFlag(f, "system"),

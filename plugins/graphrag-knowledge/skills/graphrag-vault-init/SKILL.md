@@ -1,7 +1,7 @@
 ---
 name: graphrag-vault-init
-version: 1.1.1
-description: vault (ナレッジグラフ) の初期構築。system vault (コード/プロダクト知識) と project vault (時限イニシアチブ) の両方に対応。「vault を作りたい」「初期構築したい」「新しいプロジェクトを管理したい」「リポジトリを索引したい」で発火。
+version: 1.2.0
+description: vault (ナレッジグラフ) の初期構築。system vault (コード/プロダクト知識)・project vault (時限イニシアチブ)・principal vault (当事者=法人/常設ユニットの恒久知識) の3種に対応。「vault を作りたい」「初期構築したい」「新しいプロジェクトを管理したい」「リポジトリを索引したい」「全社ルールの置き場がほしい」で発火。
 ---
 
 # Vault Initial Setup
@@ -17,12 +17,17 @@ Hereafter `$CLI` = the launcher above, `$REF` = `${CLAUDE_PLUGIN_ROOT}/reference
 
 ## Vault Types — Choose First
 
-| Type | Purpose | Schema | Example |
-|---|---|---|---|
-| **system** | Code/product knowledge (passive) | `schema: system` (13 node types) | A product platform, an API service, an internal tool |
-| **project** | Time-bounded initiative (active) | `schema: project` (16 node types) | L4 approval, API renewal |
+The axis is lifecycle × 拠り所 (what grounds the knowledge). Three presets, enumeration closed:
+
+| Type | 拠り所 | Purpose | Schema | Example |
+|---|---|---|---|---|
+| **system** | 人工物 | Code/product knowledge (passive) | `schema: system` (13 node types) | A product platform, an API service, an internal tool |
+| **project** | 企て | Time-bounded initiative (active) | `schema: project` (16 node types) | L4 approval, API renewal |
+| **principal** | 当事者 | The deciding/signing entity — perpetual | `schema: principal` (14 node types) | 法人の手続き規範 (調達しきい値・稟議), standing contracts, 全社方針 |
 
 **project vault scope**: Goal reaches `achieved` / `abandoned` → vault lifecycle closes (read-only archive). Do NOT create vaults for systems/products or teams/orgs.
+
+**principal vault scope**: never closes (business withdrawal is a Decision, not a vault closure). Admission test: **is the author / signer / allocator of this knowledge the operating entity itself?** "Useful company-wide" alone is NOT admission. No Task/Milestone — time-bounded work routes to a child project vault. 与件 (law / regulation / standard) has NO preset of its own: write Source(`source_kind: regulation`) pointers + entity-authored Constraint/OK/Decision inside principal (or project) — see `$REF/schema-quickref-principal.md`. Setup follows the Project Vault Path below (same family, minus Task/Milestone steps); **when bootstrapping, deliberately wire ≥1 cross-vault ref from a live project vault and carve ≥1 Source(regulation)→Constraint chain** — these consumption events are what validate the vault.
 
 ---
 
@@ -187,7 +192,7 @@ $CLI ask "Who is responsible?"
 
 ## Schema Reference
 
-For the full project vault schema (16 node types, 22 edge types, state vocabulary, cross-vault ref format), read `$REF/schema-quickref-project.md`.
+For the full project vault schema (16 node types, 23 edge types, state vocabulary, cross-vault ref format), read `$REF/schema-quickref-project.md`. For principal vaults (14 node types, 20 edge types, 与件 pattern), read `$REF/schema-quickref-principal.md`.
 
 ## Decision Criteria
 

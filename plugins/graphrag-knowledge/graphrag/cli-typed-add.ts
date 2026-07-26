@@ -164,10 +164,10 @@ export type AddConstraintArgs = {
   // (『〇〇を片付けるまで△△は正しく動かない』)。Goal が terminal になったのに制約が
   // 残っていれば stocktake が settled-premise として浮上させる。
   premise?: string[];
-  // enforcement contract は system プリセット限定 (project vault には File が無く、
-  // Constraint は本来的に外部条件)。呼び出し側 (runAddConstraint) が vault の
+  // enforcement contract は system プリセット限定 (project/principal vault には File が
+  // 無く、Constraint は本来的に外部条件)。呼び出し側 (runAddConstraint) が vault の
   // schema を解決して渡す。未指定は system (厳格側に倒す)。
-  schemaPreset?: "system" | "project";
+  schemaPreset?: string;
 };
 
 export type AddGoalArgs = {
@@ -325,9 +325,9 @@ export function buildAddConstraintPlan(args: AddConstraintArgs) {
   const enforcedBy = (args.enforcedBy ?? []).filter((s) => s.trim() !== "");
   const unenforceable = typeof args.unenforceable === "string" ? args.unenforceable.trim() : "";
   const preset = args.schemaPreset ?? "system";
-  if (preset === "project" && enforcedBy.length > 0) {
+  if (preset !== "system" && enforcedBy.length > 0) {
     throw new Error(
-      "buildAddConstraintPlan: --enforced-by is a system-vault concept (project vaults have no File nodes, " +
+      `buildAddConstraintPlan: --enforced-by is a system-vault concept (${preset} vaults have no File nodes, ` +
         "and their constraints are external conditions by nature). Drop --enforced-by; optionally declare " +
         '--unenforceable "<why>" to record the reason.'
     );
