@@ -39,17 +39,17 @@ Everything else (supersedes / has_premise / refines / led_to / triggered_by / re
 
 There is **no mandate preset** (rejected 2026-07-26: variants can only subtract, so a mandate preset could never express anything principal cannot; see `rejectedoption:graphrag-skill-dev:mandate-preset`). External givens (law / regulation / standard) are written INSIDE principal (or project) vaults:
 
-1. **The clause itself is never stored.** Its canonical text lives outside (例規集, UN regulation text). Point at it: `Source` with `source_kind: regulation`.
+1. **The clause itself is never stored.** Its canonical text lives outside (法令データベース, 業界標準の原文). Point at it: `Source` with `source_kind: regulation`.
 2. **What IS stored is authored by the entity**: interpretation, applicability, gap analysis — `Constraint` (the binding effect on us) / `OperationalKnowledge` (how we operate under it) / `Decision` (our chosen response) / `Risk` (gaps).
 3. **Ground the Constraint in its citation**: `Constraint → documented_by → Source`. This is the substitute for `enforced_by` (which does not exist outside system vaults — no test can enforce a law). When the regulation changes, reverse lookup from the Source finds every Constraint to re-examine.
 4. Layered norms (法律 → 委任府令 → 解釈運用) = one Constraint per effective requirement, each `documented_by` its own Source; the composite is expressed by `has_premise` between them or prose.
-5. A regulator's **verbal/informal position** (根回しで得た当局見解) is `Assumption (certainty: Expected)`, not Constraint.
+5. A regulator's **verbal/informal position** (監督官庁への事前照会で得た口頭回答) is `Assumption (certainty: Expected)`, not Constraint.
 
 If regulatory knowledge grows into its own body, carve a **vault instance** scoped to it (schema: principal) — a new address, not a new preset.
 
 ## excepts — 原則と確定した但し書き
 
-`excepts: Constraint → Constraint` (from = 例外, to = 原則). Use when a **determinate** carve-out partially defeats a principle — reading either side alone yields a wrong answer ("支払完了したもののみ対象" ⟂ "翌々月払いは条件付きで認められる").
+`excepts: Constraint → Constraint` (from = 例外, to = 原則). Use when a **determinate** carve-out partially defeats a principle — reading either side alone yields a wrong answer ("解約は90日前通知が原則" ⟂ "初年度に限り30日前通知で足りる").
 
 - Exception is **確定** ("認められる") → `excepts`.
 - Exception is a **possibility** ("個別に認められる可能性がある") → it is not a Constraint at all; write `Assumption` + `has_premise` toward the principle.

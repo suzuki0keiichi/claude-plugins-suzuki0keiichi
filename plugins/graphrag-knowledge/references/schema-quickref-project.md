@@ -42,7 +42,7 @@ For time-bounded initiatives (business projects). Differences from system vault:
 
 ### Constraint / Risk
 - `constrains`: Constraint|**Agreement** → Decision|**Task**|Goal|OK
-- `excepts`: **Constraint(例外) → Constraint(原則)** — a determinate carve-out that partially defeats a principle ("原則 support 完了までに支払 / 特例 翌々月払いは条件付きで認められる"). Reading either side alone yields a wrong answer, so wire them. A merely *possible* exception is an Assumption + `has_premise`, not `excepts`. Not `refines` (elaboration ≠ defeat).
+- `excepts`: **Constraint(例外) → Constraint(原則)** — a determinate carve-out that partially defeats a principle ("原則 解約は90日前通知 / 特例 初年度に限り30日前通知で足りる"). Reading either side alone yields a wrong answer, so wire them. A merely *possible* exception is an Assumption + `has_premise`, not `excepts`. Not `refines` (elaboration ≠ defeat).
 - `risks_in`: Risk → **Task**|Goal|**Milestone**
 - `reduces_risk`: Decision|**Task**|OK → Risk
 

@@ -59,10 +59,10 @@ describe("principal schema preset", () => {
     assert.deepStrictEqual(S.edgeTypeRules["requires"], [["Decision", "Resource"]]);
     const g = {
       nodes: [
-        { id: "decision:p:staffing-gap-fill", type: "Decision" },
-        { id: "resource:p:sd-pool", type: "Resource" },
+        { id: "decision:p:support-outsourcing", type: "Decision" },
+        { id: "resource:p:contractor-pool", type: "Resource" },
       ],
-      edges: [{ id: "e1", type: "requires", from: "decision:p:staffing-gap-fill", to: "resource:p:sd-pool" }],
+      edges: [{ id: "e1", type: "requires", from: "decision:p:support-outsourcing", to: "resource:p:contractor-pool" }],
     };
     assert.deepStrictEqual(validateGraph(g, S), []);
   });
@@ -111,13 +111,13 @@ describe("principal schema preset", () => {
   it("Constraint can cite its Source (反例A: 与件の接地は enforcer でなく出典)", () => {
     const g = {
       nodes: [
-        { id: "constraint:p:remote-monitor-quality", type: "Constraint" },
-        { id: "source:p:road-traffic-act-75-20", type: "Source", source_kind: "regulation" },
+        { id: "constraint:p:log-retention-limit", type: "Constraint" },
+        { id: "source:p:privacy-act-art-32", type: "Source", source_kind: "regulation" },
         { id: "conversation:p:c1", type: "ConversationChunk" },
       ],
       edges: [
-        { id: "e1", type: "documented_by", from: "constraint:p:remote-monitor-quality", to: "source:p:road-traffic-act-75-20" },
-        { id: "e2", type: "derived_from", from: "constraint:p:remote-monitor-quality", to: "conversation:p:c1" },
+        { id: "e1", type: "documented_by", from: "constraint:p:log-retention-limit", to: "source:p:privacy-act-art-32" },
+        { id: "e2", type: "derived_from", from: "constraint:p:log-retention-limit", to: "conversation:p:c1" },
       ],
     };
     assert.deepStrictEqual(validateGraph(g, S), []);

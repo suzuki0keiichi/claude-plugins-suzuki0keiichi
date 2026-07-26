@@ -22,7 +22,7 @@ The axis is lifecycle × 拠り所 (what grounds the knowledge). Three presets, 
 | Type | 拠り所 | Purpose | Schema | Example |
 |---|---|---|---|---|
 | **system** | 人工物 | Code/product knowledge (passive) | `schema: system` (13 node types) | A product platform, an API service, an internal tool |
-| **project** | 企て | Time-bounded initiative (active) | `schema: project` (16 node types) | L4 approval, API renewal |
+| **project** | 企て | Time-bounded initiative (active) | `schema: project` (16 node types) | 認可取得プロジェクト, API renewal |
 | **principal** | 当事者 | The deciding/signing entity — perpetual | `schema: principal` (14 node types) | 法人の手続き規範 (調達しきい値・稟議), standing contracts, 全社方針 |
 
 **project vault scope**: Goal reaches `achieved` / `abandoned` → vault lifecycle closes (read-only archive). Do NOT create vaults for systems/products or teams/orgs.
