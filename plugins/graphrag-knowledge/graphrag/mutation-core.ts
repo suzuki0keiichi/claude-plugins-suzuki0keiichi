@@ -112,8 +112,157 @@ export function validateMutation({ currentGraph, plan, enforceSourceBacking = fa
     failures,
     nextGraph,
     cascadedEdgeIds: audit.cascadedEdgeIds,
-    cascadedEdges: audit.cascadedEdges
+    cascadedEdges: audit.cascadedEdges,
+    attributeWarnings: unknownAttributeWarnings({ currentGraph, plan, schema })
   };
+}
+
+// --- unknown attribute warnings (issue #20) --------------------------------
+//
+// updates/create の属性名は型 (node type / edge type) と違い意図的なモデル外キーの
+// 運用があるため reject できない。代わりに「既存エンティティのキーでも、mutation
+// 書き手の既知語彙でもない属性名」を WARN として返し、typo (summary_append 等) に
+// その場で気付けるようにする。null 値は「キー削除」の正当な文法なので、未知キーへの
+// null (= 迷い込んだキーの掃除そのもの) は警告しない。
+//
+// この語彙は「mutation plan が正当に新設する属性」であり、indexer (index-codebase)
+// が File ノードへ書く属性群 (role / imports / exported_symbols …) は含めない —
+// それらの更新は current-entity キー例外で通り、plan からの新設は警告対象で正しい。
+const MUTATION_NODE_ATTRIBUTES = [
+  "id", "type", "title", "summary", "description", "state",
+  "aliases", "tags", "display", "path",
+  "raw_content", "raw_content_status", "generated_at",
+  "enforcement", "enforcement_reason"
+];
+const MUTATION_EDGE_ATTRIBUTES = ["id", "type", "from", "to"];
+
+export interface AttributeWarning {
+  entity: "node" | "edge";
+  id: string;
+  key: string;
+  did_you_mean?: string;
+  message: string;
+}
+
+function knownNodeAttributes(schema?: SchemaDefinition): Set<string> {
+  const known = new Set(MUTATION_NODE_ATTRIBUTES);
+  // preset 固有の必須フィールド (project の certainty 等) は schema 定義から導出する。
+  // preset を足した時にこの警告語彙を別途保守しなくて済むようにするため。
+  const s = schema ?? DEFAULT_SCHEMA;
+  for (const fields of Object.values(s.requiredFields)) {
+    for (const rf of fields ?? []) known.add(rf.field);
+  }
+  return known;
+}
+
+function levenshtein(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => i);
+  for (let j = 1; j <= b.length; j++) {
+    let prev = dp[0];
+    dp[0] = j;
+    for (let i = 1; i <= a.length; i++) {
+      const cur = dp[i];
+      dp[i] = Math.min(dp[i] + 1, dp[i - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return dp[a.length];
+}
+
+// typo 候補: 片方がもう片方を含む (summary_append ⊃ summary) か、編集距離 2 以内。
+function nearestAttribute(key: string, candidates: Iterable<string>): string | undefined {
+  let best: string | undefined;
+  let bestScore = Infinity;
+  for (const cand of candidates) {
+    if (cand === key) continue;
+    const contains =
+      (key.length >= 4 && cand.length >= 4) && (key.includes(cand) || cand.includes(key));
+    const dist = levenshtein(key, cand);
+    const score = contains ? Math.min(dist, 2) : dist;
+    if (score <= 2 && score < bestScore) {
+      best = cand;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function attributeWarning(args: {
+  entity: "node" | "edge";
+  id: string;
+  key: string;
+  op: string;
+  entityType: string | undefined;
+  candidates: Iterable<string>;
+}): AttributeWarning {
+  const { entity, id, key, op, entityType } = args;
+  const didYouMean = nearestAttribute(key, args.candidates);
+  const where = op === "update" ? `updates key '${key}'` : `attribute '${key}'`;
+  const repairTarget = didYouMean ?? "<intended attribute>";
+  const message =
+    `${where} on ${entity} ${id}${entityType ? ` (${entityType})` : ""} is not an existing ` +
+    `attribute of that ${entity} and not a known model attribute — it was written verbatim as a ` +
+    `NEW frontmatter key. 'updates' replaces whole attributes by exact name; no append/merge ` +
+    `key variants exist.` +
+    (didYouMean ? ` Did you mean '${didYouMean}'?` : "") +
+    ` If this is a typo, repair with: {"op":"update","id":"${id}","updates":` +
+    `{"${repairTarget}":"<full new value>","${key}":null}} (null deletes the stray key).` +
+    ` If this out-of-model key is intentional, ignore this warning (it round-trips as-is).`;
+  return {
+    entity,
+    id,
+    key,
+    ...(didYouMean ? { did_you_mean: didYouMean } : {}),
+    message
+  };
+}
+
+export function unknownAttributeWarnings(args: {
+  currentGraph: any;
+  plan: any;
+  schema?: SchemaDefinition;
+}): AttributeWarning[] {
+  const { currentGraph, plan, schema } = args;
+  const knownNode = knownNodeAttributes(schema);
+  const nodesById = new Map<string, any>((currentGraph.nodes ?? []).map((n: any) => [n.id, n]));
+  const edgesById = new Map<string, any>((currentGraph.edges ?? []).map((e: any) => [e.id, e]));
+  const warnings: AttributeWarning[] = [];
+
+  const check = (
+    entity: "node" | "edge",
+    item: any,
+    known: Set<string>,
+    current: any | undefined
+  ) => {
+    const currentKeys = current ? Object.keys(current) : [];
+    const patch = mutationEntityFields(item);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) continue; // key deletion — the repair verb itself, never warn
+      if (known.has(key)) continue;
+      if (current && key in current) continue; // updating an intentional out-of-model key
+      warnings.push(
+        attributeWarning({
+          entity,
+          id: String(item.id),
+          key,
+          op: mutationOp(item),
+          entityType: current?.type ?? patch.type,
+          candidates: [...known, ...currentKeys]
+        })
+      );
+    }
+  };
+
+  const knownEdge = new Set(MUTATION_EDGE_ATTRIBUTES);
+  for (const node of plan.nodes ?? []) {
+    if (mutationOp(node) === "delete") continue;
+    check("node", node, knownNode, nodesById.get(node.id));
+  }
+  for (const edge of plan.edges ?? []) {
+    if (mutationOp(edge) === "delete") continue;
+    check("edge", edge, knownEdge, edgesById.get(edge.id));
+  }
+  return warnings;
 }
 
 // successors (301) の妥当性: old はこの plan で delete されるノード、new は mutation 後の

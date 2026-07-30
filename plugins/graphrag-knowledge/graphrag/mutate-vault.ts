@@ -559,6 +559,12 @@ export async function applyMutationToVault(args: {
       err.failures = v.failures;
       throw err;
     }
+    // 未知の属性名は WARN 止まり (issue #20): 意図的なモデル外キー運用を壊さないため
+    // reject しないが、typo (summary_append 等) にその場で気付けるよう結果に同梱する。
+    const attribute_check = {
+      status: (v.attributeWarnings?.length ?? 0) > 0 ? "warn" : "ok",
+      warnings: v.attributeWarnings ?? [],
+    };
 
     // 書き込み時重複ゲート: lexical exact pre-pass + 既存索引との embedding 照合。
     // duplicate_ack で承認されない suspect が居れば all-or-nothing で拒否する。
@@ -620,6 +626,7 @@ export async function applyMutationToVault(args: {
         applied: true,
         head,
         duplicate_check,
+        attribute_check,
         files: delta,
         changed_nodes: {
           created: plan.nodes

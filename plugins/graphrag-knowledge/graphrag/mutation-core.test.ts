@@ -252,3 +252,78 @@ test("カスケード削除はエッジ id だけでなく全タプル (from/to/
     { id: "e1", type: "refines", from: "decision:s:mine", to: "doc:n1" },
   ]);
 });
+
+// --- unknown attribute warnings (issue #20) --------------------------------
+
+test("updates の未知属性名は WARN (typo に気付ける): did_you_mean と修復手順を同梱", () => {
+  const plan = { reason: "typo", nodes: [
+    { op: "update", id: "decision:s:a", updates: { summary_append: "..." } },
+  ], edges: [] };
+  const v = validateMutation({ currentGraph: baseGraph(), plan });
+  assert.equal(v.valid, true, v.failures.join("; "));
+  assert.equal(v.attributeWarnings.length, 1);
+  const w = v.attributeWarnings[0];
+  assert.equal(w.entity, "node");
+  assert.equal(w.id, "decision:s:a");
+  assert.equal(w.key, "summary_append");
+  assert.equal(w.did_you_mean, "summary");
+  assert.ok(w.message.includes('"summary_append":null'), "repair plan should delete the stray key");
+  assert.ok(w.message.includes("ignore this warning"), "intentional use must stay legal");
+});
+
+test("既知モデル属性の updates は警告なし", () => {
+  const plan = { reason: "ok", nodes: [
+    { op: "update", id: "decision:s:a", updates: { summary: "new", state: null } },
+  ], edges: [] };
+  const v = validateMutation({ currentGraph: baseGraph(), plan });
+  assert.deepEqual(v.attributeWarnings, []);
+});
+
+test("既存のモデル外キーを更新するのは意図的運用として警告なし", () => {
+  const graph = baseGraph();
+  (graph.nodes[0] as any).enforced_by = ["a.test.ts::x"];
+  const plan = { reason: "custom", nodes: [
+    { op: "update", id: "decision:s:a", updates: { enforced_by: ["a.test.ts::y"] } },
+  ], edges: [] };
+  const v = validateMutation({ currentGraph: graph, plan });
+  assert.deepEqual(v.attributeWarnings, []);
+});
+
+test("未知キーへの null (迷い込んだキーの掃除) は警告しない", () => {
+  const plan = { reason: "cleanup", nodes: [
+    { op: "update", id: "decision:s:a", updates: { summary_append: null } },
+  ], edges: [] };
+  const v = validateMutation({ currentGraph: baseGraph(), plan });
+  assert.deepEqual(v.attributeWarnings, []);
+});
+
+test("create の未知属性名も WARN (sumary typo)", () => {
+  const plan = { reason: "typo-create", nodes: [
+    { op: "create", id: "decision:s:c", type: "Decision", title: "C", sumary: "oops" },
+  ], edges: [] };
+  const v = validateMutation({ currentGraph: baseGraph(), plan });
+  assert.equal(v.attributeWarnings.length, 1);
+  assert.equal(v.attributeWarnings[0].key, "sumary");
+  assert.equal(v.attributeWarnings[0].did_you_mean, "summary");
+});
+
+test("edge の未知属性名も WARN、id/type/from/to は警告なし", () => {
+  const okPlan = { reason: "edge-ok", nodes: [], edges: [
+    { op: "update", id: "e1", type: "refines", from: "decision:s:a", to: "decision:s:b" },
+  ]};
+  assert.deepEqual(validateMutation({ currentGraph: baseGraph(), plan: okPlan }).attributeWarnings, []);
+  const typoPlan = { reason: "edge-typo", nodes: [], edges: [
+    { op: "update", id: "e1", updates: { formm: "decision:s:b" } },
+  ]};
+  const v = validateMutation({ currentGraph: baseGraph(), plan: typoPlan });
+  assert.equal(v.attributeWarnings.length, 1);
+  assert.equal(v.attributeWarnings[0].entity, "edge");
+  assert.equal(v.attributeWarnings[0].key, "formm");
+  assert.equal(v.attributeWarnings[0].did_you_mean, "from");
+});
+
+test("delete op は属性警告の対象外", () => {
+  const plan = { reason: "del", nodes: [{ op: "delete", id: "decision:s:b", stray_key: 1 }], edges: [] };
+  const v = validateMutation({ currentGraph: baseGraph(), plan });
+  assert.deepEqual(v.attributeWarnings, []);
+});

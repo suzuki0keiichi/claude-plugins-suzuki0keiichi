@@ -643,6 +643,14 @@ async function runCommitMutation(argv: string[]) {
   const baseSha = typeof f["base-sha"] === "string" ? f["base-sha"] : undefined;
   const result = await applyMutationToVault({ plan, vaultDir, schema, baseSha, reason: plan.reason });
 
+  // 属性名 typo の警告は JSON に同梱するだけでなく stderr にも 1 行出す
+  // (パイプ先で summary が切り詰められても気付けるように)。
+  if (result.attribute_check?.status === "warn") {
+    process.stderr.write(
+      `[graphrag] WARN: ${result.attribute_check.warnings.length} unknown attribute name(s) written — see attribute_check in output for the repair plan\n`
+    );
+  }
+
   process.stdout.write(JSON.stringify({
     plan_path: planPath,
     plan_reason: plan.reason,
@@ -653,6 +661,7 @@ async function runCommitMutation(argv: string[]) {
       cascaded_edge_ids: result.cascaded_edge_ids,
       head: result.head,
       duplicate_check: result.duplicate_check,
+      attribute_check: result.attribute_check,
       index_status: result.index_status
     }
   }, null, 2) + "\n");

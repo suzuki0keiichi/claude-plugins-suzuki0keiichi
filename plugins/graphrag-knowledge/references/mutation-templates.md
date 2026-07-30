@@ -105,6 +105,8 @@ Drop the File create when the node already exists. Recommended flow: write the `
 `type` / `from` / `to` are immutable. Only patches to `summary` / `description` / `raw_content` etc.
 **Passing `null` as an `updates` value deletes that field itself** (e.g. `{ "state": null }` withdraws the state). No `null` ever remains in the graph or frontmatter.
 
+**`updates` replaces whole attributes by exact key name — no append/merge key variants exist** (`summary_append` is not a verb; it would be written verbatim as a new frontmatter key). An unknown attribute name is applied as-is but reported as a WARN in the result's `attribute_check` (with `did_you_mean` and a ready-made repair plan), because intentional out-of-model keys are legal; updating a key that already exists on the node never warns.
+
 ```json
 {
   "reason": "<対象> の summary を最新の合意に合わせる",
@@ -299,6 +301,7 @@ Discipline:
 - rejects Decision/RejectedOption/Risk/OperationalKnowledge without evidence backing (enforceSourceBacking)
 - rejects duplicate create of the same id
 - limits state to the per-type vocabulary (`STATE_VOCABULARY`): Investigation = active/closed, Decision/OperationalKnowledge = superseded only, Goal = planned/active/achieved/abandoned. state on any other type is rejected, as is an out-of-vocabulary value (no state is always legal)
+- **attribute names are NOT rejected** — out-of-model keys are legal (the validator ignores unknown extra attributes). Instead, an attribute name that is neither a known model attribute nor an existing key on the target entity is reported as a WARN in the result's `attribute_check` (`{status, warnings: [{entity, id, key, did_you_mean?, message}]}`); the message carries the exact repair plan (set the intended attribute, delete the stray key with `null`)
 
 In addition, the vault writer's validation stage has a **write-time duplicate gate** (`duplicate_check`): it checks op:create knowledge/crosscut nodes (everything except File and ConversationChunk = schema's duplicateCheck targets) against same-type existing nodes. Checking runs two paths — embedding cosine ≥ 0.92 (embedded in **document space**; using the same text composition and same prefix as the index row makes the calibration honest) and lexical (normalized title / alias exact match, similarity 1.0). A suspect is returned with its judgment material in the form `{new_id, existing_id, similarity, basis: "embedding"|"lexical", existing: {type,title,summary,state}, next_step}`. On a hit, it is rejected all-or-nothing unless `duplicate_ack` covers every suspect. From typed-add, inject via `--dup-ack <id[,id...]>`. An unreachable embedding endpoint / absent vector index is a non-fatal skip (the lexical pre-pass runs even when embedding is unreachable). The gate is the last net — pre-checking for duplicates with `ask` is still required.
 
