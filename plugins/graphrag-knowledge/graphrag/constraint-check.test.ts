@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
@@ -263,4 +264,36 @@ test("ENFORCES_MARKER_RE はコメント記法非依存でマーカーを抜く 
   ].join("\n");
   const ids = [...text.matchAll(ENFORCES_MARKER_RE)].map((m) => m[1]);
   assert.deepEqual(ids, ["constraint:sys:no-sync-io", "constraint:sys:a_b.c-1"]);
+});
+
+test("marker-missing: マーカーが文字列リテラル内にしか無い enforcer は「マーカー無し」扱い (フィクスチャ耐性)", () => {
+  const vault = writeVaultFromGraph(baseGraph());
+  const res = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo(
+      // 実コメントマーカーは無く、文字列リテラルの中にだけ id が書かれている
+      { "test/pay-io.test.ts": `const tpl = "${marker("constraint:sys:no-sync-io").replace(/"/g, '\\"')}";\ntest("x", () => {});\n` },
+      []
+    )
+  );
+  const f = res.findings.find((x) => x.kind === "marker-missing");
+  assert.ok(f, "リテラル内の id は実マーカーと数えない → marker-missing が要る");
+});
+
+test("defaultGrepMarkers (実 git grep 経路): テストフィクスチャの文字列リテラル内 id は orphan-marker にならない", () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "grag-constraint-repo-"));
+  execFileSync("git", ["-C", repo, "init", "-q"]);
+  // 登記済み enforcer: 実コメントマーカー + フィクスチャ文字列 (実在しない id をリテラルで保持)
+  mkdirSync(path.join(repo, "test"), { recursive: true });
+  writeFileSync(
+    path.join(repo, "test", "pay-io.test.ts"),
+    `${MARKER}\nconst fixture = "${marker("constraint:sys:ghost-fixture").replace(/"/g, '\\"')}";\n`
+  );
+  execFileSync("git", ["-C", repo, "add", "."]);
+  const vault = writeVaultFromGraph(baseGraph());
+  // grepMarkers を DI しない = defaultGrepMarkers (git grep + リテラル除去) が走る
+  const res = constraintCheck({ vaultDir: vault, root: repo });
+  const ghosts = res.findings.filter((x) => x.kind === "orphan-marker");
+  assert.deepEqual(ghosts, [], "リテラル内の ghost id が orphan-marker として誤検出されてはならない");
+  assert.equal(res.status, "ok");
 });

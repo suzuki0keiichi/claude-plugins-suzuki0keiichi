@@ -49,6 +49,7 @@ import { canonicalType } from "./schema.ts";
 import { resolveSchema } from "./schema-registry.ts";
 import { latestTombstones, resolveSuccessor } from "./tombstones.ts";
 import { edgeId } from "./cli-typed-add.ts";
+import { stripQuotedInLine } from "./markers.ts";
 
 export type ConstraintCheckSeverity = "error" | "warn";
 
@@ -122,6 +123,8 @@ function defaultReadFile(root: string, relPath: string): string {
  * git grep でマーカーを機械走査する。-I でバイナリ除外。マッチ 0 は exit 1 なので空配列。
  * .md は除外 (enforcer は実行可能な検査であって文書ではない — 文書中のコード例を
  * 誤検出しないため)。vault 配下 (.graphrag/) も除外 (知識ノード本文が規約を引用し得る)。
+ * 文字列リテラル内は markers.ts の stripQuotedInLine で潰す — テストフィクスチャに
+ * 書かれた id を実マーカーと誤認しない (delta-check と同じ耐性)。
  */
 function defaultGrepMarkers(root: string): MarkerHit[] {
   let out = "";
@@ -144,7 +147,7 @@ function defaultGrepMarkers(root: string): MarkerHit[] {
     const relPath = lineText.slice(0, first);
     const lineNo = Number(lineText.slice(first + 1, second));
     if (relPath.endsWith(".md") || relPath.split("/").includes(".graphrag")) continue;
-    const content = lineText.slice(second + 1);
+    const content = stripQuotedInLine(lineText.slice(second + 1));
     for (const m of content.matchAll(ENFORCES_MARKER_RE)) {
       hits.push({ path: relPath, line: Number.isFinite(lineNo) ? lineNo : 0, constraintId: m[1] });
     }
@@ -363,7 +366,9 @@ export function constraintCheck(
             "or fix whatever made it get skipped — the constraint is currently unenforced. If the skip is unrelated, no action."
         });
       }
-      const markerIds = new Set([...content.matchAll(ENFORCES_MARKER_RE)].map((m) => m[1]));
+      const markerIds = new Set(
+        content.split("\n").flatMap((line) => [...stripQuotedInLine(line).matchAll(ENFORCES_MARKER_RE)].map((m) => m[1]))
+      );
       if (!markerIds.has(cid)) {
         findings.push({
           kind: "marker-missing",

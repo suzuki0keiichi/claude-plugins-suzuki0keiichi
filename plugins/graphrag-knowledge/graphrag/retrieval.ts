@@ -423,8 +423,8 @@ function collectQueryVectors(options): number[][] {
 
 // 近傍展開の edge 型優先度: 知識構造の背骨 (置き換え/具体化/前提/方針/制約) を先に、
 // 出所系 (discussed_in/documented_by) を最後に採る。cap で切る時に「supersedes の
-// 後継が落ちて discussed_in が残る」を防ぐ。未登録型は中間 (50)。日本語ラベルは
-// edge-labels.ts (EDGE_LABELS_JA) 参照。brief.ts の relations cap も同じ優先度を使う。
+// 後継が落ちて discussed_in が残る」を防ぐ。未登録型は中間 (50)。
+// brief.ts の relations cap も同じ優先度を使う。
 export const EDGE_TYPE_PRIORITY: Record<string, number> = {
   supersedes: 0,
   refines: 1,

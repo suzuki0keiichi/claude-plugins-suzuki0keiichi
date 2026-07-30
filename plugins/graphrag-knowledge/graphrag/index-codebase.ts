@@ -1,5 +1,5 @@
 // Generic codebase indexer. Redesigned from the originating project's essence
-// (see references/indexer-redesign-notes.md), NOT a blind port. No project-specific
+// (see docs/history/indexer-redesign-notes.md), NOT a blind port. No project-specific
 // rules. Targets the existing schema only (System / File + Concern / Component
 // / Layer candidates; contains / evidenced_by edges). Symbols/imports stay as
 // File fields (see references/carving-rationale.md), woven into the embedding

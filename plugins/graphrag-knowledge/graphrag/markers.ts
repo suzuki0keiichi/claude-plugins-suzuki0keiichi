@@ -42,7 +42,7 @@ export const REF_MARKER_RE = /graphrag:(see|enforces)\s+([a-z][a-z0-9_-]*:[a-z0-
  * 出る設計は alert fatigue で導線ごと死ぬ)。正当なマーカーは常にコメント内 = リテラル外に
  * あるので偽陰性は実質起きない。完璧な字句解析は不要 (hook の stripQuoted と同じ近似)。
  */
-function stripQuotedInLine(line: string): string {
+export function stripQuotedInLine(line: string): string {
   // シングルクォートは「直前が識別子文字でない」場合のみ文字列開始とみなす — 散文
   // コメント中の縮約 (don't / it's) がマーカーを文字列として飲み込む偽陰性を防ぐ。
   // Python 等の接頭辞つき文字列 (f'…' r'…' b'…' / 2文字組) は接頭辞ごと潰す

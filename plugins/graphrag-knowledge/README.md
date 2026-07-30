@@ -7,7 +7,7 @@
 | 必須 | 説明 |
 |---|---|
 | **Node.js 22.6+** | `--experimental-strip-types` で TypeScript を直接実行する |
-| **Embedding endpoint** | Ollama / LM Studio / OpenAI 互換の埋め込み API。未設定なら Ollama (`localhost:11434`) と LM Studio (`localhost:1234`) を自動検出。モデルは `nomic-embed-text` に pin |
+| **Embedding endpoint** | Ollama / LM Studio / OpenAI 互換の埋め込み API。未設定なら Ollama (`localhost:11434`) と LM Studio (`localhost:1234`) を自動検出。モデルの既定は `nomic-embed-text`（`GRAPHRAG_EMBEDDING_MODEL` で上書き可 — [setup.md](docs/setup.md) 参照） |
 
 外部 graph DB は不要（vault = ファイルのみ）。ランタイム依存もゼロ。
 
@@ -47,6 +47,8 @@
 - [embedding サーバを NPU で建てる](docs/embedding-npu.md) — プラットフォーム別の構築手順（Ubuntu / Intel NPU 実機検証済み）
 - [graphrag-overview.html](docs/graphrag-overview.html) — 設計思想の俯瞰
 - [graphrag-project-vault.html](docs/graphrag-project-vault.html) — project vault の解説
+- `references/` — スキルが実行時に読む LLM 向け正本（スキーマ早見表 3種・mutation テンプレ・CLI プリミティブ・carving 規約など 15 ファイル）。人間向け文書ではないが、挙動の正確な仕様はここにある
+- `docs/history/` — 歴史記録（v2→v3 切り出し仕様・indexer 再設計ノート・移植サイト記録）。現行仕様ではなく、改変しない過去のスナップショット
 
 ## 使い方
 
@@ -54,11 +56,13 @@
 
 主なスキル:
 - **graphrag-knowledge** — 知識の読み書き（着手前に `ask` で引く、一段落で書き戻す）
+- **graphrag-vault-init** — vault の初期構築（system / project 両対応。初回索引の正規の導線）
 - **graphrag-checkpoint** — 退避 → `/clear` で綺麗に再開（下記）
 - **graphrag-stocktake** — Investigation ライフサイクルの定期クリーニング（下記）
 - **graphrag-pr-review** — PR/diff をグラフと照合してレビュー
 - **graphrag-design-review** — 設計案をグラフと照合してレビュー
 - **graphrag-review-doc** — 人間向けのレビュー説明資料（HTML）を生成
+- **graphrag-doctrine-wiring** — プロジェクト側の設計規約・価値観を器に接続する対話ガイド（プラグイン自身は思想を持たない）
 
 ## clear 引き継ぎ（checkpoint → 自動復元）
 
@@ -94,6 +98,5 @@
 ## テスト
 
 ```bash
-node --experimental-strip-types --test graphrag/*.test.ts   # CLI
-node --test hooks/*.test.mjs                                 # フック
+node --experimental-strip-types --test graphrag/*.test.ts hooks/*.test.mjs   # 全部 (= pnpm test)
 ```

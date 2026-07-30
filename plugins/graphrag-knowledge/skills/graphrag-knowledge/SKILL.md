@@ -130,6 +130,7 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 - `carve --root <repo> --system <name>` — index → concern-hint → policy-suggest → carving-check chain. **Post-index, File and Component/Layer candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes concern-hint rejection / carving-check ERROR). **Concern (crosscut) discovery is driven by LLM conceptual modeling** — concern-hint machine candidates (for Concern discovery) are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
+- project/principal-preset typed-adds: `add-stakeholder` / `add-resource` / `add-milestone` / `add-assumption` / `add-agreement` / `add-task` / `add-source` / `add-theme` — same shape, project-vault node types ($REF/schema-quickref-project.md). On a principal vault, `add-task` / `add-milestone` refuse with a routing hint (time-bounded types are subtracted there).
 - `inspect` — status of env + artifacts as single JSON (vault / graph.json / vector-index / world, plus `vault_dir_source`, `state_dir`, `ask_state`, `indexed_graph`)
 - `checkpoint-mark --investigation <id>` — one-shot "restore me after /clear" intent for the SessionStart restore hook, written into the reserved `__checkpoint__` key of `ask-state.json` (no new file; consumed once, 60-min expiry). Fired as the final step of the `graphrag-checkpoint` skill — not needed in ordinary write flows.
 
@@ -303,3 +304,4 @@ Report graph changes in natural language, **in the conversation language** (what
 - `$REF/interpretation-guidance.md`: universal guidance for File interpretation summaries (primary lever for retrieval quality)
 - `$REF/conceptual-pass.md`: conceptual interpretation pass procedure
 - `$REF/carving-rules.md`: carving quality guards (no sequential slugs / completeness / duplicate detection / automated verification commands)
+- `$REF/graph-review-method.md`: graph-informed review method (used by the pr-review / design-review / review-doc skills)

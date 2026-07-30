@@ -99,7 +99,7 @@ Rebuilds graph.json from the vault. **For round-trip equivalence verification** 
 node graphrag/cli.ts concern-hint --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
 ```
 
-Union-Find-clusters groups of Files that span different Components by embedding distance, and outputs candidate JSON. **Concern discovery is driven primarily by the LLM's conceptual modeling** (`conceptual-pass.md` §2); this command is for blind-spot checking after that modeling. Called inside `carve`. Call it directly only when you want to tune the threshold.
+Union-Find-clusters groups of Files that span different Components by embedding distance, and outputs candidate JSON. **Concern discovery is driven primarily by the LLM's conceptual modeling** (`conceptual-pass.md` §2); this command is for blind-spot checking after that modeling. Called inside `carve`. Call it directly only when you want to tune the threshold. (`vein-hint` is a legacy alias from the Vein→Concern rename — same verb.)
 
 ## edge-suggest-policy — batch extraction of binding / relations candidates
 

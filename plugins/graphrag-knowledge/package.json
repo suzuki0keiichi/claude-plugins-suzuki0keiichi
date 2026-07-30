@@ -8,7 +8,7 @@
     "node": ">=22.6.0"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test graphrag/*.test.ts"
+    "test": "node --experimental-strip-types --test graphrag/*.test.ts hooks/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

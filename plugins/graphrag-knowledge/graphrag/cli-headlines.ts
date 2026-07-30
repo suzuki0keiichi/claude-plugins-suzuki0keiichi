@@ -42,12 +42,11 @@ import {
 } from "./cli-typed-add-project.ts";
 import { buildGraphBrief } from "./brief.ts";
 import { buildEvidencePacket } from "./evidence-packet.ts";
-import { bumpCallCount, resolveAskStateDir } from "./cli-ask-state.ts";
+import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
 import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph, vaultVectorIndexReadPath } from "./retrieval.ts";
 import { embedForIndex } from "./vector.ts";
-import { recordAskHits } from "./cli-ask-state.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { importVault } from "./import-vault.ts";
 import { resolveSchema } from "./schema-registry.ts";
