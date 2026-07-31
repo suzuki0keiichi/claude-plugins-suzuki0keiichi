@@ -41,9 +41,10 @@ test("cli has expected headline verbs", () => {
 // typed-add / mutation plan の3つのみ。verb 一覧の pin により、接面が増える変更は必ずこのテストを
 // 触る = 生クエリ経路の混入を意識的レビューに乗せる。
 // (v1.23.0: delta-check を追加。read-only の決定的逆引き = ranked JSON の読み面で、生クエリ経路ではない)
-test("listKnownVerbs returns all 42 verbs (22 primitive + 20 headline)", () => {
+// (rail-prompt / rail-touch を追加。読みレールの判定本体 — どちらも read + ranked JSON の読み面で、生クエリ経路ではない)
+test("listKnownVerbs returns all 44 verbs (24 primitive + 20 headline)", () => {
   const all = listKnownVerbs();
-  assert.equal(all.length, 42);
+  assert.equal(all.length, 44);
   // Guard against a verb id being registered twice across the primitive/headline lists.
   assert.equal(new Set(all).size, all.length, "duplicate verb id across primitive/headline lists");
 });
