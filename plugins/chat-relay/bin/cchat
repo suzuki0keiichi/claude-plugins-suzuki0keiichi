@@ -1,0 +1,346 @@
+#!/usr/bin/env node
+// chat-relay client: Node-only, cross-platform.
+// Requires: Node 16+.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const http = require('node:http');
+const { spawn } = require('node:child_process');
+
+const HOST = process.env.CHAT_HOST || '127.0.0.1';
+const PORT = parseInt(process.env.CHAT_PORT || '7777', 10);
+const HOME_DIR = process.env.CHAT_HOME || path.join(os.homedir(), '.chat');
+const CACHE_DIR = process.env.CHAT_CACHE || path.join(os.homedir(), '.cache', 'chat');
+const DEFAULT_WAIT_TIMEOUT = 1800;
+
+for (const d of [HOME_DIR, path.join(CACHE_DIR, 'identity'), path.join(CACHE_DIR, 'cursor')]) {
+  fs.mkdirSync(d, { recursive: true });
+}
+
+// ---------- session key & identity ----------
+
+function sessionKey() {
+  if (process.env.CHAT_SESSION) return process.env.CHAT_SESSION;
+  if (process.env.CLAUDE_CODE_SESSION_ID) {
+    return 'cc-' + process.env.CLAUDE_CODE_SESSION_ID.replace(/-/g, '').slice(0, 12);
+  }
+  if (process.ppid) return `ppid-${process.ppid}`;
+  return `pid-${process.pid}`;
+}
+
+const identityFile = () => path.join(CACHE_DIR, 'identity', sessionKey() + '.txt');
+const cursorFile = (room) => path.join(CACHE_DIR, 'cursor', `${sessionKey()}__${room}.txt`);
+
+function readIdentity() {
+  try { return fs.readFileSync(identityFile(), 'utf8').trim() || null; }
+  catch (_) { return null; }
+}
+function writeIdentity(name) { fs.writeFileSync(identityFile(), name); }
+
+function readCursor(room) {
+  try { return parseInt(fs.readFileSync(cursorFile(room), 'utf8'), 10) || 0; }
+  catch (_) { return 0; }
+}
+function writeCursor(room, id) { fs.writeFileSync(cursorFile(room), String(id)); }
+
+// ---------- helpers ----------
+
+function die(msg, code = 1) {
+  process.stderr.write(msg + '\n');
+  process.exit(code);
+}
+
+function requireIdentity() {
+  const id = readIdentity();
+  if (!id) die('no identity set (run: cchat name <your-name>)', 2);
+  return id;
+}
+
+const ROOM_RE = /^[A-Za-z0-9_.\-]+$/;
+function requireRoom(name) {
+  if (!name) die('missing <room>', 2);
+  if (!ROOM_RE.test(name)) die('invalid room name', 2);
+  return name;
+}
+
+function httpRequest({ method = 'GET', pathname, query = {}, body = null, timeoutMs = 30000 }) {
+  return new Promise((resolve, reject) => {
+    const qs = Object.entries(query)
+      .filter(([_, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const opts = {
+      host: HOST,
+      port: PORT,
+      path: pathname + (qs ? '?' + qs : ''),
+      method,
+      headers: body
+        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+        : {},
+    };
+    const req = http.request(opts, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('request timeout')));
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+// ---------- server lifecycle ----------
+
+async function serverAlive() {
+  try {
+    const r = await httpRequest({ pathname: '/health', timeoutMs: 1000 });
+    return r.status === 200;
+  } catch (_) { return false; }
+}
+
+function findServerJs() {
+  if (process.env.CHAT_SERVER && fs.existsSync(process.env.CHAT_SERVER)) {
+    return process.env.CHAT_SERVER;
+  }
+  let scriptPath = __filename;
+  try { scriptPath = fs.realpathSync(scriptPath); } catch (_) {}
+  const scriptDir = path.dirname(scriptPath);
+  for (const c of [
+    path.join(scriptDir, '..', 'server.js'),
+    path.join(scriptDir, '..', 'server', 'server.js'),
+  ]) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+async function ensureServer() {
+  if (await serverAlive()) return;
+  const serverJs = findServerJs();
+  if (!serverJs) die('server.js not found (set CHAT_SERVER)');
+  const logPath = path.join(HOME_DIR, 'server.log');
+  const out = fs.openSync(logPath, 'a');
+  const err = fs.openSync(logPath, 'a');
+  const child = spawn(process.execPath, [serverJs], {
+    env: { ...process.env, CHAT_HOST: HOST, CHAT_PORT: String(PORT), CHAT_HOME: HOME_DIR },
+    detached: true,
+    stdio: ['ignore', out, err],
+    windowsHide: true,
+  });
+  child.unref();
+  for (let i = 0; i < 25; i++) {
+    if (await serverAlive()) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  die(`server did not become ready (see ${logPath})`);
+}
+
+// ---------- output ----------
+
+function printMessages(jsonStr, room, advanceCursor) {
+  let msgs;
+  try { msgs = JSON.parse(jsonStr); } catch (_) { die('parse error'); }
+  if (!Array.isArray(msgs)) die('expected array');
+  let last = 0;
+  for (const m of msgs) {
+    process.stdout.write(`${m.from}: ${m.body}\n`);
+    if (typeof m.id === 'number' && m.id > last) last = m.id;
+  }
+  if (advanceCursor && last > 0) {
+    try { writeCursor(room, last); } catch (_) {}
+  }
+}
+
+// ---------- subcommand parsers ----------
+
+function parseTimeoutFlag(args) {
+  let timeout = DEFAULT_WAIT_TIMEOUT;
+  const rest = [];
+  for (const a of args) {
+    if (a.startsWith('--timeout=')) {
+      const v = parseInt(a.slice('--timeout='.length), 10);
+      if (Number.isFinite(v) && v > 0) timeout = v;
+    } else {
+      rest.push(a);
+    }
+  }
+  return { timeout, rest };
+}
+
+function parseTailFlags(args) {
+  let n = 10;
+  let follow = false;
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '-n') { n = parseInt(args[++i], 10); }
+    else if (a.startsWith('-n')) { n = parseInt(a.slice(2), 10); }
+    else if (a === '-f' || a === '--follow') { follow = true; }
+    else { rest.push(a); }
+  }
+  if (!Number.isFinite(n) || n <= 0) n = 10;
+  return { n, follow, rest };
+}
+
+// ---------- subcommands ----------
+
+async function cmdName(args) {
+  const name = args[0];
+  if (!name) die('usage: cchat name <your-name>', 2);
+  if (/\s/.test(name)) die('name must not contain whitespace', 2);
+  writeIdentity(name);
+  process.stdout.write(`identity set: ${name}\n`);
+}
+
+function cmdWhoami() {
+  const id = readIdentity();
+  if (!id) die('no identity set (run: cchat name <your-name>)', 2);
+  process.stdout.write(id + '\n');
+}
+
+async function cmdSend(args) {
+  const room = requireRoom(args[0]);
+  const message = args.slice(1).join(' ');
+  if (!message) die('usage: cchat send <room> <message...>', 2);
+  const from = requireIdentity();
+  await ensureServer();
+  const payload = JSON.stringify({ room, from, body: message });
+  const r = await httpRequest({ method: 'POST', pathname: '/messages', body: payload, timeoutMs: 30000 });
+  if (r.status !== 200) die(`send failed: http ${r.status} ${r.body}`);
+}
+
+async function cmdWait(args) {
+  const { timeout, rest } = parseTimeoutFlag(args);
+  const room = requireRoom(rest[0]);
+  const from = requireIdentity();
+  await ensureServer();
+  const since = readCursor(room);
+  const r = await httpRequest({
+    pathname: '/messages',
+    query: { room, since, exclude: from, block: timeout },
+    timeoutMs: (timeout + 30) * 1000,
+  });
+  if (r.status === 204) { process.stderr.write('timeout\n'); process.exit(124); }
+  if (r.status !== 200) die(`wait failed: http ${r.status} ${r.body}`);
+  printMessages(r.body, room, true);
+}
+
+async function cmdSay(args) {
+  const { timeout, rest } = parseTimeoutFlag(args);
+  const room = requireRoom(rest[0]);
+  const message = rest.slice(1).join(' ');
+  if (!message) die('usage: cchat say <room> <message...> [--timeout=SEC]', 2);
+  await cmdSend([room, message]);
+  await cmdWait([`--timeout=${timeout}`, room]);
+}
+
+async function cmdTail(args) {
+  const { n, follow, rest } = parseTailFlags(args);
+  const room = requireRoom(rest[0]);
+  await ensureServer();
+
+  // initial snapshot
+  const r0 = await httpRequest({ pathname: '/messages', query: { room, limit: n }, timeoutMs: 10000 });
+  if (r0.status !== 200) die(`tail failed: http ${r0.status} ${r0.body}`);
+  const initial = JSON.parse(r0.body);
+  let lastId = 0;
+  for (const m of initial) {
+    process.stdout.write(`${m.from}: ${m.body}\n`);
+    if (typeof m.id === 'number' && m.id > lastId) lastId = m.id;
+  }
+
+  if (!follow) return;
+
+  // follow loop: long-poll for anything newer, never advances any cursor
+  const FOLLOW_BLOCK = 600;
+  while (true) {
+    const r = await httpRequest({
+      pathname: '/messages',
+      query: { room, since: lastId, block: FOLLOW_BLOCK },
+      timeoutMs: (FOLLOW_BLOCK + 30) * 1000,
+    });
+    if (r.status === 204) continue; // no message in this window — re-poll
+    if (r.status !== 200) die(`tail --follow failed: http ${r.status} ${r.body}`);
+    const msgs = JSON.parse(r.body);
+    for (const m of msgs) {
+      process.stdout.write(`${m.from}: ${m.body}\n`);
+      if (typeof m.id === 'number' && m.id > lastId) lastId = m.id;
+    }
+  }
+}
+
+async function cmdRooms() {
+  await ensureServer();
+  const r = await httpRequest({ pathname: '/rooms', timeoutMs: 5000 });
+  if (r.status !== 200) die(`rooms failed: http ${r.status}`);
+  for (const x of JSON.parse(r.body)) process.stdout.write(x + '\n');
+}
+
+async function cmdServer(args) {
+  const sub = args[0];
+  if (sub === 'start') {
+    await ensureServer();
+    process.stdout.write(`server up at http://${HOST}:${PORT}\n`);
+  } else if (sub === 'stop') {
+    if (!(await serverAlive())) { process.stdout.write('server not running\n'); return; }
+    try { await httpRequest({ method: 'POST', pathname: '/shutdown', timeoutMs: 2000 }); }
+    catch (_) {}
+    process.stdout.write('shutdown requested\n');
+  } else if (sub === 'status') {
+    if (await serverAlive()) process.stdout.write('up\n');
+    else { process.stdout.write('down\n'); process.exit(1); }
+  } else {
+    die('usage: cchat server {start|stop|status}', 2);
+  }
+}
+
+function cmdHelp() {
+  process.stdout.write(`chat-relay — talk between Claude Code sessions.
+
+Setup (once per session):
+  cchat name <your-name>          set this session's identity
+
+Talking:
+  cchat send <room> <message>     send only
+  cchat wait <room> [--timeout=N] block until someone else posts (default 1800s)
+  cchat say  <room> <message>     send + wait for a reply (one command)
+  cchat tail <room> [-n N] [-f]   show last N messages (default 10); -f to follow live
+
+Misc:
+  cchat whoami                    print your identity
+  cchat rooms                     list known rooms
+  cchat server {start|stop|status}
+
+Server is auto-started on first use. Data lives under ~/.chat.
+`);
+}
+
+// ---------- dispatch ----------
+
+async function main() {
+  const [sub, ...args] = process.argv.slice(2);
+  const cmd = sub || 'help';
+  try {
+    switch (cmd) {
+      case 'name':    await cmdName(args); break;
+      case 'whoami':  cmdWhoami(); break;
+      case 'send':    await cmdSend(args); break;
+      case 'wait':    await cmdWait(args); break;
+      case 'say':     await cmdSay(args); break;
+      case 'tail':    await cmdTail(args); break;
+      case 'rooms':   await cmdRooms(); break;
+      case 'server':  await cmdServer(args); break;
+      case 'help':
+      case '-h':
+      case '--help':  cmdHelp(); break;
+      default:
+        die(`unknown subcommand: ${cmd}\nrun: cchat help`, 2);
+    }
+  } catch (err) {
+    die(`error: ${err && err.message ? err.message : err}`);
+  }
+}
+
+main();

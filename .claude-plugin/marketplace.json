@@ -13,6 +13,11 @@
       "name": "graphrag-knowledge",
       "description": "プロジェクトの永続知識グラフ(採用判断/却下案/制約/目的/リスク/運用知識)を vault(Obsidian Markdown)を単一正本として安全に読み書きするスキル + CLI。",
       "source": "./plugins/graphrag-knowledge"
+    },
+    {
+      "name": "chat-relay",
+      "description": "複数の Claude Code セッション間で人間を経由せず直接メッセージを交換するローカルチャット (long polling サーバー + cchat CLI)。",
+      "source": "./plugins/chat-relay"
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "name": "chat-relay",
+  "description": "複数の Claude Code セッション間で人間を経由せず直接メッセージを交換するローカルチャット (long polling サーバー + cchat CLI)。ルーム単位のブロードキャストと、トークンを消費しないブロッキング wait / say でセッション同士の対話・設計議論を成立させる。",
+  "version": "1.0.0",
+  "author": {
+    "name": "suzuki0keiichi"
+  },
+  "repository": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi",
+  "keywords": [
+    "chat",
+    "multi-session",
+    "long-polling",
+    "agent-to-agent",
+    "collaboration"
+  ]
+}
