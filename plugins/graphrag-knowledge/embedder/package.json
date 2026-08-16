@@ -1,0 +1,9 @@
+{
+  "name": "graphrag-embedder",
+  "private": true,
+  "type": "module",
+  "description": "Bundled in-process embedding for graphrag-knowledge. Installed into ~/.graphrag/embedder by the embedder-setup verb (pnpm only, frozen lockfile, build scripts blocked).",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  }
+}

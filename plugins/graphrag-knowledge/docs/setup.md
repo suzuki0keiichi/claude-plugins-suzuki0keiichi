@@ -9,17 +9,23 @@
 
 ## 最小構成
 
-動かすのに最低限要るのは **embedding サーバ 1 つだけ**です。vault の場所・`VAULT.md`・`.env` はすべて既定のまま動きます。
+動かすのに最低限要るのは **embedding 1 つだけ**です。vault の場所・`VAULT.md`・`.env` はすべて既定のまま動きます。
 
-1. **embedding サーバを建てます。** 手元で Ollama か LM Studio に `nomic-embed-text` を入れて起動すれば、graphrag が自動で見つけます。
+1. **embedding を用意します。** 一番簡単なのは同梱デフォルトのセットアップです（1 マシン 1 回。pnpm 必須、依存+モデルで合計約 500MB、以後はオフラインで動作。サーバも常駐プロセスも不要）:
+
+   ```sh
+   node --experimental-strip-types <plugin>/graphrag/cli.ts embedder-setup
+   ```
+
+   `~/.graphrag/embedder/` に依存とモデル（`multilingual-e5-small`、日本語対応）が入り、endpoint が見つからない時に自動でこれが使われます。依存は pnpm 限定・lockfile 固定・ビルドスクリプト全遮断で導入します（npm/npx は使いません）。
+
+   性能や好みで自前の embedding サーバを使いたい場合は、Ollama か LM Studio に `nomic-embed-text` を入れて起動すれば自動でそちらが優先されます（→ [embedding サーバ](#embedding-サーバ)）:
 
    ```sh
    # Ollama の場合
    ollama serve
    ollama pull nomic-embed-text
    ```
-
-   常時起動させておくなら NPU で建てるのがおすすめです（→ [embedding サーバ](#embedding-サーバ)）。
 
 2. **プロジェクトのルートで初回索引します。** `carve` を実行すると `.graphrag/vault` にグラフができます。
 
@@ -33,14 +39,15 @@
 
 ### embedding サーバ
 
-graphrag の検索は **意味（埋め込みベクトル）検索が前提**で、文字一致だけの代替手段は持っていません。そのため埋め込みを返すサーバが 1 つ要ります。
+graphrag の検索は **意味（埋め込みベクトル）検索が前提**で、文字一致だけの代替手段は持っていません。そのため埋め込みの担い手が 1 つ要ります（サーバでも、同梱の in-process デフォルトでも可）。
 
-**置き場所を `.env` に書かなければ、graphrag が手元の Ollama / LM Studio を順に探します:**
+**置き場所を `.env` に書かなければ、graphrag が次の順で自動解決します:**
 
 1. Ollama — `http://localhost:11434/v1`
 2. LM Studio — `http://localhost:1234/v1`
+3. 同梱ローカル embedding — `embedder-setup` 済みのマシンのみ（`~/.graphrag/embedder/`）
 
-どちらも、起動していて `nomic-embed-text` を提供していれば自動で採用されます。応答はするのに `nomic-embed-text` が無いサーバは、**採用せずはっきり失敗させます**（モデルが食い違ったまま検索結果が静かに狂うのを防ぐためです）。
+サーバは、起動していて `nomic-embed-text` を提供していれば自動で採用されます。応答はするのに `nomic-embed-text` が無いサーバは、**採用せずはっきり失敗させます**（モデルが食い違ったまま検索結果が静かに狂うのを防ぐためです）。どこにも見つからず同梱ローカルも未セットアップなら、`embedder-setup` への案内付きでハードエラーになります。**自動インストールはしません** — 数百 MB の取得と依存導入は `embedder-setup` という明示的な同意イベントに限ります。
 
 #### NPU で建てるのがおすすめ
 

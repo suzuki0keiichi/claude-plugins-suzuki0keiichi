@@ -1,0 +1,6 @@
+# サプライチェーン対策を明示: ビルドスクリプトは全拒否 + 公開直後版のクールダウン
+minimumReleaseAge: 10080 # 分 = 7日。公開7日未満のバージョンをインストールしない
+allowBuilds:
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false

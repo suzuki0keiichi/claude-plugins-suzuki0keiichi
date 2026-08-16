@@ -1,4 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
+import {
+  LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_PROVIDER,
+  localEmbedderStatus, embedLocalText
+} from "./embedder-local.ts";
 
 loadDotEnv();
 
@@ -42,6 +46,11 @@ export const VECTOR_PROVIDER_CAPABILITIES = {
     capability: "semantic",
     semantic: true,
     description: "LM Studio /v1/embeddings provider. Requires an embedding model loaded in LM Studio."
+  },
+  [LOCAL_EMBEDDING_PROVIDER]: {
+    capability: "semantic",
+    semantic: true,
+    description: `Bundled in-process embedding (transformers.js, ${LOCAL_EMBEDDING_MODEL}). Installed once per machine via embedder-setup; no server, no daemon.`
   }
 };
 
@@ -64,7 +73,12 @@ export const PINNED_EMBEDDING_MODEL = "nomic-embed-text";
 // query 接頭辞を付ける。メタ無し (旧 index) には決して付けない (document 側に
 // 接頭辞が無いのに query 側だけ付けると非対称が壊れて精度が落ちる)。
 export const EMBEDDING_PREFIX_POLICIES: Record<string, { document: string; query: string }> = {
-  "nomic-embed-text": { document: "search_document: ", query: "search_query: " }
+  "nomic-embed-text": { document: "search_document: ", query: "search_query: " },
+  // e5 系 (同梱デフォルト multilingual-e5-small を含む) は passage:/query: の非対称接頭辞。
+  // 配布元 (Xenova/intfloat) 別の名前空間と素の名前をすべて前方一致キーで登録する。
+  "multilingual-e5": { document: "passage: ", query: "query: " },
+  "Xenova/multilingual-e5": { document: "passage: ", query: "query: " },
+  "intfloat/multilingual-e5": { document: "passage: ", query: "query: " }
 };
 
 // モデル名から接頭辞ポリシーを引く。モデル名は "nomic-embed-text:latest" のような
@@ -184,6 +198,7 @@ function embeddingUnavailableError(reason) {
       `Semantic embedding unavailable: ${reason}.`,
       `semantic retrieval is required and lexical/ngram fallback is disabled.`,
       `Enable one of:`,
+      `  - Easiest: run "embedder-setup" once per machine — installs the bundled in-process embedding (${LOCAL_EMBEDDING_MODEL}; pnpm required, ~500MB, no server to run afterwards)`,
       `  - Ollama: run "ollama serve" then "ollama pull ${PINNED_EMBEDDING_MODEL}" (OpenAI-compatible at http://localhost:11434/v1)`,
       `  - LM Studio: load "${PINNED_EMBEDDING_MODEL}" and start the local server (http://localhost:1234/v1)`,
       `  - or set GRAPHRAG_EMBEDDING_ENDPOINT to an OpenAI-compatible /v1/embeddings endpoint serving ${PINNED_EMBEDDING_MODEL}.`
@@ -227,6 +242,14 @@ export async function resolveEmbeddingTarget(options: any = {}) {
     }
     return { provider: candidate.provider, endpoint: embeddingsUrlFromBase(candidate.base), model: match, apiKey };
   }
+  // 最後段: embedder-setup 済みのマシンなら同梱 in-process embedding に落ちる。
+  // 未導入マシンでは従来どおりハードエラー (自動インストールは絶対にしない —
+  // 数百MBの取得と依存導入は embedder-setup という明示的同意イベントに限る)。
+  const local = localEmbedderStatus();
+  if (local.installed) {
+    return { provider: LOCAL_EMBEDDING_PROVIDER, endpoint: null, model: local.model, apiKey: null };
+  }
+  failures.push(`bundled embedder not installed at ${local.dir}`);
   throw embeddingUnavailableError(`auto-detect found nothing usable [${failures.join("; ")}]`);
 }
 
@@ -263,6 +286,32 @@ export function createVectorProvider(options: any = {}) {
   const provider = options.provider ?? process.env.GRAPHRAG_VECTOR_PROVIDER;
   if (!provider) {
     throw new Error("Missing vector provider. Set GRAPHRAG_VECTOR_PROVIDER to a semantic embedding provider.");
+  }
+
+  if (provider === LOCAL_EMBEDDING_PROVIDER) {
+    const model = options.model ?? localEmbedderStatus().model;
+    return {
+      id: provider,
+      capability: "semantic",
+      semantic: true,
+      dimensions: options.dimensions ? Number(options.dimensions) : null,
+      metadata: {
+        provider,
+        provider_capability: "semantic",
+        semantic: true,
+        endpoint: null,
+        model,
+        dimensions: options.dimensions ? Number(options.dimensions) : null
+      },
+      async embed(text) {
+        // 未導入時は embedLocalText が embedder-setup への導線付きでハードエラー。
+        const vector = await embedLocalText(model, text);
+        if (options.dimensions && vector.length !== Number(options.dimensions)) {
+          throw new Error(`Embedding dimensions mismatch for ${provider}: expected ${options.dimensions}, got ${vector.length}`);
+        }
+        return normalizeVector(vector);
+      }
+    };
   }
 
   if (OPENAI_COMPATIBLE_PROVIDERS.has(provider)) {

@@ -26,6 +26,15 @@ test("prefixPolicyForModel: mode 'off' always returns null even for registered m
   assert.equal(prefixPolicyForModel("nomic-embed-text", "off"), null);
 });
 
+test("prefixPolicyForModel: e5 系 (同梱デフォルト含む) は passage:/query: 接頭辞", () => {
+  for (const model of ["Xenova/multilingual-e5-small", "Xenova/multilingual-e5-base", "multilingual-e5-base", "intfloat/multilingual-e5-large"]) {
+    const p = prefixPolicyForModel(model, "auto");
+    assert.ok(p, `policy missing for ${model}`);
+    assert.equal(p!.document, "passage: ");
+    assert.equal(p!.query, "query: ");
+  }
+});
+
 import { embedForIndex, embedQueryForVectorIndex } from "./vector.ts";
 
 // embedForIndex / embedQueryForVectorIndex は createVectorProvider 経由で実 endpoint を
