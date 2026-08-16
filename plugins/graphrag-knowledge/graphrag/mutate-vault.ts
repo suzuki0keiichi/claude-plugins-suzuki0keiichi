@@ -15,6 +15,7 @@ import { buildVaultFiles } from "./build-vault.ts";
 import { importVault, normalizeEol } from "./import-vault.ts";
 import {
   normalizeMutationPlan,
+  partitionIdempotentReplays,
   validateMutation,
 } from "./mutation-core.ts";
 import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
@@ -553,7 +554,39 @@ export async function applyMutationToVault(args: {
       }
     }
     const current = importVault(vaultDir);
-    const v = validateMutation({ currentGraph: current, plan, enforceSourceBacking: true, schema: args.schema });
+    // 冪等リプレイの吸収 (issue #24): 同一内容の op:create 再送 (タイムアウト後の
+    // リトライ等) は「既に成功した書き込み」なので失敗にしない。plan 全体が再送なら
+    // 書き込み自体を skip して成功を返す (連打を毒にしない)。
+    const partitioned = partitionIdempotentReplays(plan, current);
+    const effectivePlan = partitioned.plan;
+    const idempotent_replay =
+      partitioned.replayedNodeIds.length > 0 || partitioned.replayedEdgeIds.length > 0
+        ? {
+            nodes: partitioned.replayedNodeIds,
+            edges: partitioned.replayedEdgeIds,
+            note:
+              "These op:create items already exist with identical content — treated as successful no-op replays " +
+              "(safe retry). Nothing was written for them.",
+          }
+        : null;
+    if (effectivePlan.nodes.length === 0 && effectivePlan.edges.length === 0) {
+      let head: string | null = null;
+      try {
+        head = args.git !== false ? vaultHead(vaultDir) : null;
+      } catch {
+        head = null;
+      }
+      return {
+        applied: true,
+        head,
+        idempotent_replay,
+        files: { written: [], removed: [], created: [] },
+        changed_nodes: { created: [], updated: [], deleted: [] },
+        note: "entire plan was an idempotent replay — vault already contains this content; no commit was made",
+        __replayOnly: true,
+      };
+    }
+    const v = validateMutation({ currentGraph: current, plan: effectivePlan, enforceSourceBacking: true, schema: args.schema });
     if (!v.valid) {
       const err: any = new Error("Refusing to mutate invalid graph");
       err.failures = v.failures;
@@ -570,7 +603,7 @@ export async function applyMutationToVault(args: {
     // duplicate_ack で承認されない suspect が居れば all-or-nothing で拒否する。
     // 索引不在・embedding 不達は embedding 段のみ非致命スキップ (lexical は常に走る)。
     const dup = await runDuplicateCheck({
-      plan,
+      plan: effectivePlan,
       currentGraph: current,
       vectorIndex: dupIndex,
       embed: gateEmbed,
@@ -614,10 +647,10 @@ export async function applyMutationToVault(args: {
       writeDelta(vaultDir, v.nextGraph, delta);
       // 書き込み後セルフチェック: 説明できないファイル削除 (= plan に無い知識の消滅) を
       // commit 前に検知して throw する (下の catch で HEAD へ巻き戻る)。
-      assertRemovalsExplained({ currentGraph: current, nextGraph: v.nextGraph, plan, removed: delta.removed });
+      assertRemovalsExplained({ currentGraph: current, nextGraph: v.nextGraph, plan: effectivePlan, removed: delta.removed });
       // node delete を tombstone 台帳へ記録 (mutation と同一コミットで確定する。
       // シャードは delta に積むので、commit 失敗時の巻き戻しは .md と同じ経路で効く)。
-      const tombstones = recordTombstones({ vaultDir, plan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
+      const tombstones = recordTombstones({ vaultDir, plan: effectivePlan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
       let head: string | null = null;
       if (args.git !== false) {
         head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation");
@@ -627,13 +660,14 @@ export async function applyMutationToVault(args: {
         head,
         duplicate_check,
         attribute_check,
+        ...(idempotent_replay ? { idempotent_replay } : {}),
         files: delta,
         changed_nodes: {
-          created: plan.nodes
+          created: effectivePlan.nodes
             .filter((n: any) => (n.op ?? "create") === "create")
             .map((n: any) => n.id),
-          updated: plan.nodes.filter((n: any) => n.op === "update").map((n: any) => n.id),
-          deleted: plan.nodes.filter((n: any) => n.op === "delete").map((n: any) => n.id),
+          updated: effectivePlan.nodes.filter((n: any) => n.op === "update").map((n: any) => n.id),
+          deleted: effectivePlan.nodes.filter((n: any) => n.op === "delete").map((n: any) => n.id),
         },
         cascaded_edge_ids: v.cascadedEdgeIds,
         // 削除の台帳記録 (issue #18)。recorded=0 (削除なし) なら shards は空。
@@ -645,7 +679,7 @@ export async function applyMutationToVault(args: {
           removed_files: delta.removed.length,
         },
         // lock 外の suggestions 組み立てに渡す内部フィールド (出力直前に除去する)。
-        __suggestionsInput: { nextGraph: v.nextGraph, plan, relations: relationCandidates },
+        __suggestionsInput: { nextGraph: v.nextGraph, plan: effectivePlan, relations: relationCandidates },
       };
     } catch (applyErr) {
       // 適用中のどの失敗(writeVaultDelta 途中失敗・commit 失敗等)でも作業ツリーを
@@ -675,12 +709,25 @@ export async function applyMutationToVault(args: {
   //      「書込窓は極短」が回復する。
   // 索引は増分ビルド (変更ノードだけ再 embedding) なので解放後でも軽い。失敗しても
   // mutation は既に確定済みなので非致命 (index_status で結果だけ返す)。
+  // plan 全体が冪等リプレイ (= vault 無変更) なら索引再構築も suggestions も不要。
+  if ((result as any).__replayOnly) {
+    const { __replayOnly, ...replayResult } = result as any;
+    return replayResult;
+  }
+
   let index_status: any;
   try {
     await buildIndex({ vault: vaultDir, out: defaultVectorIndexPath(vaultDir) });
     index_status = { ok: true };
   } catch (e: any) {
-    index_status = { ok: false, error: String(e?.message ?? e) }; // NON-FATAL
+    index_status = {
+      ok: false,
+      error: String(e?.message ?? e),
+      // リトライ連打の根 (issue #24): 索引失敗を書き込み失敗と誤読して add を再送させない。
+      note:
+        "the mutation IS already committed — do NOT retry the add/commit-mutation for this; " +
+        "the vector index is a secondary artifact and will be rebuilt automatically on the next ask/mutation",
+    }; // NON-FATAL
   }
 
   // E0 書き込み時提案: index 再構築後 (= 新ノードが索引に載った状態) に組む。

@@ -53,6 +53,62 @@ function normalizeSuccessors(value: unknown): Array<{ old: string; new: string }
   return value.map((s) => ({ old: s.old, new: s.new }));
 }
 
+// ── idempotent replay (issue #24) ────────────────────────────────────────────
+//
+// 書き込みのリトライ (タイムアウト後の再実行等) を毒にしない: op:create で id が既存、
+// かつ plan の内容が既存エンティティと実質同一 (generated_at を除く全フィールドが
+// deep-equal) なら、それは「既に成功した書き込みの再送」なので失敗ではなく no-op と
+// して吸収する。内容が違う create-on-existing は従来どおり validateMutation が
+// fail-loud する (それは再送ではなく衝突)。
+//
+// 判定は plan 側が持つフィールドのみ比較する (既存ノードにだけある indexer 付与
+// フィールド等は再送の否定材料にしない)。generated_at は書き込み時に打刻される値
+// なので比較から除外する。
+export function partitionIdempotentReplays(
+  plan: any,
+  currentGraph: any
+): { plan: any; replayedNodeIds: string[]; replayedEdgeIds: string[] } {
+  const nodesById = new Map<string, any>((currentGraph.nodes ?? []).map((n: any) => [n.id, n]));
+  const edgesById = new Map<string, any>((currentGraph.edges ?? []).map((e: any) => [e.id, e]));
+
+  const isNodeReplay = (item: any): boolean => {
+    if (mutationOp(item) !== "create") return false;
+    const existing = nodesById.get(item.id);
+    if (!existing) return false;
+    const fields = withoutOp(item);
+    for (const [key, value] of Object.entries(fields)) {
+      if (key === "generated_at") continue;
+      if (!isDeepStrictEqual(existing[key], value)) return false;
+    }
+    return true;
+  };
+  const isEdgeReplay = (item: any): boolean => {
+    if (mutationOp(item) !== "create") return false;
+    const existing = edgesById.get(item.id);
+    if (!existing) return false;
+    return (
+      existing.type === item.type && existing.from === item.from && existing.to === item.to
+    );
+  };
+
+  const replayedNodeIds = plan.nodes.filter(isNodeReplay).map((n: any) => String(n.id));
+  const replayedEdgeIds = plan.edges.filter(isEdgeReplay).map((e: any) => String(e.id));
+  if (replayedNodeIds.length === 0 && replayedEdgeIds.length === 0) {
+    return { plan, replayedNodeIds, replayedEdgeIds };
+  }
+  const replayedNodes = new Set(replayedNodeIds);
+  const replayedEdges = new Set(replayedEdgeIds);
+  return {
+    plan: {
+      ...plan,
+      nodes: plan.nodes.filter((n: any) => !replayedNodes.has(String(n.id)) || mutationOp(n) !== "create"),
+      edges: plan.edges.filter((e: any) => !replayedEdges.has(String(e.id)) || mutationOp(e) !== "create")
+    },
+    replayedNodeIds,
+    replayedEdgeIds
+  };
+}
+
 export function validateMutation({ currentGraph, plan, enforceSourceBacking = false, schema }: {
   currentGraph: any; plan: any; enforceSourceBacking?: boolean; schema?: SchemaDefinition;
 }) {
@@ -90,8 +146,17 @@ export function validateMutation({ currentGraph, plan, enforceSourceBacking = fa
   const failures = [
     ...duplicatePlanNodeIds.map((id) => `mutation plan has duplicate node id: ${id}`),
     ...duplicatePlanEdgeIds.map((id) => `mutation plan has duplicate edge id: ${id}`),
-    ...createNodeIds.map((id) => `node already exists in graph: ${id}`),
-    ...createEdgeIds.map((id) => `edge already exists in graph: ${id}`),
+    ...createNodeIds.map(
+      (id) =>
+        `node already exists in graph: ${id} (this plan's content DIFFERS from the existing node — ` +
+        `an identical re-send would have been absorbed as an idempotent replay; ` +
+        `to change the node, re-send as {"op":"update","id":"${id}","updates":{...}})`
+    ),
+    ...createEdgeIds.map(
+      (id) =>
+        `edge already exists in graph: ${id} (same id but different type/from/to — ` +
+        `identical re-sends are absorbed as idempotent replays)`
+    ),
     ...updateNodeIds.map((id) => `node does not exist in graph for update: ${id}`),
     ...updateEdgeIds.map((id) => `edge does not exist in graph for update: ${id}`),
     ...deleteNodeFailures,

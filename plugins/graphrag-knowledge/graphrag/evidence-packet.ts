@@ -16,13 +16,18 @@ export async function buildEvidencePacket(args) {
   // args 経由で渡してくる (同じ問いを 2 回 embedding せず、vault も 2 回読まない)。
   // 単体実行 (primitive の evidence verb) では従来どおりここで読み込む。
   const graph = args.graphData ?? await loadGraph(args.vault);
-  const vectorIndex = args.vectorIndex
-    ?? await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
+  // useVector === false (ask --lexical-only) は明示 degrade: 索引読込も embedding も
+  // 行わない (brief.buildQueryBrief と同じ契約 — 無言 fallback ではない)。
+  const vectorIndex = args.useVector === false
+    ? null
+    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
   const vectorDescription = describeVectorIndex(vectorIndex);
   // R6 multi-query: 呼び出し側が --gist 込みの queryVectors を渡していればそれを使う。
-  const vectorSearch = Array.isArray(args.queryVectors) && args.queryVectors.length > 0
-    ? { vectorIndex, queryVectors: args.queryVectors }
-    : await prepareVectorSearch(args.request, { vectorIndex });
+  const vectorSearch = args.useVector === false
+    ? { vectorIndex: null, useVector: false }
+    : Array.isArray(args.queryVectors) && args.queryVectors.length > 0
+      ? { vectorIndex, queryVectors: args.queryVectors }
+      : await prepareVectorSearch(args.request, { vectorIndex });
   const matches = searchGraph(graph, args.request, {
     types: args.types,
     limit: args.limit,

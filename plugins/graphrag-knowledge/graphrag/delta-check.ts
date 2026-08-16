@@ -51,6 +51,8 @@ import {
   type FrameFinding
 } from "./frame-check.ts";
 import { scanMarkersInContent, verifyMarkerRefs, type MarkerRefFinding } from "./markers.ts";
+import { cacheDirForVault } from "./cli-env.ts";
+import { recordEchoFirings, recordEvidenceChanges } from "./lane-log.ts";
 
 const CONNECTED_CAP = 20;
 const VIA_CAP = 3;
@@ -86,6 +88,8 @@ export interface DeltaCheckResult {
   status: "clean" | "info" | "warn";
   summary: string;
   connected_knowledge: ConnectedKnowledge[];
+  /** diff 内で ≥1 の知識ノードの evidence に配線されている path 群 (cap 前全量)。 */
+  evidence_paths: string[];
   authority_echoes: AuthorityEcho[];
   marker_findings: MarkerRefFinding[];
   placement_findings: FrameFinding[];
@@ -277,6 +281,14 @@ export function deltaCheck(
   const connected = options.full ? connectedAll : connectedAll.slice(0, CONNECTED_CAP);
   const connectedOverflow = connectedAll.length - connected.length;
 
+  // evidence_paths: この diff 内で「≥1 の知識ノードの evidence に配線されている」path 群
+  // (cap 前の全量)。issue #21 の鮮度台帳 (worktree lane で runDeltaCheck が記録) が使う —
+  // これらのファイルが変わった = それを evidence に持つノードは検証時点より新しい正本を
+  // 参照している可能性がある、という決定的事実の記録材料。
+  const evidencePaths = [...new Set(
+    [...connectedByNode.values()].flatMap(({ via }) => via.map((v) => v.path))
+  )].sort();
+
   // ── authority_echoes: 権威の語彙指紋が家の外の追加行に現れた ─────────────────
   // 権威 = KNOWLEDGE_TO_FILE_EDGES で File に配線され、識別子形式の alias を持つ知識
   // ノード。その alias が「家 (配線先 path 群) 以外」の追加行に現れたら、重複実装の
@@ -407,6 +419,7 @@ export function deltaCheck(
     status,
     summary,
     connected_knowledge: connected,
+    evidence_paths: evidencePaths,
     authority_echoes: authorityEchoes,
     marker_findings: markerFindings,
     placement_findings: placementFindings,
@@ -486,6 +499,16 @@ export function runDeltaCheck(
     },
     deps
   );
+  // 観測ログ (worktree lane のみ = commit hook / pre-commit / 既定 CLI 実行):
+  //   - echo 発火履歴 (issue #22 — 指紋棚卸しの材料。これが無いと偽陽性率を裁けない)
+  //   - evidence 鮮度台帳 (issue #21 — 「evidence ファイルがいま変わった」の決定的記録)
+  // --diff / --files (過去レンジ・任意集合のレビュー実行) は「いま変わった」ではないので
+  // 記録しない。書き込みは cache 配下・失敗は無音 (deltaCheck 本体は read-only のまま)。
+  if (inputSource === "worktree") {
+    const cacheDir = cacheDirForVault(args.vault);
+    if (result.authority_echoes.length > 0) recordEchoFirings(cacheDir, result.authority_echoes);
+    if (result.evidence_paths.length > 0) recordEvidenceChanges(cacheDir, result.evidence_paths);
+  }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   // 出力契約: findings (warn) のみ --strict で exit 1。info (読むべき見出しがある) は失敗ではない。
   process.exitCode = args.strict && result.status === "warn" ? 1 : 0;

@@ -71,6 +71,8 @@ export async function buildGraphBrief(options: any = {}) {
         // どちらも未指定なら従来挙動 (single vector / rerank on)。
         queryVectors: options.queryVectors,
         graphRerank: options.graphRerank,
+        // 明示 degrade (ask --lexical-only)。既定 undefined = 従来どおり semantic 必須。
+        useVector: options.useVector,
         limit: options.limit ?? DEFAULT_LIMIT,
         summaryChars,
         relationLimit: options.relationLimit ?? 8,
@@ -207,12 +209,18 @@ export function buildResumeBrief(graph, nodesById, options: any = {}) {
 export async function buildQueryBrief(graph, nodesById, options: any = {}) {
   // 呼び出し側 (ask の world ヒント等) が索引とクエリ embedding を済ませている時は
   // 共用する (同じ問いを 2 回 embedding しない)。無ければ従来どおりここで行う。
-  const vectorIndex = options.vectorIndex
-    ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath);
+  // useVector === false (ask --lexical-only) は明示 degrade: 索引読込も embedding も
+  // 一切行わず lexical (alias/ngram/coverage) のみで検索する。無言 fallback ではない —
+  // 呼び出し側が出力に degraded を焼き込む責務を持つ。
+  const vectorIndex = options.useVector === false
+    ? null
+    : options.vectorIndex ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath);
   // R6: queryVectors (複数) が来ていれば最優先 (gist + 質問の両埋め込み)。
   // 次に従来の単一 queryVector、無ければここで embed する。
   let vectorSearch: any;
-  if (Array.isArray(options.queryVectors) && options.queryVectors.length > 0) {
+  if (options.useVector === false) {
+    vectorSearch = { vectorIndex: null, useVector: false };
+  } else if (Array.isArray(options.queryVectors) && options.queryVectors.length > 0) {
     vectorSearch = { vectorIndex, queryVectors: options.queryVectors };
   } else if (options.queryVector !== undefined && options.queryVector !== null) {
     vectorSearch = { vectorIndex, queryVector: options.queryVector };

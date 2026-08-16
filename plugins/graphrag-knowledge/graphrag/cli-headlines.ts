@@ -42,6 +42,9 @@ import {
 } from "./cli-typed-add-project.ts";
 import { buildGraphBrief } from "./brief.ts";
 import { buildEvidencePacket } from "./evidence-packet.ts";
+import { formatAskMarkdown } from "./ask-format.ts";
+import { evidenceStaleNoteForNode, readEvidenceChangesByPath } from "./lane-log.ts";
+import { isEchoAlias } from "./delta-check.ts";
 import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
 import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
@@ -181,6 +184,92 @@ export function ensureEvidenceFileNodes(
   return created;
 }
 
+// ── alias 所有権プローブ (issue #22) ─────────────────────────────────────────
+//
+// authority echo の語彙指紋 (aliases) は「自リポジトリが所有する語彙」だけが機能する
+// (登記済み教訓: 例示語彙や汎用語を指紋にすると正当利用のたびに echo り、読み手が
+// 「echo は無視してよい」を学習して導線ごと死ぬ — 精度経済)。実運用 1 ヶ月の実測では
+// echo 9 発火中 8 が汎用シンボル (execFile / tar.gz / fileType 型) 由来の偽陽性だった。
+//
+// 「これはライブラリ名か」という意味判断はしない。代わりに決定的な所有権テスト:
+// 登録しようとした echo 対象 alias が、この plan の evidence 家の外の既存ファイルに
+// 既に広く出現している (= 語彙が既にリポジトリ中で共有されている) なら、それは登録した
+// 瞬間から鳴り続ける指紋なので警告する。非ブロッキング (警告のみ — issue #22 の裁定)。
+// git 不在・grep 失敗は無音 skip (プローブの失敗で書き込みを落とさない)。
+const ALIAS_PROBE_FILE_THRESHOLD = 3;
+
+// プローブの grep 対象はコードリポジトリ。external vault 構成では
+// dirname(stateDirForVault(vault)) は vault リポジトリを指してしまう (そこに code は無い)
+// ので、cwd の git toplevel を優先し、無ければ vault 由来の root に落とす。
+export function codeRepoRootForProbe(vaultDir: string): string {
+  try {
+    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    if (top.length > 0) return top;
+  } catch {
+    /* git 外 — vault 由来の root に落ちる */
+  }
+  return path.dirname(stateDirForVault(vaultDir));
+}
+
+export function probeAliasOwnership(
+  plan: any,
+  repoRoot: string,
+  deps: { grepFiles?: (root: string, token: string) => string[] } = {}
+): { alias: string; node_id: string; files: number; sample: string[]; message: string }[] {
+  const grepFiles =
+    deps.grepFiles ??
+    ((root: string, token: string): string[] => {
+      try {
+        const out = execFileSync(
+          "git",
+          ["-C", root, "grep", "-l", "--fixed-strings", "--word-regexp", token, "--", "."],
+          { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+        );
+        return out.split("\n").filter(Boolean);
+      } catch {
+        return []; // no match (exit 1) / git 不在 — どちらも「出現なし」扱い
+      }
+    });
+
+  const warnings: { alias: string; node_id: string; files: number; sample: string[]; message: string }[] = [];
+  for (const node of plan.nodes ?? []) {
+    if ((node.op ?? "create") !== "create") continue;
+    const aliases = Array.isArray(node.aliases) ? node.aliases : [];
+    if (aliases.length === 0) continue;
+    // この node の家 = plan 内で node → file:... へ張られたエッジの path 群。
+    const homes = new Set<string>(
+      (plan.edges ?? [])
+        .filter((e: any) => e.from === node.id && typeof e.to === "string" && e.to.startsWith("file:"))
+        .map((e: any) => e.to.split(":").slice(2).join(":"))
+        .filter((p: string) => p.length > 0)
+    );
+    for (const alias of aliases) {
+      if (typeof alias !== "string" || !isEchoAlias(alias)) continue;
+      // echo と同じ走査対象に合わせる (.md / .graphrag は echo が見ないので数えない)。
+      const files = grepFiles(repoRoot, alias).filter(
+        (p) => !homes.has(p) && !p.endsWith(".md") && !p.split("/").includes(".graphrag")
+      );
+      if (files.length < ALIAS_PROBE_FILE_THRESHOLD) continue;
+      warnings.push({
+        alias,
+        node_id: String(node.id),
+        files: files.length,
+        sample: files.slice(0, 5),
+        message:
+          `alias "${alias}" already appears in ${files.length} repo file(s) OUTSIDE this node's evidence home — ` +
+          `if this vocabulary is not OWNED by this authority (library/runtime/general API names are the usual ` +
+          `culprits), it will fire an authority echo on every future commit touching it and train readers to ` +
+          `ignore echoes (crying wolf). Keep aliases to vocabulary this node owns; if unintended, drop it via ` +
+          `{"op":"update","id":"${node.id}","updates":{"aliases":[...without it]}}.`
+      });
+    }
+  }
+  return warnings;
+}
+
 async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<void> {
   // v3: typed-add goes through vault writer (not FalkorDB). Vault is the single source of truth.
   const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
@@ -207,6 +296,20 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
   const result = await applyMutationToVault({ plan, vaultDir, schema, baseSha: baseShaFlag(f), reason: plan.reason });
 
   const output: any = { applied: true, plan_reason: plan.reason, ...vaultResolution, result };
+  // alias 所有権プローブ (issue #22, 非ブロッキング): echo 指紋になる alias が既に
+  // リポジトリ中に広く出現していれば警告を同梱する。stderr にも 1 行 (見落とし防止)。
+  try {
+    const probeWarnings = probeAliasOwnership(plan, codeRepoRootForProbe(vaultDir));
+    if (probeWarnings.length > 0) {
+      output.alias_probe = { warnings: probeWarnings };
+      process.stderr.write(
+        `[graphrag] WARN: ${probeWarnings.length} alias(es) look like shared/generic vocabulary — ` +
+        `they will echo on every legitimate use. See alias_probe in output.\n`
+      );
+    }
+  } catch {
+    // プローブ失敗は無音 (書き込みは確定済み)
+  }
   if (fileAutoCreated.length > 0) {
     output.file_auto_created = fileAutoCreated;
   }
@@ -414,6 +517,15 @@ export async function runAsk(argv: string[]) {
   const gist = typeof f.gist === "string" && f.gist.trim() !== "" ? f.gist : undefined;
   // R5 --graph-rerank on|off (default off — hub-heavy net-negative observed in real vault. See R5 comment in retrieval.ts).
   const graphRerank = parseOnOff(f["graph-rerank"]);
+  // --lexical-only (issue #24): embedding endpoint 障害時の明示 escape hatch。
+  // 「semantic 非交渉・無言 fallback 禁止」(retrieval.ts) は守る — これは fallback ではなく
+  // 呼び手が明示した degrade で、出力に DEGRADED を焼き込む。
+  const lexicalOnly = f["lexical-only"] === true;
+  // --format md|json (issue #24): LLM がそのまま読める markdown ダイジェスト。既定は JSON。
+  const outputFormat = typeof f.format === "string" ? f.format : "json";
+  if (outputFormat !== "json" && outputFormat !== "md") {
+    throw new Error(`ask --format accepts "json" (default) or "md", got: ${outputFormat}`);
+  }
 
   // v3: vault is the single source of truth. Resolve vault via --vault flag > GRAPHRAG_VAULT_DIR env,
   // and pass explicitly to read operations (brief/evidence) rather than relying on env.
@@ -449,6 +561,7 @@ export async function runAsk(argv: string[]) {
   let sharedQueryVector: number[] | null = null;
   let sharedQueryVectors: number[][] | null = null;
   try {
+    if (lexicalOnly) throw new Error("lexical-only: skip vector index");
     sharedVectorIndex = await loadRequiredVectorIndex(vaultDir);
     if (gist) {
       // 質問と gist を index の prefix_policy に従って query 接頭辞付きで埋め込む。
@@ -479,7 +592,8 @@ export async function runAsk(argv: string[]) {
     vectorIndex: sharedVectorIndex ?? undefined,
     queryVector: sharedQueryVector ?? undefined,
     queryVectors: sharedQueryVectors ?? undefined,
-    graphRerank
+    graphRerank,
+    ...(lexicalOnly ? { useVector: false } : {})
   });
   stages.push({ stage: "brief", output: briefOut });
 
@@ -522,7 +636,8 @@ export async function runAsk(argv: string[]) {
       // brief と同じ graph / 索引 / query embedding を共有する (再読込・再 embed しない)。
       graphData,
       vectorIndex: sharedVectorIndex ?? undefined,
-      queryVectors: sharedQueryVectors ?? (sharedQueryVector ? [sharedQueryVector] : undefined)
+      queryVectors: sharedQueryVectors ?? (sharedQueryVector ? [sharedQueryVector] : undefined),
+      ...(lexicalOnly ? { useVector: false } : {})
     });
     stages.push({ stage: "evidence", output: evidenceOut });
   }
@@ -607,10 +722,49 @@ export async function runAsk(argv: string[]) {
     }
   }
 
-  process.stdout.write(JSON.stringify({
+  // evidence 鮮度注記 (issue #21): 配達するノードの evidence ファイルが、そのノードの
+  // 最終検証時点 (generated_at) より後に commit lane で変更を観測されていれば ⚠ を添える。
+  // 検知は台帳 (lane-log) 参照のみでほぼ無料。再抽出はしない — 読み手に正本確認の
+  // 判断材料を渡すのが目的 (機械は提示のみ、意味判断はしない)。失敗しても ask は落とさない。
+  try {
+    const askCacheDir = cacheDirForVault(vaultDir);
+    const changesByPath = readEvidenceChangesByPath(askCacheDir);
+    if (changesByPath.size > 0) {
+      const nodesById = new Map((graphData.nodes ?? []).map((n: any) => [n.id, n]));
+      const attach = (m: any) => {
+        const id = m?.node?.id;
+        if (typeof id !== "string") return m;
+        const staleNote = evidenceStaleNoteForNode(id, graphData, changesByPath, nodesById);
+        return staleNote ? { ...m, evidence_stale: staleNote } : m;
+      };
+      if (briefOut?.query?.matches) briefOut.query.matches = briefOut.query.matches.map(attach);
+      for (const stage of stages) {
+        if (stage?.output?.direct_evidence) {
+          stage.output.direct_evidence = stage.output.direct_evidence.map(attach);
+        }
+      }
+    }
+  } catch {
+    // 鮮度注記は同乗情報 — 失敗で ask 本体を落とさない
+  }
+
+  const payload = {
     question,
     call_number: callNumber,
     final_stage: finalStage,
+    // 明示 degrade の焼き込み (issue #24): --lexical-only の結果は「semantic 検索を
+    // 通っていない」ことを読み手が見落とせない形で出力に刻む (無言 fallback の禁止と両立)。
+    ...(lexicalOnly
+      ? {
+          retrieval_mode: {
+            semantic: false,
+            reason: "--lexical-only",
+            warning:
+              "DEGRADED: keyword/alias/ngram matching only — semantic recall is OFF. Absence of hits is weak " +
+              "evidence in this mode; re-run without --lexical-only once the embedding endpoint is back."
+          }
+        }
+      : {}),
     area_map: areaMap,
     ...(enforcementDebtOut !== undefined ? { enforcement_debt: enforcementDebtOut } : {}),
     next_action_hint: shouldEscalate(lastOutcome)
@@ -619,7 +773,10 @@ export async function runAsk(argv: string[]) {
     ...(askSchema?.llmReference ? { schema_summary: { id: askSchema.id, reference: askSchema.llmReference } } : {}),
     ...(worldHints !== undefined ? { world_hints: worldHints } : {}),
     stages
-  }, null, 2) + "\n");
+  };
+  process.stdout.write(
+    outputFormat === "md" ? formatAskMarkdown(payload) : JSON.stringify(payload, null, 2) + "\n"
+  );
 }
 
 async function runCommitMutation(argv: string[]) {
@@ -650,12 +807,30 @@ async function runCommitMutation(argv: string[]) {
     );
   }
 
+  // alias 所有権プローブ (issue #22, 非ブロッキング) — typed-add と同じ扱い。
+  let aliasProbe: any = undefined;
+  try {
+    const probeWarnings = probeAliasOwnership(plan, codeRepoRootForProbe(vaultDir));
+    if (probeWarnings.length > 0) {
+      aliasProbe = { warnings: probeWarnings };
+      process.stderr.write(
+        `[graphrag] WARN: ${probeWarnings.length} alias(es) look like shared/generic vocabulary — ` +
+        `they will echo on every legitimate use. See alias_probe in output.\n`
+      );
+    }
+  } catch {
+    /* プローブ失敗は無音 */
+  }
+
   process.stdout.write(JSON.stringify({
     plan_path: planPath,
     plan_reason: plan.reason,
     ...vaultResolution,
+    ...(aliasProbe ? { alias_probe: aliasProbe } : {}),
     summary: {
       applied: result.applied,
+      ...(result.idempotent_replay ? { idempotent_replay: result.idempotent_replay } : {}),
+      ...(result.note ? { note: result.note } : {}),
       changed_nodes: result.changed_nodes,
       cascaded_edge_ids: result.cascaded_edge_ids,
       head: result.head,

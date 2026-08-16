@@ -104,3 +104,26 @@ test("buildGraphContext: cross-vault endpoints stay as edge refs without a nodes
   assert.ok(context.nodes["goal:s:a"]);
   assert.equal(Object.keys(context.nodes).length, 1);
 });
+
+// ── lexical-only (issue #24): 明示 degrade は索引もエンドポイントも触らない ──
+
+test("useVector:false は vector index を読まず lexical だけで返す (vault/index 不在でも動く)", async () => {
+  const graphData = {
+    nodes: [
+      { id: "decision:s:zebra", type: "Decision", title: "zebra policy", summary: "zebra を採用", aliases: ["zebraPolicy_v1"] },
+      { id: "decision:s:other", type: "Decision", title: "unrelated", summary: "nothing" }
+    ],
+    edges: []
+  };
+  // vault を渡さない: useVector:false が loadRequiredVectorIndex を呼んだら throw して落ちる。
+  const packet = await buildEvidencePacket({
+    request: "zebraPolicy_v1",
+    graphData,
+    useVector: false,
+    limit: 3,
+    neighbors: 0,
+    types: []
+  });
+  assert.equal(packet.retrieval_policy.vector.semantic, false, "vector は無効と明示される");
+  assert.ok(packet.direct_evidence.some((m: any) => m.node.id === "decision:s:zebra"), "alias exact で当たる");
+});

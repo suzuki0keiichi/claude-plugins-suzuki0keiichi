@@ -1126,3 +1126,49 @@ test("collectAskScopeIds: 欠損/異形入力に耐える (undefined / relations
     ["ok:s:x"]
   );
 });
+
+// ── probeAliasOwnership (issue #22): 指紋の所有権プローブ ────────────────────
+import { probeAliasOwnership } from "./cli-headlines.ts";
+
+test("probeAliasOwnership: 家の外に広く出現する echo 指紋 alias に警告、家と .md は数えない", () => {
+  const plan = {
+    nodes: [
+      {
+        op: "create",
+        id: "decision:s:auth",
+        type: "Decision",
+        title: "authority",
+        aliases: ["execFile", "OWNED_STATUS_SET", "migration", "日本語の別名"]
+      },
+      { op: "create", id: "file:s:src/home.ts", type: "File", path: "src/home.ts" }
+    ],
+    edges: [
+      { op: "create", id: "e", type: "documented_by", from: "decision:s:auth", to: "file:s:src/home.ts" }
+    ]
+  };
+  const grepFiles = (_root: string, token: string): string[] => {
+    if (token === "execFile") return ["src/home.ts", "src/a.ts", "src/b.ts", "src/c.ts", "docs/x.md"];
+    if (token === "OWNED_STATUS_SET") return ["src/home.ts"];
+    return [];
+  };
+  const warnings = probeAliasOwnership(plan, "/repo", { grepFiles });
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].alias, "execFile");
+  assert.equal(warnings[0].files, 3, "家 (src/home.ts) と .md は数えない");
+  assert.match(warnings[0].message, /crying wolf/);
+  // migration (全小文字英単語) と日本語 alias は echo 指紋にならないのでプローブ対象外
+});
+
+test("probeAliasOwnership: 閾値未満・update op・grep 失敗は警告なし", () => {
+  const plan = {
+    nodes: [
+      { op: "update", id: "decision:s:u", updates: { aliases: ["execFile"] } },
+      { op: "create", id: "decision:s:few", type: "Decision", title: "few", aliases: ["rareToken_x"] }
+    ],
+    edges: []
+  };
+  const warnings = probeAliasOwnership(plan, "/repo", {
+    grepFiles: (_root, token) => (token === "rareToken_x" ? ["src/a.ts", "src/b.ts"] : [])
+  });
+  assert.deepEqual(warnings, []);
+});

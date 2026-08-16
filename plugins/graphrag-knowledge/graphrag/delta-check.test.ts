@@ -365,3 +365,19 @@ test("scanMarkersInContent: 縮約 (don't/it's) がマーカーを飲み込ま�
   assert.deepEqual(hits.map((h) => h.targetId), ["decision:s:kept"],
     "縮約アポストロフィは文字列開始と誤認しない / f-string・bytes リテラル内は無視");
 });
+
+// ── evidence_paths (issue #21): 鮮度台帳の記録材料 ──────────────────────────
+
+test("evidence_paths: diff 内で知識に配線された path 群を cap 前全量で返す", () => {
+  const { result } = run(["src/upload/pack.ts", "src/upload/send.ts", "src/ui/table.tsx"]);
+  assert.deepEqual(result.evidence_paths, [
+    "src/ui/table.tsx",
+    "src/upload/pack.ts",
+    "src/upload/send.ts"
+  ]);
+});
+
+test("evidence_paths: 知識に配線されていない変更ファイルは含まない", () => {
+  const { result } = run(["src/ui/table.tsx", "src/unwired/other.ts"]);
+  assert.deepEqual(result.evidence_paths, ["src/ui/table.tsx"]);
+});

@@ -327,3 +327,59 @@ test("delete op は属性警告の対象外", () => {
   const v = validateMutation({ currentGraph: baseGraph(), plan });
   assert.deepEqual(v.attributeWarnings, []);
 });
+
+// ── partitionIdempotentReplays (issue #24) ──────────────────────────────────
+import { partitionIdempotentReplays } from "./mutation-core.ts";
+
+test("idempotent replay: 同一内容の op:create 再送は plan から落ち replayed に載る", () => {
+  const plan = {
+    reason: "retry",
+    nodes: [{ op: "create", id: "decision:s:a", type: "Decision", title: "A", summary: "a" }],
+    edges: [{ op: "create", id: "e1", type: "refines", from: "decision:s:a", to: "decision:s:b" }],
+  };
+  const p = partitionIdempotentReplays(plan, baseGraph());
+  assert.deepEqual(p.replayedNodeIds, ["decision:s:a"]);
+  assert.deepEqual(p.replayedEdgeIds, ["e1"]);
+  assert.equal(p.plan.nodes.length, 0);
+  assert.equal(p.plan.edges.length, 0);
+});
+
+test("idempotent replay: 内容が違う create は落とさない (validate が fail-loud する)", () => {
+  const plan = {
+    reason: "conflict",
+    nodes: [{ op: "create", id: "decision:s:a", type: "Decision", title: "CHANGED", summary: "a" }],
+    edges: [],
+  };
+  const p = partitionIdempotentReplays(plan, baseGraph());
+  assert.deepEqual(p.replayedNodeIds, []);
+  assert.equal(p.plan.nodes.length, 1);
+  const v = validateMutation({ currentGraph: baseGraph(), plan: p.plan });
+  assert.equal(v.valid, false);
+  assert.ok(v.failures.some((f) => f.includes("content DIFFERS")), v.failures.join("; "));
+});
+
+test("idempotent replay: generated_at の差だけなら再送とみなす / update・delete は対象外", () => {
+  const plan = {
+    reason: "retry",
+    nodes: [
+      { op: "create", id: "decision:s:a", type: "Decision", title: "A", summary: "a", generated_at: "2099-01-01T00:00:00Z" },
+      { op: "update", id: "decision:s:b", updates: { summary: "b" } },
+    ],
+    edges: [],
+  };
+  const p = partitionIdempotentReplays(plan, baseGraph());
+  assert.deepEqual(p.replayedNodeIds, ["decision:s:a"]);
+  assert.equal(p.plan.nodes.length, 1, "update は残る");
+  assert.equal(p.plan.nodes[0].op, "update");
+});
+
+test("idempotent replay: 同一 id で from/to が違う edge create は再送ではない", () => {
+  const plan = {
+    reason: "conflict",
+    nodes: [],
+    edges: [{ op: "create", id: "e1", type: "refines", from: "decision:s:b", to: "decision:s:a" }],
+  };
+  const p = partitionIdempotentReplays(plan, baseGraph());
+  assert.deepEqual(p.replayedEdgeIds, []);
+  assert.equal(p.plan.edges.length, 1);
+});

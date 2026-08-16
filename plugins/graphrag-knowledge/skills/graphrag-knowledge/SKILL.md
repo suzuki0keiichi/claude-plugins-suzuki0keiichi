@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.13.0
+version: 4.14.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -37,7 +37,7 @@ This skill is the read/write foundation. Three derived skills review changes and
    - Read: ranked JSON (`ask` / `brief` / `search` / `evidence` output).
    - Write: typed-add CLI args, or mutation plan JSON (`reason` / `nodes` / `edges`) validated and applied to the **vault** by `commit-mutation`.
    Any change that thins this layer or exposes a raw query path to the LLM is a design violation.
-3. **Semantic is non-negotiable.** Search ranking combines lexical (exact/partial/word-coverage, normalized to [0,1]) and semantic (cosine, clamped to [0,1]) with equal weight (max 100 each). Lexical-only fallback is not designed for (no vector index → `ask` hard-errors).
+3. **Semantic is non-negotiable.** Search ranking combines lexical (exact/partial/word-coverage, normalized to [0,1]) and semantic (cosine, clamped to [0,1]) with equal weight (max 100 each). There is no SILENT lexical fallback (no vector index → `ask` hard-errors). The only exception is the explicit `ask --lexical-only` escape hatch for embedding-endpoint outages — caller-invoked, and the output is loudly marked DEGRADED (`retrieval_mode.semantic:false`); it never engages on its own.
 4. **Vault round-trips.** Frontmatter (YAML) is canonical, body is human projection. The vault import→build round-trip equivalence test is the sole gate for serialization changes.
 
 ## Anti-patterns (DO NOT)
@@ -94,6 +94,8 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 
 **Authority nodes MUST carry their code vocabulary as aliases.** When a Decision/OK/Constraint declares an authority ("the authority for X is function/constant Y"), put the authority symbol AND the literals it owns into `aliases` (e.g. `ERROR_STATUSES`, `zero_bytes`). This is not just for retrieval: `delta-check` uses identifier-shaped aliases as the authority's **vocabulary fingerprint** — when a commit adds those tokens outside the authority's home files, it flags the second implementation in the act (`authority_echoes`). Plain lowercase English words (`migration`) don't work as fingerprints; distinctive identifiers (`zero_bytes`, `decideAutoUnmount`, `constraint-check`) do.
 
+**Only OWNED vocabulary belongs in fingerprints.** Library / runtime / general API names (`execFile`, `tar.gz`, `fileType`) fire on every legitimate use — field measurement: 8 of 9 echo firings in one month were such false positives, and readers learn to ignore echoes (crying wolf kills the lane). The write path runs a deterministic **alias ownership probe** at registration (alias already widespread outside the evidence home → `alias_probe` warning, non-blocking), and `stocktake` aggregates actual firings as `echo_stats` for periodic fingerprint stocktake — retire a hot alias via op:update on the owning node's `aliases`.
+
 ### Cutoff judgment (reading `ask` output)
 
 - If auto-escalation reaches `evidence` and returns empty, the knowledge truly does not exist. **Try one different keyword only.** Do not repeat.
@@ -126,10 +128,12 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 
 ## Headline verbs (chained, multi-stage in one command)
 
-- `ask "<q>"` — auto-escalation brief→search→evidence + auto-incrementing `--call-number` (reads vault). Every ask carries `area_map` (the touched area's registered Component/Layer/Concern) — **consult it before deciding where new code lives** — and, when the vault holds unguarded Constraints, `enforcement_debt` (migration rail: relay to the user once per session). Details: $REF/ask-output-guide.md
+- `ask "<q>"` — auto-escalation brief→search→evidence + auto-incrementing `--call-number` (reads vault). Every ask carries `area_map` (the touched area's registered Component/Layer/Concern) — **consult it before deciding where new code lives** — and, when the vault holds unguarded Constraints, `enforcement_debt` (migration rail: relay to the user once per session). `--format md` returns the same payload as a readable markdown digest (use it instead of piping JSON through jq/python). `--lexical-only` is the explicit escape hatch for embedding-endpoint outages (keyword-only, output loudly marked DEGRADED — absence of hits is weak evidence there). Delivered nodes may carry `evidence_stale` (⚠ the evidence file changed after the node was last verified — verify against the file; op:update clears it). Details: $REF/ask-output-guide.md
 - `carve --root <repo> --system <name>` — index → concern-hint → policy-suggest → carving-check chain. **Post-index, File and Component/Layer candidate summaries are machine templates (`summary_provisional`). You must read them and rewrite to meaningful summaries, then remove `summary_provisional`** (leaving it causes concern-hint rejection / carving-check ERROR). **Concern (crosscut) discovery is driven by LLM conceptual modeling** — concern-hint machine candidates (for Concern discovery) are for blind-spot checking only (`$REF/conceptual-pass.md` §2).
 - `commit-mutation <plan.json>` — **via vault writer** (lock → OCC → vault import → normalize/validate → atomic delta write → vector-index update (non-fatal) → git commit). Failure is all-or-nothing rollback.
 - `add-decision` / `add-ok` / `add-risk` / `add-investigation` / `add-rejected-option` / `add-constraint` / `add-goal` — builds plan from args + applies to **vault**. Use `--dup-ack <id[,id...]>` to pass duplicate gate suspects.
+- **Retries are safe (idempotent replay).** Re-sending an op:create with identical content (e.g. after a timeout) is absorbed as a successful no-op (`idempotent_replay` in the output) — do NOT diagnose "node already exists" after a timeout; that error now only fires when the content actually differs (then use op:update). `index_status.ok:false` also does NOT mean the write failed — the mutation is committed; the index self-heals on the next ask/mutation. **Never retry an add because of index_status.**
+- Registering aliases on an authority node triggers the **alias ownership probe**: if an identifier-shaped alias already appears widely in the repo outside the node's evidence home, the output carries `alias_probe` warnings — that fingerprint would echo on every legitimate use (crying wolf). Keep aliases to vocabulary the node OWNS.
 - project/principal-preset typed-adds: `add-stakeholder` / `add-resource` / `add-milestone` / `add-assumption` / `add-agreement` / `add-task` / `add-source` / `add-theme` — same shape, project-vault node types ($REF/schema-quickref-project.md). On a principal vault, `add-task` / `add-milestone` refuse with a routing hint (time-bounded types are subtracted there).
 - `inspect` — status of env + artifacts as single JSON (vault / graph.json / vector-index / world, plus `vault_dir_source`, `state_dir`, `ask_state`, `indexed_graph`)
 - `checkpoint-mark --investigation <id>` — one-shot "restore me after /clear" intent for the SessionStart restore hook, written into the reserved `__checkpoint__` key of `ask-state.json` (no new file; consumed once, 60-min expiry). Fired as the final step of the `graphrag-checkpoint` skill — not needed in ordinary write flows.

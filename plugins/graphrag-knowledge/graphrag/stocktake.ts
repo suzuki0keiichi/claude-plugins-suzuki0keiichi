@@ -16,6 +16,8 @@
 // 読み取り専用: loadGraph だけで動く。embedding / vector index 不要。vault への書き込み一切なし。
 import { pathToFileURL } from "node:url";
 import { loadGraph } from "./retrieval.ts";
+import { cacheDirForVault } from "./cli-env.ts";
+import { summarizeEchoLog, type EchoStat } from "./lane-log.ts";
 
 // 進行中を自己申告するマーカー。title + summary のみに当てる —
 // raw_content は作業メモで「途中」「未実装」等が正当に頻出し誤検知するので見ない。
@@ -45,6 +47,8 @@ export interface StocktakeResult {
     suspects: number;
   };
   suspects: StocktakeSuspect[];
+  /** 指紋棚卸し (issue #22): commit lane の echo 発火集計。CLI 層 (runStocktake) が同乗させる。 */
+  echo_stats?: { note: string; aliases: EchoStat[] };
   next_action_hint: string;
 }
 
@@ -253,6 +257,25 @@ export async function runStocktake(
   }
   const graph = await loadGraph(args.vault);
   const result = stocktake(graph, { vaultDir: args.vault, staleDays: args.staleDays, activeGoalStaleDays: args.activeGoalStaleDays });
+  // 指紋棚卸し (issue #22): commit lane の echo 発火履歴 (lane-log) の集計を同乗させる。
+  // 発火の多い alias は「正当利用のたびに鳴っている」疑い。残す/削るの裁定はスキル側 —
+  // ここは決定的集計のみ。ログ不在・失敗は節ごと省略 (stocktake() 本体は読み取り専用のまま)。
+  try {
+    const stats = summarizeEchoLog(cacheDirForVault(args.vault));
+    if (stats.length > 0) {
+      result.echo_stats = {
+        note:
+          "authority echo firing history (commit lane, from cache/echo-log.jsonl). High-firing aliases are " +
+          "crying-wolf suspects — a fingerprint that fires on every legitimate use trains readers to ignore " +
+          "echoes and kills the lane. Firing count alone is NOT proof of false positives (one hot alias can be " +
+          "a real serial re-implementation): check the logged paths before dropping. To retire a fingerprint: " +
+          'op:update the owning node with {"updates":{"aliases":[...without it]}}.',
+        aliases: stats
+      };
+    }
+  } catch {
+    /* 集計失敗は無音 — stocktake 本体を落とさない */
+  }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return result;
 }

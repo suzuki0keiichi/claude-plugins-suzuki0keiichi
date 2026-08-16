@@ -201,7 +201,10 @@ function embeddingUnavailableError(reason) {
       `  - Easiest: run "embedder-setup" once per machine — installs the bundled in-process embedding (${LOCAL_EMBEDDING_MODEL}; pnpm required, ~500MB, no server to run afterwards)`,
       `  - Ollama: run "ollama serve" then "ollama pull ${PINNED_EMBEDDING_MODEL}" (OpenAI-compatible at http://localhost:11434/v1)`,
       `  - LM Studio: load "${PINNED_EMBEDDING_MODEL}" and start the local server (http://localhost:1234/v1)`,
-      `  - or set GRAPHRAG_EMBEDDING_ENDPOINT to an OpenAI-compatible /v1/embeddings endpoint serving ${PINNED_EMBEDDING_MODEL}.`
+      `  - or set GRAPHRAG_EMBEDDING_ENDPOINT to an OpenAI-compatible /v1/embeddings endpoint serving ${PINNED_EMBEDDING_MODEL}.`,
+      `To proceed RIGHT NOW without fixing the endpoint: re-run ask with --lexical-only ` +
+      `(explicit degraded mode — keyword/alias matching only, loudly marked in the output; ` +
+      `absence of hits is weak evidence in that mode).`
     ].join("\n")
   );
 }
@@ -448,7 +451,27 @@ function visitDisplayValue(value, fields) {
   }
 }
 
+// ── embedding circuit breaker (issue #24) ────────────────────────────────────
+// 1プロセス内で endpoint が一度「到達不能 (接続失敗/タイムアウト/5xx)」と分かったら、
+// 以後の同一 endpoint への embedding 呼び出しは待たずに即失敗させる。書き込み経路は
+// 重複ゲート事前埋め込み → 索引再構築 → suggestions と embedding を直列に複数回呼ぶため、
+// 各所が最大 60s ずつハングすると呼び出し側 (LLM の Bash) のタイムアウトを踏み、
+// 「commit 済みなのに失敗に見える → add リトライ連打」を誘発する。fail-fast で
+// プロセス全体の待ち時間を最初の 1 回分に畳む。HTTP 4xx (リクエスト側の問題で
+// endpoint は生きている) では開かない。プロセス毎にリセットされる (CLI は one-shot)。
+const embeddingCircuitOpenByEndpoint = new Map<string, string>();
+export function resetEmbeddingCircuit(): void {
+  embeddingCircuitOpenByEndpoint.clear();
+}
+
 async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
+  const circuitReason = embeddingCircuitOpenByEndpoint.get(String(endpoint));
+  if (circuitReason) {
+    throw new Error(
+      `Embedding endpoint unavailable (circuit open — an earlier request in this process already failed): ` +
+      `${endpoint} (${circuitReason}). Failing fast instead of waiting for another timeout.`
+    );
+  }
   let response;
   try {
     response = await fetchWithTimeout(endpoint, {
@@ -464,12 +487,16 @@ async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
     }, EMBEDDING_FETCH_TIMEOUT_MS);
   } catch (error) {
     const cause = error?.cause?.code ?? error?.message ?? "unknown error";
+    embeddingCircuitOpenByEndpoint.set(String(endpoint), String(cause));
     throw new Error(
       `Embedding endpoint unavailable: ${endpoint} (${cause}). Start the configured semantic embedding server or update GRAPHRAG_EMBEDDING_ENDPOINT; lexical ngram vector fallback is disabled.`
     );
   }
   if (!response.ok) {
     const body = await response.text();
+    if (response.status >= 500) {
+      embeddingCircuitOpenByEndpoint.set(String(endpoint), `HTTP ${response.status}`);
+    }
     throw new Error(`Embedding request failed: ${response.status} ${response.statusText} ${body.slice(0, 500)}`);
   }
   const payload = await response.json();

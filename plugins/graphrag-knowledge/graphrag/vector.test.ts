@@ -134,3 +134,57 @@ test("fetchWithTimeout forwards options + an AbortSignal and passes through a fa
   assert.equal(sawSignal, true, "AbortSignal が付与される");
   assert.equal(sawMethod, "POST", "呼び出し側の options が透過される");
 });
+
+// ── embedding circuit breaker (issue #24) ────────────────────────────────────
+import { createServer } from "node:http";
+import { createVectorProvider, resetEmbeddingCircuit } from "./vector.ts";
+
+test("circuit breaker: 5xx を一度踏んだ endpoint への embedding は以後即失敗 (circuit open)", async () => {
+  resetEmbeddingCircuit();
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits += 1;
+    res.statusCode = 503;
+    res.end("boom");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as any).port;
+  const provider = createVectorProvider({
+    provider: "openai-compatible-embedding",
+    endpoint: `http://127.0.0.1:${port}/v1/embeddings`,
+    model: "m"
+  });
+  try {
+    await assert.rejects(() => provider.embed("a"), /Embedding request failed: 503/);
+    await assert.rejects(() => provider.embed("b"), /circuit open/);
+    assert.equal(hits, 1, "2回目は endpoint に到達しない (fail-fast)");
+  } finally {
+    server.close();
+    resetEmbeddingCircuit();
+  }
+});
+
+test("circuit breaker: 4xx では開かない (endpoint は生きている)", async () => {
+  resetEmbeddingCircuit();
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits += 1;
+    res.statusCode = 400;
+    res.end("bad request");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as any).port;
+  const provider = createVectorProvider({
+    provider: "openai-compatible-embedding",
+    endpoint: `http://127.0.0.1:${port}/v1/embeddings`,
+    model: "m"
+  });
+  try {
+    await assert.rejects(() => provider.embed("a"), /Embedding request failed: 400/);
+    await assert.rejects(() => provider.embed("b"), /Embedding request failed: 400/);
+    assert.equal(hits, 2, "4xx では circuit は開かず毎回到達する");
+  } finally {
+    server.close();
+    resetEmbeddingCircuit();
+  }
+});

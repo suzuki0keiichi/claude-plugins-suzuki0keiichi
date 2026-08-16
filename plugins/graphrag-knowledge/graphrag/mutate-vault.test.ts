@@ -1051,3 +1051,49 @@ test("applyMutationToVault: successors の typo (plan で消さない old) は r
   assert.equal(latestTombstones(vault).size, 0, "台帳にも何も書かれない");
 });
 import { latestTombstones } from "./tombstones.ts";
+
+// ── idempotent replay (issue #24): リトライ連打を毒にしない ──────────────────
+
+test("applyMutationToVault: 同一 plan の再実行は成功 no-op (HEAD 不変・idempotent_replay 報告)", async () => {
+  const { vault, stateDir } = gitInitVault();
+  const plan = decisionPlan("r", "add decision r");
+  const first = await applyMutationToVault({ plan, vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  assert.equal(first.applied, true);
+  const headAfterFirst = vaultHead(vault);
+
+  const retry = await applyMutationToVault({ plan: decisionPlan("r", "add decision r"), vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  assert.equal(retry.applied, true, "リトライは成功として返る");
+  assert.deepEqual(retry.idempotent_replay.nodes.sort(), ["decision:s:r", "file:s:src/r.ts"]);
+  assert.equal(retry.idempotent_replay.edges.length, 1);
+  assert.match(retry.note, /idempotent replay/);
+  assert.equal(vaultHead(vault), headAfterFirst, "no-op なので HEAD は進まない");
+  assert.deepEqual(retry.changed_nodes, { created: [], updated: [], deleted: [] });
+});
+
+test("applyMutationToVault: 一部だけ再送の plan は残り半分だけ適用し replay を同梱", async () => {
+  const { vault, stateDir } = gitInitVault();
+  await applyMutationToVault({ plan: decisionPlan("p", "add p"), vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+
+  const mixed = decisionPlan("q", "add q + replay p");
+  const replayed = decisionPlan("p", "ignored");
+  mixed.nodes.push(...replayed.nodes);
+  mixed.edges.push(...replayed.edges);
+  const res = await applyMutationToVault({ plan: mixed, vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  assert.equal(res.applied, true);
+  assert.deepEqual(res.changed_nodes.created.sort(), ["decision:s:q", "file:s:src/q.ts"]);
+  assert.deepEqual(res.idempotent_replay.nodes.sort(), ["decision:s:p", "file:s:src/p.ts"]);
+});
+
+test("applyMutationToVault: 同一 id で内容が違う create は従来どおり拒否 (message が update を案内)", async () => {
+  const { vault, stateDir } = gitInitVault();
+  await applyMutationToVault({ plan: decisionPlan("s", "add s"), vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  const conflicting = decisionPlan("s", "conflict");
+  conflicting.nodes[0].summary = "DIFFERENT CONTENT";
+  await assert.rejects(
+    () => applyMutationToVault({ plan: conflicting, vaultDir: vault, stateDir, git: true, buildIndex: noopIndex }),
+    (err: any) => {
+      assert.ok(err.failures?.some((f: string) => f.includes("content DIFFERS")), err.failures?.join("; "));
+      return true;
+    }
+  );
+});
