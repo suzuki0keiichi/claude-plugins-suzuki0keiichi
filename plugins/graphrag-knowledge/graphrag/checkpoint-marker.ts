@@ -59,7 +59,7 @@ export function findProjectRoot(startDir: string): string | null {
 
 /**
  * `checkpoint-mark` verb 本体 (cli-headlines.ts の dispatchHeadline から呼ばれる)。
- * 引数: --investigation <id> (必須) [--vault <dir>]
+ * 引数: --investigation <id> (必須) [--vault <dir>] [--session-dir <dir>]
  * 出力: { investigation_id, first_action, marked_at, ttl_minutes, state_path, note } の JSON。
  */
 export async function runCheckpointMark(argv: string[]): Promise<void> {
@@ -148,14 +148,19 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
 
   const now = Date.now();
-  // cwd はそのまま記録しつつ (旧フォーマット互換 / 診断表示用)、判定の主役は root。
-  // cwd は「AI が cd したサブディレクトリ」になり得るので、これ単体では同一性判定に使えない。
+  // 同一性判定の材料を精度順に三段そろえる (優先順位はフック側 hooks/clear-restore.mjs と
+  // CheckpointStateEntry のコメントを参照)。
+  //   session_dir: skill がモデルのシステムプロンプトの Primary working directory を渡した時だけ。最精密。
+  //   root: 最寄りの .git を持つ祖先。git 外なら省略 → フックは cwd 一致へフォールバック。
+  //   cwd: 「AI が cd したサブディレクトリ」になり得るので単体では粗い (旧フォーマット互換 / 診断表示用)。
   const projectRoot = findProjectRoot(process.cwd());
+  const sessionDir = flags.sessionDir ? resolveRealPath(flags.sessionDir) : null;
   const entry: CheckpointStateEntry = {
     count: 0,                              // ask 連打カウントとは無縁。0 固定 (型互換のため持たせる)。
     last_at: now,                          // ms epoch。既存 24h GC に自然に乗る (無いと不死化)。
     marked_at: new Date(now).toISOString(),
     cwd: process.cwd(),
+    ...(sessionDir ? { session_dir: sessionDir } : {}), // 未指定なら省略 (旧動作 = root/cwd 判定)
     ...(projectRoot ? { root: projectRoot } : {}), // git 外なら省略 → フックは cwd 一致へフォールバック
     investigation_id: flags.investigation,
     first_action: firstAction,
@@ -174,6 +179,8 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
     investigation_id: flags.investigation,
     first_action: firstAction,
     marked_at: entry.marked_at,
+    // 渡された時だけ出す。誤ったディレクトリを渡した事故をレポート時点で目視できるようにする。
+    ...(sessionDir ? { session_dir: sessionDir } : {}),
     ttl_minutes: CHECKPOINT_TTL_MS / 60_000,
     state_path: statePath,
     note: "one-shot: the /clear restore hook consumes it exactly once. compact does not restore"
@@ -209,12 +216,25 @@ function stripBullet(s: string): string {
   return s.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim();
 }
 
-function parseMarkFlags(argv: string[]): { vault?: string; investigation?: string } {
-  const out: { vault?: string; investigation?: string } = {};
+/**
+ * `--session-dir` の値を実体パスへ正規化する。realpath 不能 (存在しない等) なら path.resolve で
+ * 絶対化だけして返す — フック側も同じ「realpath 不能ならそのまま比較」規約なので破綻しない。
+ */
+function resolveRealPath(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
+  }
+}
+
+function parseMarkFlags(argv: string[]): { vault?: string; investigation?: string; sessionDir?: string } {
+  const out: { vault?: string; investigation?: string; sessionDir?: string } = {};
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
     if (tok === "--vault" && typeof argv[i + 1] === "string") { out.vault = argv[++i]; continue; }
     if (tok === "--investigation" && typeof argv[i + 1] === "string") { out.investigation = argv[++i]; continue; }
+    if (tok === "--session-dir" && typeof argv[i + 1] === "string") { out.sessionDir = argv[++i]; continue; }
   }
   return out;
 }

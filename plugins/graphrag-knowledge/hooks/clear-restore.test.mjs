@@ -297,7 +297,7 @@ test("clear + root 無し (旧フォーマット) で cwd 不一致: 理由一�
     const out = runHook({ source: "clear", cwd: root });
     const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
     assert.match(ctx, /NOT restored/);
-    assert.match(ctx, /different project root/);
+    assert.match(ctx, /different project/);
     assert.match(ctx, /\/somewhere\/else/);
     const onDisk = JSON.parse(readFileSync(fp, "utf8"));
     assert.ok(!(CHECKPOINT_KEY in onDisk), "不一致でも one-shot 消費される");
@@ -345,7 +345,7 @@ test("clear + 別 git リポジトリの checkpoint は復元されない", () =
     const out = runHook({ source: "clear", cwd: root });
     const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
     assert.match(ctx, /NOT restored/);
-    assert.match(ctx, /different project root/);
+    assert.match(ctx, /different project/);
     assert.ok(ctx.includes(realpathSync(other)) || ctx.includes(other), "不一致の root が理由に出る");
     const onDisk = JSON.parse(readFileSync(fp, "utf8"));
     assert.ok(!(CHECKPOINT_KEY in onDisk), "不一致でも one-shot 消費される");
@@ -375,7 +375,7 @@ test("clear + worktree (.git がファイル) は自分自身を root として�
     fp = writeState(wt, { [CHECKPOINT_KEY]: checkpointEntry({ cwd: parent, root: parent }) });
     ctx = JSON.parse(runHook({ source: "clear", cwd: wt })).hookSpecificOutput.additionalContext;
     assert.match(ctx, /NOT restored/);
-    assert.match(ctx, /different project root/, "worktree は親リポジトリの root へ登らない");
+    assert.match(ctx, /different project/, "worktree は親リポジトリの root へ登らない");
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }
@@ -396,7 +396,62 @@ test("clear + 旧フォーマット entry (root 無し) は従来どおり cwd �
     fp = writeState(root, { [CHECKPOINT_KEY]: checkpointEntry({ cwd: sub }) });
     ctx = JSON.parse(runHook({ source: "clear", cwd: root })).hookSpecificOutput.additionalContext;
     assert.match(ctx, /NOT restored/);
-    assert.match(ctx, /different project root/);
+    assert.match(ctx, /different project/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- session_dir 判定 (三段フォールバックの最上位) ---
+
+test("clear + session_dir 一致: git ルートが違っても (git 外でも) 復元される", () => {
+  // session_dir は skill がモデルのシステムプロンプトの Primary working directory を渡したもので、
+  // フックの input.cwd と同じ土俵にある。git を一切持たない anchor でも単独で判定できる。
+  const root = makeAnchor(); // .git は作らない
+  try {
+    const fp = writeState(root, {
+      // cwd は cd 先のサブディレクトリ、root は無し (git 外) という最悪条件でも session_dir で通る。
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: path.join(root, "sub"), session_dir: realpathSync(root) })
+    });
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "session_dir 一致だけで復元される");
+    assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("clear + session_dir 不一致: git ルートが同じでも拒否される (モノレポのサブディレクトリを開いた別セッション)", () => {
+  const root = makeGitAnchor();
+  try {
+    // リポジトリのサブディレクトリをプロジェクトとして開いた別セッションの checkpoint。
+    // root は同一なので root 判定なら通ってしまうが、session_dir が最精密なので降りない。
+    const sub = path.join(root, "packages", "api");
+    mkdirSync(path.join(sub, ".graphrag", "vault"), { recursive: true });
+    const fp = writeState(root, {
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: sub, root, session_dir: sub })
+    });
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /different project/);
+    assert.ok(ctx.includes(sub), "理由には最精密の値 (session_dir) が出る");
+    assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "不一致でも one-shot 消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("clear + session_dir が symlink 経由の表記違い: 実体パス一致なら復元する", () => {
+  const root = makeAnchor();
+  try {
+    const fp = writeState(root, {
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: root, session_dir: realpathSync(root) })
+    });
+    const ctx = JSON.parse(runHook({ source: "clear", cwd: root })).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "未解決表記の input.cwd でも実体が同じなら復元される");
+    assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "消費される");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

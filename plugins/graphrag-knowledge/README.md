@@ -68,8 +68,8 @@
 
 長時間セッションで避けられない情報ロストを、盲目的要約に任せず**狙って残す**。
 
-- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態と未書き戻しの恒久知識をグラフへフラッシュし、最後に `checkpoint-mark --investigation <id>` で「/clear されたら復元せよ」の one-shot 意図を刻む。ファイルは作らず `.graphrag/cache/ask-state.json` の予約キーに書く。
-- **復元**（自動、`/clear` 直後のみ）: `SessionStart` フックが直前の意図を**読んだ時点で消費(一度きり)**して作業状態を再水和する。失効 60 分・同一プロジェクトルート（最寄りの `.git` を持つ祖先）が条件なので、サブディレクトリで撃った checkpoint もセッションルートで復元される。**compact では何も注入しない**（旧来どおり compact 自身の要約に任せる）。auto-compact に飲まれた場合は、次セッションで `$CLI brief --mode resume` を手動で撃てば同じ Investigation から辿れる。
+- **退避**（手動）: 余力のある頃合いで `/graphrag-knowledge:graphrag-checkpoint` を撃つと、いまの作業状態と未書き戻しの恒久知識をグラフへフラッシュし、最後に `checkpoint-mark --investigation <id> --session-dir <dir>` で「/clear されたら復元せよ」の one-shot 意図を刻む。ファイルは作らず `.graphrag/cache/ask-state.json` の予約キーに書く。
+- **復元**（自動、`/clear` 直後のみ）: `SessionStart` フックが直前の意図を**読んだ時点で消費(一度きり)**して作業状態を再水和する。条件は失効 60 分と同一プロジェクト判定（精度順に三段: skill が渡した `--session-dir`（セッションのプロジェクトディレクトリ）→ プロジェクトルート（最寄りの `.git` を持つ祖先）→ cwd 厳密一致。上位が在ればそれだけで判定する）。サブディレクトリで撃った checkpoint もセッションルートで復元され、モノレポでサブディレクトリを開いた別セッションとは混ざらない。**compact では何も注入しない**（旧来どおり compact 自身の要約に任せる）。auto-compact に飲まれた場合は、次セッションで `$CLI brief --mode resume` を手動で撃てば同じ Investigation から辿れる。
 
 非 graphrag リポジトリでは no-op。細かい挙動は `graphrag-checkpoint` skill を参照。
 

@@ -25,13 +25,25 @@ export type CheckpointStateEntry = {
   last_at: number;
   hits?: never;
   marked_at: string;        // ISO 8601。フック側の 60 分失効判定に使う。
-  // checkpoint 実行時の cwd。AI が `cd <subdir>` して CLI を撃つとセッションルートと食い違うので、
-  // 同一性判定の主役ではない (root が無い旧 entry / git 外のためのフォールバックと診断表示用)。
-  cwd: string;
-  // checkpoint 実行時のプロジェクトルート (findProjectRoot: realpath から上へ .git を探した最寄り)。
-  // フック側 (hooks/clear-restore.mjs) はこれと自分の cwd から解決した root の realpath 一致で
+  // --- 同一性判定 (hooks/clear-restore.mjs) の三段フォールバック ---
+  // 精度の高い順に session_dir → root → cwd。上位が在ればそれ「だけ」で判定し、下位へは降りない
+  // (下位は上位より粗いので、精密な宣言が不一致なのに粗い一致で救うと別プロジェクトを誤復元する)。
+  //
+  // [1] checkpoint を撃ったセッションのプロジェクトディレクトリ。`checkpoint-mark --session-dir` で
+  // 明示的に渡された値 (realpath 解決済み)。出所は graphrag-checkpoint skill: モデルが自身の
+  // システムプロンプトに持つ Primary working directory を渡す。Bash ツール内の CLI には
+  // CLAUDE_PROJECT_DIR が渡らず PWD は `cd` で汚染されるので、これが「Claude Code が
+  // プロジェクトと認識している位置」を知る唯一の確かな経路。フック側の input.cwd と直接照合できる
+  // ため最精密 — 在れば単独で判定し、不一致なら root へフォールバックせず拒否する
+  // (モノレポのサブディレクトリを開いた別セッションは root が同じでも別プロジェクト位置)。
+  session_dir?: string;
+  // [2] checkpoint 実行時のプロジェクトルート (findProjectRoot: realpath から上へ .git を探した最寄り)。
+  // session_dir が無い entry で使う近似。フック側は自分の cwd から解決した root との realpath 一致で
   // 「同じ作業か」を判定する。git 外なら省略される (= 旧フォーマット entry と同じ扱い → cwd 一致判定)。
   root?: string;
+  // [3] checkpoint 実行時の cwd。AI が `cd <subdir>` して CLI を撃つとセッションルートと食い違うので、
+  // 同一性判定の主役ではない (session_dir も root も無い旧 entry / git 外のためのフォールバックと診断表示用)。
+  cwd: string;
   investigation_id: string;
   first_action: string;     // next: から抽出した「最初の一手」。
   work_state: string;       // Investigation.raw_content 全文。

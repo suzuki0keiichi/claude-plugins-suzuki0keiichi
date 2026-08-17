@@ -15,6 +15,8 @@
 //     walk-up した anchor の .graphrag/.env が GRAPHRAG_VAULT_DIR で外部 vault を指していれば
 //     「vault の親の .graphrag/cache」を読む。ここを anchor 側固定で読むと共有 vault 構成で
 //     書き手と分裂し、復元が毎回無音で失敗する (実際に起きた)。
+//   - 同一性判定は三段フォールバック (精度順に session_dir → root → cwd)。詳細は main() の該当箇所と
+//     graphrag/cli-ask-state.ts の CheckpointStateEntry のコメント。
 //   - ack 契約: 注入は additionalContext なので人間には見えない。復元成功/不成功のどちらの
 //     注入文も「最初の返答の冒頭でユーザーに宣言せよ」を義務付ける。これにより /clear 後の
 //     最初の返答に宣言が無い = 引き継ぎ失敗、と人間が沈黙から判定できる。
@@ -187,32 +189,48 @@ async function main() {
     : (typeof entry.last_at === "number" ? entry.last_at : NaN);
   const fresh = Number.isFinite(stampMs) && Date.now() - stampMs <= CHECKPOINT_TTL_MS;
 
-  // 同一性判定: プロジェクトルート (最寄りの .git を持つ祖先) 同士の実体パス一致。
-  // かつて cwd 厳密一致で判定していたが、Claude Code の Bash ツールは作業ディレクトリが
-  // セッション中持続するので、AI が `cd <subdir>` して checkpoint-mark を撃つと記録される
-  // cwd はサブディレクトリになり、フックに届く input.cwd (セッションルート) と食い違って
-  // 復元が拒否された (実際に起きた)。同じリポジトリなら同じ作業とみなす。
+  // 同一性判定 (三段フォールバック。精度の高い順に session_dir → root → cwd)。
   // 素の文字列比較だと symlink で偽陰性になる — checkpoint-mark 側の process.cwd() は
   // OS 解決済み (/private/var/…) だが、フック input.cwd は未解決 (/var/…) で届き得る。
   // realpath 不能 (削除済み等) はそのままの文字列で比較する。
   const realOrSelf = (p) => {
     try { return realpathSync(p); } catch { return p; }
   };
+  const entrySessionDir =
+    typeof entry.session_dir === "string" && entry.session_dir ? entry.session_dir : null;
   const entryRoot = typeof entry.root === "string" && entry.root ? entry.root : null;
   const inputRoot = findProjectRoot(cwd);
-  // 両側の root が揃う時だけ root で判定する。片方でも欠ける (git 外 / root を持たない
-  // 旧フォーマット entry) 時は従来の cwd 厳密一致へフォールバックする。
-  const sameProject = entryRoot && inputRoot
-    ? realOrSelf(inputRoot) === realOrSelf(entryRoot)
-    : (typeof entry.cwd === "string" &&
-       typeof input.cwd === "string" &&
-       realOrSelf(input.cwd) === realOrSelf(entry.cwd));
+  let sameProject;
+  if (entrySessionDir) {
+    // [1] session_dir はモデルがシステムプロンプトの Primary working directory を
+    // `checkpoint-mark --session-dir` で宣言したもので、こちらの input.cwd (Claude Code の
+    // プロジェクトディレクトリそのもの) と同じ土俵にある最精密の情報。よってこれ「だけ」で判定し、
+    // 不一致なら root へフォールバックせず拒否する: モノレポでサブディレクトリをプロジェクトとして
+    // 開いた別セッションは、git ルートが同じでも別プロジェクト位置だから。
+    sameProject = realOrSelf(cwd) === realOrSelf(entrySessionDir);
+  } else if (entryRoot && inputRoot) {
+    // [2] session_dir を持たない entry (旧フォーマット / skill を経ない直接実行) の近似。
+    // プロジェクトルート (最寄りの .git を持つ祖先) 同士の実体パス一致で見る。
+    // かつて cwd 厳密一致で判定していたが、Claude Code の Bash ツールは作業ディレクトリが
+    // セッション中持続するので、AI が `cd <subdir>` して checkpoint-mark を撃つと記録される
+    // cwd はサブディレクトリになり、フックに届く input.cwd (セッションルート) と食い違って
+    // 復元が拒否された (実際に起きた)。同じリポジトリなら同じ作業とみなす。
+    sameProject = realOrSelf(inputRoot) === realOrSelf(entryRoot);
+  } else {
+    // [3] root がどちらかで欠ける (git 外 / root を持たない旧フォーマット entry) —
+    // 従来の cwd 厳密一致。
+    sameProject =
+      typeof entry.cwd === "string" &&
+      typeof input.cwd === "string" &&
+      realOrSelf(input.cwd) === realOrSelf(entry.cwd);
+  }
 
   if (!fresh || !sameProject) {
     // 沈黙は「なぜ復元しなかったか」の切り分けを不能にするので、理由を一行だけ注入する。
+    // 表示する位置は判定に使ったのと同じ最精密の値 (session_dir → root → cwd)。
     const reason = !fresh
       ? "expired: past the 60-minute freshness window"
-      : `checkpoint belongs to a different project root (${entry.root ?? entry.cwd})`;
+      : `checkpoint belongs to a different project (${entry.session_dir ?? entry.root ?? entry.cwd})`;
     emit(
       `A graphrag checkpoint existed but was NOT restored (${reason}). ` +
       "The user cannot see this message and may be relying on the handover — open your first reply by " +

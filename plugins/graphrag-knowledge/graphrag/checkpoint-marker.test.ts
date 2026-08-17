@@ -2,7 +2,7 @@
 // 実行: node --experimental-strip-types --test graphrag/checkpoint-marker.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
@@ -173,6 +173,73 @@ test("サブディレクトリから撃っても root にはプロジェクト�
     assert.equal(realpathSync(entry.cwd), sub, "cwd は従来どおり実行時のサブディレクトリ");
   } finally {
     process.chdir(origCwd);
+    rmSync(vaultRoot, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("--session-dir を渡すと session_dir に記録される (root / cwd の記録は従来どおり)", async () => {
+  const { root: vaultRoot, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  const repo = makeRepo("dir");
+  const sub = path.join(repo, "plugins", "graphrag-knowledge");
+  mkdirSync(sub, { recursive: true });
+  const origCwd = process.cwd();
+  try {
+    // AI が cd したサブディレクトリから撃つが、skill が渡すのはセッションのプロジェクトルート。
+    process.chdir(sub);
+    const { out } = await runCaptured([
+      "--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", repo
+    ]);
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    assert.equal(entry.session_dir, repo, "渡されたセッションディレクトリが記録される");
+    assert.equal(entry.root, repo, "root の記録は従来どおり");
+    assert.equal(realpathSync(entry.cwd), sub, "cwd の記録も従来どおり");
+    assert.equal(JSON.parse(out).session_dir, repo, "stdout JSON にも出す (誤指定の目視用)");
+  } finally {
+    process.chdir(origCwd);
+    rmSync(vaultRoot, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("--session-dir 未指定なら session_dir フィールドは省略される (旧動作)", async () => {
+  const { root, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  try {
+    const { out } = await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    assert.ok(!("session_dir" in entry), "未指定では書かない (フックは root/cwd 判定へ)");
+    assert.ok(!("session_dir" in JSON.parse(out)), "stdout JSON にも出さない");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--session-dir は realpath 解決して記録される (symlink 表記でも実体で残す)", async () => {
+  const { root: vaultRoot, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  const repo = makeRepo("dir");
+  const link = path.join(repo, "link-to-self");
+  symlinkSync(repo, link, "dir");
+  try {
+    await runCaptured([
+      "--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", link
+    ]);
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    assert.equal(entry.session_dir, repo, "symlink は実体パスへ解決される");
+
+    // realpath 不能 (存在しないパス) でも落とさず絶対化だけして残す。
+    const ghost = path.join(repo, "does", "not", "exist");
+    await runCaptured([
+      "--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", ghost
+    ]);
+    const entry2 = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    assert.equal(entry2.session_dir, path.resolve(ghost), "解決不能なら path.resolve へフォールバック");
+  } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
