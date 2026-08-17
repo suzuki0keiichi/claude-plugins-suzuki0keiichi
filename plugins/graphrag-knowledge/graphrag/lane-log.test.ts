@@ -129,3 +129,44 @@ test("EVIDENCE_STALE_FILE / ECHO_LOG_FILE は別ファイル (相互汚染しな
   assert.equal(readJsonlLog(dir, ECHO_LOG_FILE).length, 1);
   assert.equal(summarizeEchoLog(dir).length, 1);
 });
+
+// ── 猶予窓と git 裏取り (レビュー指摘 #5) ───────────────────────────────────
+import { execFileSync } from "node:child_process";
+import { refuteEvidenceChangeViaGit, EVIDENCE_STALE_GRACE_MS_DEFAULT } from "./lane-log.ts";
+
+test("猶予窓: 検証直後 (2h 以内) の変更観測は stale にしない — 書き戻し→commit の順序反転対策", () => {
+  const byPath = new Map([["src/a.ts", "2026-01-15T01:30:00.000Z"]]); // 検証の 1.5h 後
+  assert.equal(evidenceStaleNoteForNode("ok:s:burn", staleGraph(), byPath), null);
+  const past = new Map([["src/a.ts", "2026-01-15T03:00:00.000Z"]]); // 3h 後 → 猶予外
+  assert.ok(evidenceStaleNoteForNode("ok:s:burn", staleGraph(), past));
+  // graceMs override
+  assert.ok(
+    evidenceStaleNoteForNode("ok:s:burn", staleGraph(), byPath, undefined, { graceMs: 0 }),
+    "graceMs:0 なら即 stale"
+  );
+  assert.ok(EVIDENCE_STALE_GRACE_MS_DEFAULT > 0);
+});
+
+test("refuteEvidenceChangeViaGit: revert 済み (worktree クリーン & 検証以後の commit 無し) は refute、生きている変更は keep", () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "lane-git-"));
+  const g = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  g("init", "-q");
+  g("config", "user.email", "t@t");
+  g("config", "user.name", "t");
+  writeFileSync(path.join(repo, "a.ts"), "one\n");
+  g("add", "a.ts");
+  g("commit", "-q", "-m", "c1");
+
+  const future = "2099-01-01T00:00:00.000Z"; // 検証がファイル最終 commit より新しい
+  assert.equal(refuteEvidenceChangeViaGit(repo, "a.ts", future), true, "検証以後 commit 無し + クリーン → refute");
+
+  writeFileSync(path.join(repo, "a.ts"), "dirty\n");
+  assert.equal(refuteEvidenceChangeViaGit(repo, "a.ts", future), false, "worktree に変更が生きている → keep");
+
+  g("add", "a.ts");
+  g("commit", "-q", "-m", "c2");
+  const past = "2000-01-01T00:00:00.000Z"; // 検証がファイル最終 commit より古い
+  assert.equal(refuteEvidenceChangeViaGit(repo, "a.ts", past), false, "検証後に commit が実在 → keep");
+
+  assert.equal(refuteEvidenceChangeViaGit("/nonexistent-root", "a.ts", past), false, "git 不能は fail-open (keep)");
+});

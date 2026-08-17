@@ -13,9 +13,10 @@
  *     ノイズ率・文字数を実測で語るための土台。ログは自動ローテーション。
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync, appendFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { cacheDirForVault } from "./cli-env.ts";
+import { appendJsonlLog } from "./lane-log.ts";
 
 export const RAIL_MAX_ITEMS = 3;
 export const RAIL_TOTAL_BUDGET_CHARS = 700;
@@ -23,7 +24,6 @@ export const RAIL_TITLE_CLIP = 90;
 export const RAIL_HEADLINE_CLIP = 90;
 
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
-const LOG_ROTATE_BYTES = 2 * 1024 * 1024;
 
 export interface RailItem {
   id: string;
@@ -101,18 +101,9 @@ export function saveRailSeen(cacheDir: string, seen: RailSeen, now: number = Dat
   }
 }
 
-/** 発火記録 (注入/沈黙の両方)。1行1 JSON。サイズ超過で .1 へローテーション。 */
+/** 発火記録 (注入/沈黙の両方)。1行1 JSON。ローテーション込みの追記は lane-log に一本化。 */
 export function appendRailLog(cacheDir: string, entry: Record<string, unknown>, now: number = Date.now()): void {
-  try {
-    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-    const fp = path.join(cacheDir, "rail-log.jsonl");
-    if (existsSync(fp) && statSync(fp).size > LOG_ROTATE_BYTES) {
-      renameSync(fp, `${fp}.1`);
-    }
-    appendFileSync(fp, JSON.stringify({ ts: new Date(now).toISOString(), ...entry }) + "\n");
-  } catch {
-    // ログ失敗はレール動作に影響させない
-  }
+  appendJsonlLog(cacheDir, "rail-log.jsonl", [entry], now);
 }
 
 function clip(s: string, max: number): string {

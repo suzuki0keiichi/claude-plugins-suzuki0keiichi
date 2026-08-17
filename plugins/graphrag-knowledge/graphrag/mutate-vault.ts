@@ -542,17 +542,6 @@ export async function applyMutationToVault(args: {
   }
 
   const result = await withVaultLock(cacheDir, async () => {
-    // OCC: base_sha が現 HEAD と違えば「古い判断」として拒否（粗い粒度）。
-    if (args.baseSha) {
-      const head = vaultHead(vaultDir);
-      if (head !== args.baseSha) {
-        const err: any = new Error(
-          `OCC conflict: base_sha ${args.baseSha} != HEAD ${head} (stale judgment; re-read and rebuild plan)`
-        );
-        err.code = "OCC_STALE";
-        throw err;
-      }
-    }
     const current = importVault(vaultDir);
     // 冪等リプレイの吸収 (issue #24): 同一内容の op:create 再送 (タイムアウト後の
     // リトライ等) は「既に成功した書き込み」なので失敗にしない。plan 全体が再送なら
@@ -585,6 +574,21 @@ export async function applyMutationToVault(args: {
         note: "entire plan was an idempotent replay — vault already contains this content; no commit was made",
         __replayOnly: true,
       };
+    }
+    // OCC: base_sha が現 HEAD と違えば「古い判断」として拒否（粗い粒度）。
+    // 冪等リプレイ吸収の後に置く (レビュー指摘): base_sha 付き再送の代表例は「1回目が
+    // commit 済みで HEAD が進んだ後のタイムアウト・リトライ」で、まさに base_sha が古く
+    // なっているケース。全量リプレイは vault が既にこの内容を含むので stale 判断の懸念
+    // 自体が無く、先に OCC を引くと吸収できない。残作業がある場合のみ従来どおり検査する。
+    if (args.baseSha) {
+      const head = vaultHead(vaultDir);
+      if (head !== args.baseSha) {
+        const err: any = new Error(
+          `OCC conflict: base_sha ${args.baseSha} != HEAD ${head} (stale judgment; re-read and rebuild plan)`
+        );
+        err.code = "OCC_STALE";
+        throw err;
+      }
     }
     const v = validateMutation({ currentGraph: current, plan: effectivePlan, enforceSourceBacking: true, schema: args.schema });
     if (!v.valid) {

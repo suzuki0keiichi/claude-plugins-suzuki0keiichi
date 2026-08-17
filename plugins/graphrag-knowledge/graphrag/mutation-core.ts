@@ -61,9 +61,11 @@ function normalizeSuccessors(value: unknown): Array<{ old: string; new: string }
 // して吸収する。内容が違う create-on-existing は従来どおり validateMutation が
 // fail-loud する (それは再送ではなく衝突)。
 //
-// 判定は plan 側が持つフィールドのみ比較する (既存ノードにだけある indexer 付与
-// フィールド等は再送の否定材料にしない)。generated_at は書き込み時に打刻される値
-// なので比較から除外する。
+// 判定は「同一コマンドの再送」に限る: 既存・plan の双方に現れる全フィールド
+// (generated_at を除く) が deep-equal であること。plan 側フィールドのみの subset 比較に
+// すると、たまたま既存ノードの部分集合と一致する別の最小ノード (id 衝突) まで
+// 「登記済み」と誤報告して衝突を隠す (レビュー指摘 #9)。generated_at は書き込み時に
+// 打刻される値なので比較から除外する。
 export function partitionIdempotentReplays(
   plan: any,
   currentGraph: any
@@ -76,9 +78,10 @@ export function partitionIdempotentReplays(
     const existing = nodesById.get(item.id);
     if (!existing) return false;
     const fields = withoutOp(item);
-    for (const [key, value] of Object.entries(fields)) {
-      if (key === "generated_at") continue;
-      if (!isDeepStrictEqual(existing[key], value)) return false;
+    const keys = new Set([...Object.keys(existing), ...Object.keys(fields)]);
+    keys.delete("generated_at");
+    for (const key of keys) {
+      if (!isDeepStrictEqual(existing[key], fields[key])) return false;
     }
     return true;
   };
@@ -91,18 +94,22 @@ export function partitionIdempotentReplays(
     );
   };
 
-  const replayedNodeIds = plan.nodes.filter(isNodeReplay).map((n: any) => String(n.id));
-  const replayedEdgeIds = plan.edges.filter(isEdgeReplay).map((e: any) => String(e.id));
-  if (replayedNodeIds.length === 0 && replayedEdgeIds.length === 0) {
+  // 落とすのは replay と判定された「その item」だけ (id 単位で落とさない)。id 単位で
+  // 落とすと、同一 id の replay + 内容違い create が併存する plan で両方が消え、
+  // 内容違い側の衝突が無言で握り潰される (レビュー指摘 #3 — duplicate-plan-id 検証にも
+  // create-exists 検証にも到達しなくなる)。
+  const replayNodeItems = new Set(plan.nodes.filter(isNodeReplay));
+  const replayEdgeItems = new Set(plan.edges.filter(isEdgeReplay));
+  const replayedNodeIds = [...replayNodeItems].map((n: any) => String(n.id));
+  const replayedEdgeIds = [...replayEdgeItems].map((e: any) => String(e.id));
+  if (replayNodeItems.size === 0 && replayEdgeItems.size === 0) {
     return { plan, replayedNodeIds, replayedEdgeIds };
   }
-  const replayedNodes = new Set(replayedNodeIds);
-  const replayedEdges = new Set(replayedEdgeIds);
   return {
     plan: {
       ...plan,
-      nodes: plan.nodes.filter((n: any) => !replayedNodes.has(String(n.id)) || mutationOp(n) !== "create"),
-      edges: plan.edges.filter((e: any) => !replayedEdges.has(String(e.id)) || mutationOp(e) !== "create")
+      nodes: plan.nodes.filter((n: any) => !replayNodeItems.has(n)),
+      edges: plan.edges.filter((e: any) => !replayEdgeItems.has(e))
     },
     replayedNodeIds,
     replayedEdgeIds

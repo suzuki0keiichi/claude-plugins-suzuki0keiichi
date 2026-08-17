@@ -272,6 +272,13 @@ export async function runStocktake(
           'op:update the owning node with {"updates":{"aliases":[...without it]}}.',
         aliases: stats
       };
+      // hint の整合 (レビュー指摘): suspects ゼロでも echo_stats が乗るなら「棚卸し不要」とは
+      // 言わない — hint だけを読む LLM が指紋棚卸し (skill §2b) を素通りする。
+      result.next_action_hint =
+        result.suspects.length > 0
+          ? `${result.next_action_hint} Also adjudicate echo_stats (fingerprint stocktake, skill §2b).`
+          : "Investigation/Goal lifecycle is healthy, but echo_stats is present — adjudicate the hot " +
+            "fingerprints (crying-wolf suspects) per the graphrag-stocktake skill §2b.";
     }
   } catch {
     /* 集計失敗は無音 — stocktake 本体を落とさない */

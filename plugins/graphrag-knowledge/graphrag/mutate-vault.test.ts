@@ -1097,3 +1097,27 @@ test("applyMutationToVault: 同一 id で内容が違う create は従来どお�
     }
   );
 });
+
+test("applyMutationToVault: 全量リプレイは古い base_sha でも OCC を踏まず成功する (指摘 #4)", async () => {
+  const { vault, stateDir } = gitInitVault();
+  const base = vaultHead(vault); // 1回目送信時の base
+  const plan = decisionPlan("occ", "add occ");
+  await applyMutationToVault({ plan, vaultDir: vault, stateDir, baseSha: base, git: true, buildIndex: noopIndex });
+  // タイムアウト後のリトライ想定: HEAD は進んでいるが base_sha は当時のまま
+  const retry = await applyMutationToVault({
+    plan: decisionPlan("occ", "add occ"),
+    vaultDir: vault, stateDir, baseSha: base, git: true, buildIndex: noopIndex
+  });
+  assert.equal(retry.applied, true, "全量リプレイは stale base でも吸収される");
+  assert.ok(retry.idempotent_replay.nodes.includes("decision:s:occ"));
+});
+
+test("applyMutationToVault: 残作業がある plan は従来どおり stale base_sha で OCC_STALE", async () => {
+  const { vault, stateDir } = gitInitVault();
+  const base = vaultHead(vault);
+  await applyMutationToVault({ plan: decisionPlan("o1", "add o1"), vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  await assert.rejects(
+    () => applyMutationToVault({ plan: decisionPlan("o2", "add o2"), vaultDir: vault, stateDir, baseSha: base, git: true, buildIndex: noopIndex }),
+    (err: any) => err.code === "OCC_STALE"
+  );
+});

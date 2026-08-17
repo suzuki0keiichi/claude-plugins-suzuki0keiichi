@@ -43,7 +43,7 @@ import {
 import { buildGraphBrief } from "./brief.ts";
 import { buildEvidencePacket } from "./evidence-packet.ts";
 import { formatAskMarkdown } from "./ask-format.ts";
-import { evidenceStaleNoteForNode, readEvidenceChangesByPath } from "./lane-log.ts";
+import { evidenceStaleNoteForNode, readEvidenceChangesByPath, refuteEvidenceChangeViaGit } from "./lane-log.ts";
 import { isEchoAlias } from "./delta-check.ts";
 import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
@@ -198,20 +198,61 @@ export function ensureEvidenceFileNodes(
 // git 不在・grep 失敗は無音 skip (プローブの失敗で書き込みを落とさない)。
 const ALIAS_PROBE_FILE_THRESHOLD = 3;
 
-// プローブの grep 対象はコードリポジトリ。external vault 構成では
-// dirname(stateDirForVault(vault)) は vault リポジトリを指してしまう (そこに code は無い)
-// ので、cwd の git toplevel を優先し、無ければ vault 由来の root に落とす。
-export function codeRepoRootForProbe(vaultDir: string): string {
+// プローブの grep 対象はコードリポジトリ。候補は cwd の git toplevel と
+// dirname(stateDirForVault(vault)) の2つだが、どちらも構成次第で vault リポジトリを
+// 指し得る (external vault の中で CLI を叩いた場合など — その場合 grep は .md しか
+// 当たらず、プローブは無音で空振りする偽陰性になる)。そこで plan 自身が参照する
+// file:<system>:<path> の実在で候補を自己検証し、evidence の実体を持つ候補だけを使う。
+// どの候補にも実体が無ければ null (間違ったリポジトリを黙って grep しない)。
+export function codeRepoRootForProbe(vaultDir: string, plan: any): string | null {
+  const candidates: string[] = [];
   try {
     const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       encoding: "utf8",
       stdio: ["pipe", "pipe", "pipe"]
     }).trim();
-    if (top.length > 0) return top;
+    if (top.length > 0) candidates.push(top);
   } catch {
-    /* git 外 — vault 由来の root に落ちる */
+    /* git 外 — vault 由来の候補のみ */
   }
-  return path.dirname(stateDirForVault(vaultDir));
+  const vaultRoot = path.dirname(stateDirForVault(vaultDir));
+  if (!candidates.includes(vaultRoot)) candidates.push(vaultRoot);
+
+  const refPaths = new Set<string>();
+  for (const e of plan.edges ?? []) {
+    if (typeof e?.to === "string" && e.to.startsWith("file:")) {
+      const p = e.to.split(":").slice(2).join(":");
+      if (p.length > 0) refPaths.add(p);
+    }
+  }
+  for (const n of plan.nodes ?? []) {
+    if (n?.type === "File" && typeof n.path === "string" && n.path.length > 0) refPaths.add(n.path);
+  }
+  if (refPaths.size === 0) return candidates[0] ?? null; // 検証材料なし — 最有力候補で行く
+  for (const c of candidates) {
+    for (const p of refPaths) {
+      if (existsSync(path.join(c, p))) return c;
+    }
+  }
+  return null;
+}
+
+// alias 所有権プローブの発注 + 報告 (typed-add / commit-mutation 共通)。
+// 警告があれば {warnings} を返し stderr にも 1 行出す。失敗・root 不明は undefined (無音)。
+function aliasProbeReport(plan: any, vaultDir: string): { warnings: ReturnType<typeof probeAliasOwnership> } | undefined {
+  try {
+    const root = codeRepoRootForProbe(vaultDir, plan);
+    if (!root) return undefined;
+    const warnings = probeAliasOwnership(plan, root);
+    if (warnings.length === 0) return undefined;
+    process.stderr.write(
+      `[graphrag] WARN: ${warnings.length} alias(es) look like shared/generic vocabulary — ` +
+      `they will echo on every legitimate use. See alias_probe in output.\n`
+    );
+    return { warnings };
+  } catch {
+    return undefined; // プローブ失敗は無音 (書き込みは確定済み)
+  }
 }
 
 export function probeAliasOwnership(
@@ -298,18 +339,8 @@ async function applyPlanAndReport(plan: any, f: Record<string, any>): Promise<vo
   const output: any = { applied: true, plan_reason: plan.reason, ...vaultResolution, result };
   // alias 所有権プローブ (issue #22, 非ブロッキング): echo 指紋になる alias が既に
   // リポジトリ中に広く出現していれば警告を同梱する。stderr にも 1 行 (見落とし防止)。
-  try {
-    const probeWarnings = probeAliasOwnership(plan, codeRepoRootForProbe(vaultDir));
-    if (probeWarnings.length > 0) {
-      output.alias_probe = { warnings: probeWarnings };
-      process.stderr.write(
-        `[graphrag] WARN: ${probeWarnings.length} alias(es) look like shared/generic vocabulary — ` +
-        `they will echo on every legitimate use. See alias_probe in output.\n`
-      );
-    }
-  } catch {
-    // プローブ失敗は無音 (書き込みは確定済み)
-  }
+  const probe = aliasProbeReport(plan, vaultDir);
+  if (probe) output.alias_probe = probe;
   if (fileAutoCreated.length > 0) {
     output.file_auto_created = fileAutoCreated;
   }
@@ -506,6 +537,13 @@ export function shouldEscalate(stageOutcome: { match_confidence?: string; result
 
 export async function runAsk(argv: string[]) {
   const f = parseFlagsArgv(argv);
+  // --lexical-only は値を取らない boolean フラグだが、parseFlagsArgv は「次の非フラグ
+  // トークンを値に取る」ため `ask --lexical-only "質問"` (障害時の主要な打ち方) で質問が
+  // フラグ値に飲まれ、escape hatch が無言で無効になる。文字列が来ていたら positional へ戻す。
+  if (typeof f["lexical-only"] === "string") {
+    (f._positional as string[]).unshift(f["lexical-only"]);
+    f["lexical-only"] = true;
+  }
   const positional = f._positional as string[];
   const question = positional[0];
   if (!question) throw new Error('ask "<question>" requires a positional question argument');
@@ -731,11 +769,29 @@ export async function runAsk(argv: string[]) {
     const changesByPath = readEvidenceChangesByPath(askCacheDir);
     if (changesByPath.size > 0) {
       const nodesById = new Map((graphData.nodes ?? []).map((n: any) => [n.id, n]));
+      // 猶予窓 (同一セッションの「書き戻し→commit」順序反転を偽 ⚠ にしない) は env で調整可。
+      const graceHours = Number(process.env.GRAPHRAG_EVIDENCE_STALE_GRACE_HOURS);
+      const graceMs = Number.isFinite(graceHours) && graceHours >= 0 ? graceHours * 3600_000 : undefined;
+      // git 裏取り用の code repo root (revert / 未コミット断念で消えた変更の台帳残骸を落とす)。
+      let askRepoRoot: string | null = null;
+      try {
+        askRepoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+          encoding: "utf8",
+          stdio: ["pipe", "pipe", "pipe"]
+        }).trim() || null;
+      } catch {
+        askRepoRoot = null; // git 外 — 裏取りなし (注記は残す側に倒れる)
+      }
       const attach = (m: any) => {
         const id = m?.node?.id;
         if (typeof id !== "string") return m;
-        const staleNote = evidenceStaleNoteForNode(id, graphData, changesByPath, nodesById);
-        return staleNote ? { ...m, evidence_stale: staleNote } : m;
+        const staleNote = evidenceStaleNoteForNode(id, graphData, changesByPath, nodesById, { graceMs });
+        if (!staleNote) return m;
+        const survivingPaths = askRepoRoot
+          ? staleNote.paths.filter((p) => !refuteEvidenceChangeViaGit(askRepoRoot!, p.path, staleNote.verified_at))
+          : staleNote.paths;
+        if (survivingPaths.length === 0) return m;
+        return { ...m, evidence_stale: { ...staleNote, paths: survivingPaths } };
       };
       if (briefOut?.query?.matches) briefOut.query.matches = briefOut.query.matches.map(attach);
       for (const stage of stages) {
@@ -808,19 +864,7 @@ async function runCommitMutation(argv: string[]) {
   }
 
   // alias 所有権プローブ (issue #22, 非ブロッキング) — typed-add と同じ扱い。
-  let aliasProbe: any = undefined;
-  try {
-    const probeWarnings = probeAliasOwnership(plan, codeRepoRootForProbe(vaultDir));
-    if (probeWarnings.length > 0) {
-      aliasProbe = { warnings: probeWarnings };
-      process.stderr.write(
-        `[graphrag] WARN: ${probeWarnings.length} alias(es) look like shared/generic vocabulary — ` +
-        `they will echo on every legitimate use. See alias_probe in output.\n`
-      );
-    }
-  } catch {
-    /* プローブ失敗は無音 */
-  }
+  const aliasProbe = aliasProbeReport(plan, vaultDir);
 
   process.stdout.write(JSON.stringify({
     plan_path: planPath,

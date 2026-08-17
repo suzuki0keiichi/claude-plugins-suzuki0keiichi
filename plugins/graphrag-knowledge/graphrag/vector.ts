@@ -458,7 +458,10 @@ function visitDisplayValue(value, fields) {
 // 各所が最大 60s ずつハングすると呼び出し側 (LLM の Bash) のタイムアウトを踏み、
 // 「commit 済みなのに失敗に見える → add リトライ連打」を誘発する。fail-fast で
 // プロセス全体の待ち時間を最初の 1 回分に畳む。HTTP 4xx (リクエスト側の問題で
-// endpoint は生きている) では開かない。プロセス毎にリセットされる (CLI は one-shot)。
+// endpoint は生きている) では開かない。プロセス毎にリセットされる (CLI は one-shot なので
+// half-open 再試行は持たない — 開いたままプロセスが終わるのが正しい)。モデルの cold-load 等で
+// 正当に 60s を超える環境は GRAPHRAG_EMBEDDING_TIMEOUT_MS の引き上げで対処する (breaker を
+// 緩めるのではなく、1回目のタイムアウト自体を防ぐ)。
 const embeddingCircuitOpenByEndpoint = new Map<string, string>();
 export function resetEmbeddingCircuit(): void {
   embeddingCircuitOpenByEndpoint.clear();
@@ -469,7 +472,9 @@ async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
   if (circuitReason) {
     throw new Error(
       `Embedding endpoint unavailable (circuit open — an earlier request in this process already failed): ` +
-      `${endpoint} (${circuitReason}). Failing fast instead of waiting for another timeout.`
+      `${endpoint} (${circuitReason}). Failing fast instead of waiting for another timeout. ` +
+      `If this was a mutation, note the mutation may already be committed (check index_status). ` +
+      `If this blocks an ask, the explicit degraded mode \`ask --lexical-only\` is available.`
     );
   }
   let response;
@@ -489,7 +494,9 @@ async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
     const cause = error?.cause?.code ?? error?.message ?? "unknown error";
     embeddingCircuitOpenByEndpoint.set(String(endpoint), String(cause));
     throw new Error(
-      `Embedding endpoint unavailable: ${endpoint} (${cause}). Start the configured semantic embedding server or update GRAPHRAG_EMBEDDING_ENDPOINT; lexical ngram vector fallback is disabled.`
+      `Embedding endpoint unavailable: ${endpoint} (${cause}). Start the configured semantic embedding server or ` +
+      `update GRAPHRAG_EMBEDDING_ENDPOINT; there is no silent lexical fallback. ` +
+      `To proceed right now on the read side, use the explicit degraded mode \`ask --lexical-only\`.`
     );
   }
   if (!response.ok) {

@@ -383,3 +383,33 @@ test("idempotent replay: 同一 id で from/to が違う edge create は再送�
   assert.deepEqual(p.replayedEdgeIds, []);
   assert.equal(p.plan.edges.length, 1);
 });
+
+test("idempotent replay: 同一 id の replay + 内容違い create が併存したら replay だけ落とし衝突は fail-loud (指摘 #3)", () => {
+  const plan = {
+    reason: "retry+conflict",
+    nodes: [
+      { op: "create", id: "decision:s:a", type: "Decision", title: "A", summary: "a" },
+      { op: "create", id: "decision:s:a", type: "Decision", title: "A", summary: "CHANGED" },
+    ],
+    edges: [],
+  };
+  const p = partitionIdempotentReplays(plan, baseGraph());
+  assert.deepEqual(p.replayedNodeIds, ["decision:s:a"], "replay 判定は identical 側の 1 item のみ");
+  assert.equal(p.plan.nodes.length, 1, "内容違い側は plan に残る");
+  assert.equal(p.plan.nodes[0].summary, "CHANGED");
+  const v = validateMutation({ currentGraph: baseGraph(), plan: p.plan });
+  assert.equal(v.valid, false, "残った衝突 create は fail-loud");
+  assert.ok(v.failures.some((f) => f.includes("content DIFFERS")));
+});
+
+test("idempotent replay: 既存より少ないフィールドの create は replay ではない (subset 比較の衝突隠蔽防止, 指摘 #9)", () => {
+  const plan = {
+    reason: "minimal collision",
+    nodes: [{ op: "create", id: "decision:s:a", type: "Decision", title: "A" }], // summary 欠落
+    edges: [],
+  };
+  const p = partitionIdempotentReplays(plan, baseGraph());
+  assert.deepEqual(p.replayedNodeIds, [], "対称比較: 既存の summary と plan の undefined が不一致");
+  const v = validateMutation({ currentGraph: baseGraph(), plan: p.plan });
+  assert.equal(v.valid, false, "id 衝突として fail-loud する");
+});

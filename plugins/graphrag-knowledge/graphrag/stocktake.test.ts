@@ -316,3 +316,30 @@ test("settled-premise: abandoned を含む場合は abandoned-premise を併記 
   assert.deepEqual(c.signals, ["settled-premise", "abandoned-premise"]);
   assert.match(res.next_action_hint, /convert the shadow/);
 });
+
+// ── echo_stats と next_action_hint の整合 (レビュー指摘 #8) ──────────────────
+import { cacheDirForVault } from "./cli-env.ts";
+import { recordEchoFirings } from "./lane-log.ts";
+
+test("echo_stats があれば suspects ゼロでも「棚卸し不要」とは言わない", async () => {
+  const { vaultDir } = makeVault([
+    { id: "decision:s:a", type: "Decision", title: "A", summary: "a" }
+  ]);
+  recordEchoFirings(cacheDirForVault(vaultDir), [
+    { alias: "hot_alias", knowledge_id: "decision:s:a", occurrences: [{ path: "x.ts" }] }
+  ]);
+  const out = await runStocktake(["--vault", vaultDir]);
+  assert.equal(out.counts.suspects, 0);
+  assert.equal(out.echo_stats!.aliases[0].alias, "hot_alias");
+  assert.doesNotMatch(out.next_action_hint, /No stocktake needed/);
+  assert.match(out.next_action_hint, /echo_stats|fingerprint/);
+});
+
+test("echo ログが無ければ echo_stats は載らず従来 hint のまま", async () => {
+  const { vaultDir } = makeVault([
+    { id: "decision:s:a", type: "Decision", title: "A", summary: "a" }
+  ]);
+  const out = await runStocktake(["--vault", vaultDir]);
+  assert.equal(out.echo_stats, undefined);
+  assert.match(out.next_action_hint, /No stocktake needed/);
+});

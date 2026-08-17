@@ -1172,3 +1172,28 @@ test("probeAliasOwnership: 閾値未満・update op・grep 失敗は警告なし
   });
   assert.deepEqual(warnings, []);
 });
+
+// ── codeRepoRootForProbe (レビュー指摘 #6): evidence 実在で候補を自己検証 ────
+import { codeRepoRootForProbe } from "./cli-headlines.ts";
+import { mkdtempSync as mkdtempSync2, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import path2 from "node:path";
+
+test("codeRepoRootForProbe: evidence 実体を持つ候補だけを返し、どこにも無ければ null", () => {
+  const vrepo = mkdtempSync2(path2.join(tmpdir2(), "probe-root-"));
+  const vaultDir = path2.join(vrepo, "vault");
+  mkdirSync2(vaultDir, { recursive: true });
+  const plan = {
+    nodes: [{ op: "create", id: "decision:s:x", type: "Decision", title: "x", aliases: ["someToken_x"] }],
+    edges: [{ op: "create", id: "e", type: "documented_by", from: "decision:s:x", to: "file:s:src/probe-target.ts" }]
+  };
+  // どの候補にも src/probe-target.ts が無い (cwd toplevel にも vrepo にも) → null = プローブ skip
+  assert.equal(codeRepoRootForProbe(vaultDir, plan), null);
+  // vault リポジトリ側に実体を置けばそこが code root として自己同定される
+  mkdirSync2(path2.join(vrepo, "src"), { recursive: true });
+  writeFileSync2(path2.join(vrepo, "src", "probe-target.ts"), "x\n");
+  assert.equal(codeRepoRootForProbe(vaultDir, plan), vrepo);
+  // File 参照が無い plan は検証材料なし → 最有力候補 (非 null) で行く
+  const noRef = { nodes: [{ op: "create", id: "goal:s:g", type: "Goal", title: "g" }], edges: [] };
+  assert.notEqual(codeRepoRootForProbe(vaultDir, noRef), null);
+});
