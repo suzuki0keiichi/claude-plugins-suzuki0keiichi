@@ -6,7 +6,7 @@ import {
 import { pathToFileURL } from "node:url";
 
 const PRIMITIVE_VERBS = [
-  "brief", "search", "evidence", "index", "vector-index",
+  "brief", "search", "evidence", "grep", "show", "index", "vector-index",
   "vault-build", "vault-import",
   "concern-hint", "edge-suggest-policy", "carving-check",
   "branch-merge", "world-refresh", "world-join",
@@ -48,6 +48,8 @@ const PRIMITIVE_FILE_MAP: Record<PrimitiveVerb, { file: string; exportName?: str
   "brief": { file: "./brief.ts" },
   "search": { file: "./search.ts" },
   "evidence": { file: "./evidence-packet.ts" },
+  "grep": { file: "./node-grep.ts", exportName: "runNodeGrep" },
+  "show": { file: "./node-grep.ts", exportName: "runNodeShow" },
   "index": { file: "./index-codebase.ts" },
   "vector-index": { file: "./build-vector-index.ts" },
   "vault-build": { file: "./build-vault.ts" },

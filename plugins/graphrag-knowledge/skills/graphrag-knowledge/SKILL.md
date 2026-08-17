@@ -1,6 +1,6 @@
 ---
 name: graphrag-knowledge
-version: 4.14.0
+version: 4.15.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -34,7 +34,7 @@ This skill is the read/write foundation. Three derived skills review changes and
 
 1. **Vault is the single source of truth.** Knowledge lives in the vault (frontmatter = canonical, body = human projection). Search, indexing, and writes all read the vault. `graph.json` is an indexer output / round-trip verification artifact, NOT the source of truth. Do not hand-edit vault for normal knowledge insertion (`commit-mutation` / `add-*` handle lock / OCC / atomic publish / git commit).
 2. **Never let the LLM write raw queries.** The LLM touches exactly two surfaces:
-   - Read: ranked JSON (`ask` / `brief` / `search` / `evidence` output).
+   - Read: ranked JSON (`ask` / `brief` / `search` / `evidence` output) and deterministic JSON (`grep` / `show` output).
    - Write: typed-add CLI args, or mutation plan JSON (`reason` / `nodes` / `edges`) validated and applied to the **vault** by `commit-mutation`.
    Any change that thins this layer or exposes a raw query path to the LLM is a design violation.
 3. **Semantic is non-negotiable.** Search ranking combines lexical (exact/partial/word-coverage, normalized to [0,1]) and semantic (cosine, clamped to [0,1]) with equal weight (max 100 each). There is no SILENT lexical fallback (no vector index → `ask` hard-errors). The only exception is the explicit `ask --lexical-only` escape hatch for embedding-endpoint outages — caller-invoked, and the output is loudly marked DEGRADED (`retrieval_mode.semantic:false`); it never engages on its own.
@@ -42,7 +42,7 @@ This skill is the read/write foundation. Three derived skills review changes and
 
 ## Anti-patterns (DO NOT)
 
-- **DO NOT translate "read/trace the graph" into grep / glob / read.** Do not read vault `.md` files directly — use `ask` instead. The CLI auto-discovers the vault (§Setup). `ask` works without knowing the vault path; if not found, it hard-errors. Falling back to grep is a design violation.
+- **DO NOT translate "read/trace the graph" into grep / glob / read.** Do not read vault `.md` files directly — for conceptual queries use `ask`; for exact matches (id fragments, code identifiers, body text, type-scoped enumeration) use `$CLI grep`; to read a node in full (description / raw_content included) use `$CLI show <id>`. The CLI auto-discovers the vault (§Setup) and hard-errors if not found. Falling back to filesystem grep/cat on vault `.md` is a design violation — every read need now has a CLI verb.
 - **DO NOT grep / read `graphrag/*.ts` source code.** Everything the LLM needs is in this file and `$REF/`. Do not re-derive types from `schema.ts` (§Schema quick-ref is enough). Do not re-derive CLI invocation (`$CLI <verb>` is enough).
 - **DO NOT edit `vault/` directly.** The vault is the source of truth, but write through `commit-mutation` / `add-*` only (CLI guarantees lock / OCC / atomic publish / git commit).
 - **DO NOT create duplicate nodes.** Always check existing nodes via `ask` before creating. Prefer `skip` / `update` / `supersede` / `review` over new creation. The write-time duplicate gate (`duplicate_check`, §Mutation Plan) catches suspects as a last resort, but **do not skip the `ask` pre-check just because the gate exists** (sole scoped exception: the checkpoint rescue pass — graphrag-checkpoint §B). To acknowledge a suspect as intentionally distinct, use `--dup-ack <id[,id...]>`.
@@ -147,6 +147,8 @@ Headline = multi-stage sugar (quick/typical). Primitive = direct per-stage contr
 | `brief` | summary response (resume / query mode, reads vault) |
 | `search` | ranked neighbor expansion (reads vault) |
 | `evidence` | provenance-attached answer packet (reads vault) |
+| `grep` | deterministic full-field match across ALL node fields incl. id / type / description / raw_content (enumeration, not ranking — the sanctioned replacement for grepping vault .md). Flags: `--regex` `--types A,B` `--limit N` `--case-sensitive` |
+| `show` | full node content verbatim (every frontmatter field + description + raw_content) + incident edges — the sanctioned replacement for cat-ing vault .md. Missing ids resolve through the tombstone ledger (301 successor / 410 gone) |
 | `index` | deterministic indexing (git ls-files + role classification + deps) → graph.json |
 | `vector-index` | build vector index (from vault) |
 | `vault-build` | graph.json → vault (**empty-vault initial build only**; wipes & rebuilds. Guarded: refuses if the existing vault holds nodes absent from the source graph, since those non-indexed knowledge nodes would be lost. `--force` to override) |

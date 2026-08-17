@@ -51,6 +51,22 @@ direct_evidence (ranked) + graph_context (neighbors) + retrieval_policy + answer
 
 Plan templates for Goal / Constraint / Concern / Layer / Component / Update / Delete are in `references/mutation-templates.md` (application is via `commit-mutation`).
 
+## grep — deterministic full-field match (read-only)
+
+```sh
+node graphrag/cli.ts grep "<pattern>" [--regex] [--types A,B] [--limit N] [--case-sensitive] [--vault <dir>]
+```
+
+An enumeration, not a ranking. Matches EVERY string field of every node — including `id`, `type`, `description`, `raw_content`, `path`, nested `display` values — the fields the ranked search deliberately excludes (id/type for rename-migration stability, long bodies to protect scoring). That deliberate exclusion left "find by id fragment / code identifier / body text" with no CLI answer, and field usage showed agents grepping vault `.md` directly at ask-comparable volume. This verb is the sanctioned replacement: default case-insensitive substring, `--regex` for JS regexes (invalid pattern = loud error), `--types` to scope, `--limit` (default 20 — overflow is COUNTED in `hits_total`, never silently truncated). Multi-line fields report per-line hits with line numbers. Read the winners with `show`.
+
+## show — full node content + incident edges (read-only)
+
+```sh
+node graphrag/cli.ts show <id> [<id>...] [--vault <dir>]
+```
+
+Every frontmatter field verbatim (no whitelist, no summary truncation — `description` and `raw_content` included) plus incident edges (relation / direction / other endpoint id+title). This is the sanctioned replacement for cat-ing vault `.md` files. A missing id is resolved through the tombstone ledger: `deleted-301` names the final successor to follow, `deleted-410` means gone with no successor. Exit 1 when any requested id is not found.
+
 ## index — deterministic indexing (git ls-files + role classification + deps)
 
 ```sh
