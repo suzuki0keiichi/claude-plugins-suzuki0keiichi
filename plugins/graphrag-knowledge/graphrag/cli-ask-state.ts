@@ -25,7 +25,13 @@ export type CheckpointStateEntry = {
   last_at: number;
   hits?: never;
   marked_at: string;        // ISO 8601。フック側の 60 分失効判定に使う。
-  cwd: string;              // checkpoint 実行時の cwd。フック側の厳密一致判定に使う。
+  // checkpoint 実行時の cwd。AI が `cd <subdir>` して CLI を撃つとセッションルートと食い違うので、
+  // 同一性判定の主役ではない (root が無い旧 entry / git 外のためのフォールバックと診断表示用)。
+  cwd: string;
+  // checkpoint 実行時のプロジェクトルート (findProjectRoot: realpath から上へ .git を探した最寄り)。
+  // フック側 (hooks/clear-restore.mjs) はこれと自分の cwd から解決した root の realpath 一致で
+  // 「同じ作業か」を判定する。git 外なら省略される (= 旧フォーマット entry と同じ扱い → cwd 一致判定)。
+  root?: string;
   investigation_id: string;
   first_action: string;     // next: から抽出した「最初の一手」。
   work_state: string;       // Investigation.raw_content 全文。

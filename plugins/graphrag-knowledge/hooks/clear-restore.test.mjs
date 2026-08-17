@@ -288,7 +288,7 @@ test("clear + 失効 (60分超): 理由一行を注入しキーを消費", () =>
   }
 });
 
-test("clear + cwd 不一致: 理由一行を注入しキーを消費", () => {
+test("clear + root 無し (旧フォーマット) で cwd 不一致: 理由一行を注入しキーを消費", () => {
   const root = makeAnchor();
   try {
     const fp = writeState(root, {
@@ -297,10 +297,106 @@ test("clear + cwd 不一致: 理由一行を注入しキーを消費", () => {
     const out = runHook({ source: "clear", cwd: root });
     const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
     assert.match(ctx, /NOT restored/);
-    assert.match(ctx, /different directory/);
+    assert.match(ctx, /different project root/);
     assert.match(ctx, /\/somewhere\/else/);
     const onDisk = JSON.parse(readFileSync(fp, "utf8"));
-    assert.ok(!(CHECKPOINT_KEY in onDisk), "cwd 不一致でも one-shot 消費される");
+    assert.ok(!(CHECKPOINT_KEY in onDisk), "不一致でも one-shot 消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- プロジェクトルート判定 (cwd 厳密一致からの緩和) ---
+
+// git リポジトリ相当の anchor (.git ディレクトリ + .graphrag/vault) を作る。
+const makeGitAnchor = () => {
+  const root = makeAnchor();
+  mkdirSync(path.join(root, ".git"), { recursive: true });
+  return root;
+};
+
+test("clear + サブディレクトリで打った checkpoint はセッションルートで復元される (回帰: AI が cd してから CLI を撃つと cwd がずれて拒否されていた)", () => {
+  const root = makeGitAnchor();
+  try {
+    const sub = path.join(root, "plugins", "graphrag-knowledge");
+    mkdirSync(sub, { recursive: true });
+    // checkpoint-mark は cd 先 (サブディレクトリ) の cwd と、解決したプロジェクトルートを記録する。
+    const fp = writeState(root, {
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: sub, root })
+    });
+    // SessionStart フックにはセッションルート (= リポジトリルート) が届く。
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "同じプロジェクトルートなら cwd 表記が違っても復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(CHECKPOINT_KEY in onDisk), "消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("clear + 別 git リポジトリの checkpoint は復元されない", () => {
+  const root = makeGitAnchor();
+  const other = makeGitAnchor();
+  try {
+    const fp = writeState(root, {
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: other, root: other })
+    });
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /different project root/);
+    assert.ok(ctx.includes(realpathSync(other)) || ctx.includes(other), "不一致の root が理由に出る");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(CHECKPOINT_KEY in onDisk), "不一致でも one-shot 消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("clear + worktree (.git がファイル) は自分自身を root として解決する (親リポジトリまで登らない)", () => {
+  const parent = makeGitAnchor();
+  try {
+    // 親リポジトリの中に worktree を置く。worktree の .git は「ファイル」。
+    const wt = path.join(parent, "wt");
+    mkdirSync(path.join(wt, ".graphrag", "vault"), { recursive: true });
+    writeFileSync(path.join(wt, ".git"), `gitdir: ${path.join(parent, ".git", "worktrees", "wt")}\n`);
+
+    // (1) worktree 内サブディレクトリの checkpoint は worktree ルートで復元される。
+    const sub = path.join(wt, "src");
+    mkdirSync(sub, { recursive: true });
+    let fp = writeState(wt, { [CHECKPOINT_KEY]: checkpointEntry({ cwd: sub, root: wt }) });
+    let ctx = JSON.parse(runHook({ source: "clear", cwd: wt })).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "worktree 自身が root として一致する");
+    assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "消費される");
+
+    // (2) 親リポジトリで打った checkpoint は worktree では復元されない (別 root)。
+    fp = writeState(wt, { [CHECKPOINT_KEY]: checkpointEntry({ cwd: parent, root: parent }) });
+    ctx = JSON.parse(runHook({ source: "clear", cwd: wt })).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /different project root/, "worktree は親リポジトリの root へ登らない");
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("clear + 旧フォーマット entry (root 無し) は従来どおり cwd 厳密一致で判定される", () => {
+  const root = makeGitAnchor();
+  try {
+    // (1) cwd が一致すれば復元される (root フィールドが無くても壊れない)。
+    let fp = writeState(root, { [CHECKPOINT_KEY]: checkpointEntry({ cwd: root }) });
+    let ctx = JSON.parse(runHook({ source: "clear", cwd: root })).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "root 無し + cwd 一致 → 復元");
+    assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "消費される");
+
+    // (2) 同一リポジトリ内でも cwd が違えば復元しない (root が無いので緩和は効かない)。
+    const sub = path.join(root, "sub");
+    mkdirSync(sub, { recursive: true });
+    fp = writeState(root, { [CHECKPOINT_KEY]: checkpointEntry({ cwd: sub }) });
+    ctx = JSON.parse(runHook({ source: "clear", cwd: root })).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /different project root/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

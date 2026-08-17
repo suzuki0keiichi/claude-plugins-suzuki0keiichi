@@ -36,6 +36,26 @@ const CHECKPOINT_KEY = "__checkpoint__";
 // graphrag/checkpoint-marker.ts の CHECKPOINT_TTL_MS と揃える (依存ゼロ方針で import しない)。
 const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
 
+// 与えられたパスを realpath 解決してから上方向に辿り、.git (ディレクトリ、または worktree の
+// ように .git ファイル) を持つ最寄りの祖先ディレクトリを返す。見つからなければ null。
+// graphrag/checkpoint-marker.ts の findProjectRoot と揃える (依存ゼロ方針で import せず複製する
+// — CHECKPOINT_TTL_MS / askStatePath と同じ扱い。変える時は両側を直すこと)。
+// child_process で git を呼ばない (素の fs で .git を探す) のもこの方針の一部。
+function findProjectRoot(startDir) {
+  let dir;
+  try {
+    dir = realpathSync(startDir);
+  } catch {
+    dir = path.resolve(startDir); // 削除済み等 — 解決せずそのまま辿る
+  }
+  while (true) {
+    if (existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 // cwd から上方向に .graphrag (vault/ か .env を持つもの) を探す。最初の一致で止める。
 // 見つからなければ null (= 非 graphrag リポジトリ → 何もしない)。
 function findGraphragDir(startDir) {
@@ -167,22 +187,32 @@ async function main() {
     : (typeof entry.last_at === "number" ? entry.last_at : NaN);
   const fresh = Number.isFinite(stampMs) && Date.now() - stampMs <= CHECKPOINT_TTL_MS;
 
-  // cwd 判定: 実体パス同士の厳密一致 (別ディレクトリの checkpoint を引き込まない)。
+  // 同一性判定: プロジェクトルート (最寄りの .git を持つ祖先) 同士の実体パス一致。
+  // かつて cwd 厳密一致で判定していたが、Claude Code の Bash ツールは作業ディレクトリが
+  // セッション中持続するので、AI が `cd <subdir>` して checkpoint-mark を撃つと記録される
+  // cwd はサブディレクトリになり、フックに届く input.cwd (セッションルート) と食い違って
+  // 復元が拒否された (実際に起きた)。同じリポジトリなら同じ作業とみなす。
   // 素の文字列比較だと symlink で偽陰性になる — checkpoint-mark 側の process.cwd() は
   // OS 解決済み (/private/var/…) だが、フック input.cwd は未解決 (/var/…) で届き得る。
   // realpath 不能 (削除済み等) はそのままの文字列で比較する。
   const realOrSelf = (p) => {
     try { return realpathSync(p); } catch { return p; }
   };
-  const sameCwd = typeof entry.cwd === "string" &&
-    typeof input.cwd === "string" &&
-    realOrSelf(input.cwd) === realOrSelf(entry.cwd);
+  const entryRoot = typeof entry.root === "string" && entry.root ? entry.root : null;
+  const inputRoot = findProjectRoot(cwd);
+  // 両側の root が揃う時だけ root で判定する。片方でも欠ける (git 外 / root を持たない
+  // 旧フォーマット entry) 時は従来の cwd 厳密一致へフォールバックする。
+  const sameProject = entryRoot && inputRoot
+    ? realOrSelf(inputRoot) === realOrSelf(entryRoot)
+    : (typeof entry.cwd === "string" &&
+       typeof input.cwd === "string" &&
+       realOrSelf(input.cwd) === realOrSelf(entry.cwd));
 
-  if (!fresh || !sameCwd) {
+  if (!fresh || !sameProject) {
     // 沈黙は「なぜ復元しなかったか」の切り分けを不能にするので、理由を一行だけ注入する。
     const reason = !fresh
       ? "expired: past the 60-minute freshness window"
-      : `checkpoint belongs to a different directory (${entry.cwd})`;
+      : `checkpoint belongs to a different project root (${entry.root ?? entry.cwd})`;
     emit(
       `A graphrag checkpoint existed but was NOT restored (${reason}). ` +
       "The user cannot see this message and may be relying on the handover — open your first reply by " +

@@ -2,13 +2,13 @@
 // 実行: node --experimental-strip-types --test graphrag/checkpoint-marker.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
 import { cacheDirForVault } from "./cli-env.ts";
 import { CHECKPOINT_STATE_KEY } from "./cli-ask-state.ts";
-import { CHECKPOINT_TTL_MS, extractFirstAction, runCheckpointMark } from "./checkpoint-marker.ts";
+import { CHECKPOINT_TTL_MS, extractFirstAction, findProjectRoot, runCheckpointMark } from "./checkpoint-marker.ts";
 
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
 
@@ -74,6 +74,50 @@ test("extractFirstAction: next 行が無い / 一手が空なら空文字", () =
   assert.equal(extractFirstAction("next:\n\n"), "");
 });
 
+// --- findProjectRoot 単体 ---
+
+// .git を持つ一時ディレクトリ (dir=通常リポジトリ / file=worktree) を作る。
+function makeRepo(kind: "dir" | "file"): string {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ckpt-repo-")));
+  if (kind === "dir") mkdirSync(path.join(root, ".git"));
+  else writeFileSync(path.join(root, ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
+  return root;
+}
+
+test("findProjectRoot: サブディレクトリから .git ディレクトリを持つ最寄り祖先を返す", () => {
+  const root = makeRepo("dir");
+  try {
+    const sub = path.join(root, "plugins", "graphrag-knowledge");
+    mkdirSync(sub, { recursive: true });
+    assert.equal(findProjectRoot(sub), root);
+    assert.equal(findProjectRoot(root), root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("findProjectRoot: worktree (.git がファイル) も root として認め、親リポジトリまで登らない", () => {
+  const parent = makeRepo("dir");
+  try {
+    const wt = path.join(parent, "wt", "sub");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(path.join(parent, "wt", ".git"), "gitdir: /elsewhere\n");
+    assert.equal(findProjectRoot(wt), path.join(parent, "wt"));
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("findProjectRoot: git 外なら null / 存在しないパスでも例外を投げない", () => {
+  const plain = realpathSync(mkdtempSync(path.join(tmpdir(), "ckpt-nogit-")));
+  try {
+    assert.equal(findProjectRoot(plain), null);
+    assert.equal(findProjectRoot(path.join(plain, "does", "not", "exist")), null);
+  } finally {
+    rmSync(plain, { recursive: true, force: true });
+  }
+});
+
 // --- 正常系 ---
 
 test("正常系: 予約キーが書かれ他キーは保たれ stdout JSON が返る", async () => {
@@ -108,6 +152,48 @@ test("正常系: 予約キーが書かれ他キーは保たれ stdout JSON が�
     assert.deepEqual(onDisk.abcd1234, { count: 3, last_at: 111 });
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("サブディレクトリから撃っても root にはプロジェクトルートが記録される (cwd はサブのまま)", async () => {
+  // 回帰: AI が `cd plugins/graphrag-knowledge` してから CLI を撃つと cwd がセッションルートと
+  // 食い違い、復元フックの cwd 厳密一致で弾かれていた。root があれば同一プロジェクトと分かる。
+  const { root: vaultRoot, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  const repo = makeRepo("dir");
+  const sub = path.join(repo, "plugins", "graphrag-knowledge");
+  mkdirSync(sub, { recursive: true });
+  const origCwd = process.cwd();
+  try {
+    process.chdir(sub);
+    await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    assert.equal(entry.root, repo, "最寄りの .git を持つ祖先が root");
+    assert.equal(realpathSync(entry.cwd), sub, "cwd は従来どおり実行時のサブディレクトリ");
+  } finally {
+    process.chdir(origCwd);
+    rmSync(vaultRoot, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git 外から撃つと root フィールドは省略される (フックは cwd 一致へフォールバックする)", async () => {
+  const { root: vaultRoot, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  const plain = realpathSync(mkdtempSync(path.join(tmpdir(), "ckpt-nogit-")));
+  const origCwd = process.cwd();
+  try {
+    process.chdir(plain);
+    await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    assert.ok(!("root" in entry), "git 外では root を書かない");
+    assert.equal(typeof entry.cwd, "string");
+  } finally {
+    process.chdir(origCwd);
+    rmSync(vaultRoot, { recursive: true, force: true });
+    rmSync(plain, { recursive: true, force: true });
   }
 });
 

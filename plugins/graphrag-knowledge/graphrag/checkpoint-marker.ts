@@ -11,7 +11,7 @@
 //     せず、予約キーの中身をそのまま注入する。検証は「文脈が生きている checkpoint 時」に済ませる
 //     ので、失敗はここで (直せる場所で) hard-error になる。
 //   - compact では復元しない: 古い checkpoint の無条件再注入はミスリードなので clear 限定。
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { cacheDirForVault } from "./cli-env.ts";
 import { loadGraph } from "./retrieval.ts";
@@ -29,6 +29,33 @@ export const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
 
 // raw_content の上限。これを超える深い生ログは ConversationChunk に置くべき。
 const RAW_CONTENT_MAX_BYTES = 8 * 1024; // 8KB
+
+/**
+ * 与えられたパスを realpath 解決してから上方向に辿り、`.git` (ディレクトリ、または worktree の
+ * ように `.git` ファイル) を持つ最寄りの祖先ディレクトリを返す。見つからなければ null。
+ *
+ * checkpoint の「同じ作業か」判定を cwd 厳密一致からプロジェクトルート一致へ緩めるための鍵。
+ * Claude Code の Bash ツールは作業ディレクトリがセッション中持続するので、AI が
+ * `cd <subdir>` して CLI を撃つと cwd はセッションルート (リポジトリルート) と食い違う。
+ * 実際にそれで復元が拒否された。
+ *
+ * hooks/clear-restore.mjs は依存ゼロ方針でこの関数を import せず複製する
+ * (CHECKPOINT_TTL_MS / cacheDirForVault と同じ扱い — 変える時は両側を直すこと)。
+ */
+export function findProjectRoot(startDir: string): string | null {
+  let dir: string;
+  try {
+    dir = realpathSync(startDir);
+  } catch {
+    dir = path.resolve(startDir); // 削除済み等 — 解決せずそのまま辿る
+  }
+  while (true) {
+    if (existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
 
 /**
  * `checkpoint-mark` verb 本体 (cli-headlines.ts の dispatchHeadline から呼ばれる)。
@@ -121,11 +148,15 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
 
   const now = Date.now();
+  // cwd はそのまま記録しつつ (旧フォーマット互換 / 診断表示用)、判定の主役は root。
+  // cwd は「AI が cd したサブディレクトリ」になり得るので、これ単体では同一性判定に使えない。
+  const projectRoot = findProjectRoot(process.cwd());
   const entry: CheckpointStateEntry = {
     count: 0,                              // ask 連打カウントとは無縁。0 固定 (型互換のため持たせる)。
     last_at: now,                          // ms epoch。既存 24h GC に自然に乗る (無いと不死化)。
     marked_at: new Date(now).toISOString(),
     cwd: process.cwd(),
+    ...(projectRoot ? { root: projectRoot } : {}), // git 外なら省略 → フックは cwd 一致へフォールバック
     investigation_id: flags.investigation,
     first_action: firstAction,
     work_state: raw
