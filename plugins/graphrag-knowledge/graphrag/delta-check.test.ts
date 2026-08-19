@@ -62,7 +62,7 @@ function run(paths: string[], graph: Record<string, unknown> = GRAPH, deps: Delt
     vault,
     result: deltaCheck(
       { vaultDir: vault, root: "/repo", paths, inputSource: "files" },
-      { gitLsDir: () => [], fileExists: () => false, ...deps }
+      { gitTrackedFiles: () => [], fileExists: () => false, ...deps }
     )
   };
 }
@@ -138,7 +138,7 @@ test("marker_findings: 削除済みノードは台帳を引いて 301 successor 
     const result = deltaCheck(
       { vaultDir: vault, root: "/repo", paths: ["src/upload/pack.ts"], inputSource: "files" },
       {
-        gitLsDir: () => [],
+        gitTrackedFiles: () => [],
         fileExists: (_root, rel) => rel in files,
         readFile: (_root, rel) => files[rel]
       }
@@ -216,7 +216,7 @@ test("authority_echoes: 権威の語彙が家の外の追加行に現れたら�
   const vault = writeVaultFromGraph(graph);
   const result = deltaCheck(
     { vaultDir: vault, root: "/repo", paths: ["src/ui/SsdTable.tsx", "shared/constants.ts"], inputSource: "worktree" },
-    { gitLsDir: () => [], fileExists: () => true, readFile: () => "", gitAddedLines: () => added }
+    { gitTrackedFiles: () => [], fileExists: () => true, readFile: () => "", gitAddedLines: () => added }
   );
   assert.equal(result.status, "info");
   assert.equal(result.authority_echoes.length, 1, "zero_bytes の家の外での追加のみ (家の中の ERROR_STATUSES は無音)");
@@ -247,7 +247,7 @@ test("authority_echoes: 識別子境界 — 部分文字列 (zero_bytes_v2) に�
   const vault = writeVaultFromGraph(graph);
   const result = deltaCheck(
     { vaultDir: vault, root: "/repo", paths: ["b.ts"], inputSource: "worktree" },
-    { gitLsDir: () => [], fileExists: () => true, readFile: () => "", gitAddedLines: () => added }
+    { gitTrackedFiles: () => [], fileExists: () => true, readFile: () => "", gitAddedLines: () => added }
   );
   assert.equal(result.authority_echoes.length, 0);
 });
@@ -266,7 +266,7 @@ test("connected_knowledge: documented_by で場所に宿った Goal (planned) �
   const vault = writeVaultFromGraph(graph);
   const result = deltaCheck(
     { vaultDir: vault, root: "/repo", paths: ["src/heartbeat.ts"], inputSource: "files" },
-    { gitLsDir: () => [], fileExists: () => false }
+    { gitTrackedFiles: () => [], fileExists: () => false }
   );
   const goal = result.connected_knowledge.find((k) => k.id === "goal:s:step2-authority-migration");
   assert.ok(goal, "「あとで」がその場所を触った瞬間に浮上する");
@@ -327,7 +327,7 @@ test("authority_echoes: import/依存宣言らしき追加行は除外 — 正�
   const vault = writeVaultFromGraph(graph);
   const result = deltaCheck(
     { vaultDir: vault, root: "/repo", paths: ["src/ui/table.tsx"], inputSource: "worktree" },
-    { gitLsDir: () => [], fileExists: () => true, readFile: () => "", gitAddedLines: () => added }
+    { gitTrackedFiles: () => [], fileExists: () => true, readFile: () => "", gitAddedLines: () => added }
   );
   assert.equal(result.authority_echoes.length, 1);
   assert.deepEqual(result.authority_echoes[0].occurrences.map((o) => o.line), [9],
@@ -344,11 +344,11 @@ test("--full 相当 (options.full): connected の cap が外れる", () => {
   const vault = writeVaultFromGraph({ nodes, edges });
   const capped = deltaCheck(
     { vaultDir: vault, root: "/repo", paths: ["a.ts"], inputSource: "files" },
-    { gitLsDir: () => [], fileExists: () => false }
+    { gitTrackedFiles: () => [], fileExists: () => false }
   );
   const full = deltaCheck(
     { vaultDir: vault, root: "/repo", paths: ["a.ts"], inputSource: "files", full: true },
-    { gitLsDir: () => [], fileExists: () => false }
+    { gitTrackedFiles: () => [], fileExists: () => false }
   );
   assert.equal(capped.connected_knowledge.length, 20, "既定 cap 20");
   assert.equal(capped.counts.connected_overflow, 5);

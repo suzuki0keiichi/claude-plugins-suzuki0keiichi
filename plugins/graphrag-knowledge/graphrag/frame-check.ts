@@ -79,8 +79,8 @@ export interface FrameCheckDeps {
   gitWorktreePaths?: (root: string) => string[];
   /** git diff --name-only <range>。テスト DI 用。 */
   gitDiffPaths?: (root: string, range: string) => string[];
-  /** dir 直下 (再帰しない) の tracked ファイル列挙。cluster 判定用。テスト DI 用。 */
-  gitLsDir?: (root: string, dir: string) => string[];
+  /** 全 tracked ファイルの一括列挙 (cluster 判定用)。repo 全体で1回だけ呼ばれる。テスト DI 用。 */
+  gitTrackedFiles?: (root: string) => string[];
 }
 
 function gitLines(root: string, args: string[]): string[] {
@@ -105,10 +105,8 @@ export function defaultGitDiffPaths(root: string, range: string): string[] {
   return gitLines(root, ["diff", "--name-only", range]);
 }
 
-function defaultGitLsDir(root: string, dir: string): string[] {
-  // dir 直下のみ (サブディレクトリは別クラスタ)。dir="." はルート直下。
-  const spec = dir === "." ? "*" : `${dir}/*`;
-  return gitLines(root, ["ls-files", "--", spec]).filter((p) => posixDirname(p) === dir);
+function defaultGitTrackedFiles(root: string): string[] {
+  return gitLines(root, ["ls-files"]);
 }
 
 function posixDirname(p: string): string {
@@ -145,7 +143,7 @@ export function frameCheck(
   deps: FrameCheckDeps = {}
 ): FrameCheckResult {
   const threshold = options.thresholdFiles ?? DEFAULT_CLUSTER_THRESHOLD;
-  const gitLsDir = deps.gitLsDir ?? defaultGitLsDir;
+  const gitTrackedFiles = deps.gitTrackedFiles ?? defaultGitTrackedFiles;
   const graph = options.graphData ?? importVault(options.vaultDir);
   const index: CrosscutIndex = buildCrosscutIndex(graph);
 
@@ -219,13 +217,25 @@ export function frameCheck(
 
   // component-candidate: 触れたディレクトリの未登記実装ファイルの実数を git で数える
   // (入力リストだけだと蓄積が見えない)。閾値以上 = Component が生まれたがっている合図。
-  for (const dir of [...dirsToInspect].sort()) {
-    let dirFiles: string[];
+  // git spawn は全体で1回 (per-dir spawn は O(触れたディレクトリ数) の同期ブロックになり、
+  // vault 初期化直後など未登記ファイルが広く散る局面で commit hook を秒単位で止めた — issue #25)。
+  // dir 直下のみをそのクラスタと数える (サブディレクトリは別クラスタ) 意味論は dirname
+  // グルーピングで従来どおり。
+  let trackedByDir: Map<string, string[]> | null = null;
+  if (dirsToInspect.size > 0) {
     try {
-      dirFiles = gitLsDir(options.root, dir);
+      trackedByDir = new Map();
+      for (const p of gitTrackedFiles(options.root)) {
+        const d = posixDirname(p);
+        if (!trackedByDir.has(d)) trackedByDir.set(d, []);
+        trackedByDir.get(d)!.push(p);
+      }
     } catch {
-      continue; // git 不能環境では cluster 判定を静かに諦める (entries は既に出ている)
+      trackedByDir = null; // git 不能環境では cluster 判定を静かに諦める (entries は既に出ている)
     }
+  }
+  for (const dir of trackedByDir === null ? [] : [...dirsToInspect].sort()) {
+    const dirFiles = trackedByDir!.get(dir) ?? [];
     const unregistered = dirFiles.filter(
       (p) => isImplPath(p) && !exemptionFor(p, configPaths) && isRegistered(p) !== "registered"
     );

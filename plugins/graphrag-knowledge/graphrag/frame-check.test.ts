@@ -34,7 +34,7 @@ function check(paths: string[], deps: FrameCheckDeps = {}, threshold = 5) {
   const vault = writeVaultFromGraph(GRAPH);
   return frameCheck(
     { vaultDir: vault, root: "/repo", paths, inputSource: "files", thresholdFiles: threshold },
-    { gitLsDir: () => [], ...deps }
+    { gitTrackedFiles: () => [], ...deps }
   );
 }
 
@@ -85,7 +85,7 @@ test("フラット配置 (複数 Component 同居 dir) では unwired を発火�
   const vault = writeVaultFromGraph(flatGraph);
   const res = frameCheck(
     { vaultDir: vault, root: "/repo", paths: ["lib/new.ts"], inputSource: "files" },
-    { gitLsDir: () => [] }
+    { gitTrackedFiles: () => [] }
   );
   assert.equal(res.entries[0].status, "unclaimed");
   assert.equal(res.entries[0].claimants.length, 2, "地図としては両候補を列挙する");
@@ -96,7 +96,7 @@ test("component-candidate: 未登記実装ファイルが閾値を超えた dir 
   const pile = ["scripts/a.ts", "scripts/b.ts", "scripts/c.ts", "scripts/d.ts", "scripts/e.ts"];
   const res = check(
     ["scripts/a.ts"],
-    { gitLsDir: (_root, dir) => (dir === "scripts" ? pile : []) },
+    { gitTrackedFiles: () => pile },
     5
   );
   const f = res.findings.find((x) => x.kind === "component-candidate");
@@ -110,10 +110,31 @@ test("component-candidate: 未登記実装ファイルが閾値を超えた dir 
 test("component-candidate: 閾値未満なら沈黙 (小さいクラスタは枠を彫らない)", () => {
   const res = check(
     ["scripts/a.ts"],
-    { gitLsDir: (_root, dir) => (dir === "scripts" ? ["scripts/a.ts", "scripts/b.ts"] : []) },
+    { gitTrackedFiles: () => ["scripts/a.ts", "scripts/b.ts"] },
     5
   );
   assert.ok(!res.findings.some((x) => x.kind === "component-candidate"));
+});
+
+test("cluster 判定の tracked 列挙は触れた dir 数に関わらず1回だけ (issue #25: per-dir spawn の O(dirs) ブロック回帰防止)", () => {
+  let calls = 0;
+  const res = check(
+    ["a/x.ts", "b/y.ts", "c/z.ts", "d/w.ts"],
+    { gitTrackedFiles: () => { calls += 1; return ["a/x.ts", "b/y.ts", "c/z.ts", "d/w.ts"]; } },
+    5
+  );
+  assert.equal(calls, 1, "git ls-files 相当の呼び出しは全体で1回");
+  assert.equal(res.entries.length, 4);
+});
+
+test("cluster 判定: 触れた dir が無ければ tracked 列挙自体を呼ばない", () => {
+  let calls = 0;
+  const res = check(
+    ["docs/readme.md"],
+    { gitTrackedFiles: () => { calls += 1; return []; } }
+  );
+  assert.equal(calls, 0, "non-impl のみなら git を触らない");
+  assert.equal(res.entries[0].status, "non-impl");
 });
 
 test("carving.json の literal 免除は unregistered 集計からも外れる", () => {
@@ -126,7 +147,7 @@ test("carving.json の literal 免除は unregistered 集計からも外れる",
   );
   const res = frameCheck(
     { vaultDir: vault, root, paths: ["scripts/gen.ts"], inputSource: "files", thresholdFiles: 1 },
-    { gitLsDir: () => ["scripts/gen.ts"] }
+    { gitTrackedFiles: () => ["scripts/gen.ts"] }
   );
   assert.equal(res.entries[0].status, "exempt");
   assert.match(res.entries[0].exempt_reason!, /自動生成/);
