@@ -305,31 +305,35 @@ export async function writeFileAtomic(outPath: string, content: string): Promise
 }
 
 // issue #27: 「自分の書き込みが索引を古い世代へ退行させるか」の rename 直前判定。
-// 1. fingerprint 一致 → 既存と同一 snapshot 内容 → 書いても退行しない。
-// 2. 双方に snapshot_seq があり既存 <= 自分 → 自分の方が新しい snapshot → 退行しない。
-//    これは「同一 cache 世代内の高速パス」でしかない (PR #41 [P2]): seq は同じ vault の
-//    cache dir を共有する builder 同士でのみ単調で、cache 初期化 (seq は 0 に戻る —
-//    cli-env.ts が設計上許容と明文化) や別 GRAPHRAG_STATE_DIR が同じ out を共有した
-//    場合は seq 空間が別物になる。そのため既存の seq が高くても即 skip はせず、
-//    3. の fingerprint fallback (既存 index が現 graph と内容一致するか) に落として裁定
-//    する — 一致するなら真に fresh なので破棄、一致しないなら seq が高くても現実と
-//    乖離した index を守る意味はない (索引は二次生成物で、真実は graph 側) ので書く。
-//    これで #27 の「stale builder が新しい index を踏み潰さない」性質は保たれる:
-//    stale builder の payload は古い graph 由来 → 既存 (新しい) index は現 graph と
-//    一致 → skip。
-// 3. fingerprint fallback: 既存 index が現 vault の graph と内容一致していればそれが
-//    fresh なので自分は破棄。判定不能 (vault 無し・読めない等) は seq 比較できていれば
-//    その結果、できていなければ従来どおり後勝ち。
+// 1. fingerprint 一致 → 既存と同一 snapshot 内容 → 書いても退行しない (無害な早期判定)。
+// 2. 主裁定 (PR #41 再指摘): vault の現 graph を読めるなら、seq に関係なく常に
+//    「既存 index が現 graph と内容一致するか」で裁定する。一致するなら既存が真に
+//    fresh なので自分は破棄 (skip)、一致しないなら seq がどうであれ現実と乖離した
+//    index を守る意味はない (索引は二次生成物で、真実は graph 側) ので書く。
+//    seq を先に見ない理由: seq は同じ vault の cache dir を共有する builder 同士で
+//    しか単調でなく、cache 初期化 (seq は 0 に戻る — cli-env.ts が設計上許容と明文化)
+//    や別 GRAPHRAG_STATE_DIR が同じ out を共有した場合は seq 空間が別物になる。
+//    v1.39.4 は「既存が高 seq → 即 skip」の向きだけ塞いだが、逆向き —
+//    「現 graph と一致する既存 (新 seq 空間で低 seq) を、旧 seq 空間の高 seq stale
+//    builder が existing.seq <= payload.seq の高速パスで上書きできる」— が残っていた。
+//    内容一致を常に主裁定にすることで両方向とも塞がる:
+//    (a) stale builder (低 seq) → 既存 (新) が現 graph と一致 → skip。
+//    (b) cache 初期化後、現 graph と乖離した旧世代 index (高 seq) → 不一致 → 書く。
+//    (c) 旧世代の高 seq builder → 既存 (新、低 seq) が現 graph と一致 → skip。
+// 3. seq 比較は「現 graph を読めない時の最終 fallback」に格下げ: vault が渡らない
+//    経路や graph 読み失敗時のみ、既存 > 自分 なら退行とみなす。それも比較不能なら
+//    従来どおり後勝ち。書き込み時の graph 読みコストは v1.39.4 の fallback 経路で
+//    既に払っていたものと同等 (読みは cache 済み)。
 export async function indexWriteWouldRegress(payload: any, existing: any, vaultDir?: string): Promise<boolean> {
   if (!existing || typeof existing !== "object") return false;
   if (
     typeof existing.graph_fingerprint === "string" &&
     existing.graph_fingerprint === payload.graph_fingerprint
   ) return false;
-  const seqComparable =
-    typeof existing.snapshot_seq === "number" && typeof payload.snapshot_seq === "number";
-  if (seqComparable && existing.snapshot_seq <= payload.snapshot_seq) return false;
-  const seqVerdict = seqComparable && existing.snapshot_seq > payload.snapshot_seq;
+  const seqVerdict =
+    typeof existing.snapshot_seq === "number" &&
+    typeof payload.snapshot_seq === "number" &&
+    existing.snapshot_seq > payload.snapshot_seq;
   if (!vaultDir) return seqVerdict; // graph が渡らない経路は現状維持 (seq 比較 or 後勝ち)
   try {
     const { data } = await readVaultConsistentWithSeq(

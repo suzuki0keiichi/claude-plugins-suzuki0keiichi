@@ -661,6 +661,40 @@ test("PR #41: cache 初期化後 (seq リセット)、現 graph と一致しな�
   }
 });
 
+test("PR #41 再指摘: 現 graph と一致する低 seq の既存 index は、旧世代の高 seq builder に踏み潰されない (seq 逆向きの穴)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec41-revdir-"));
+  const nodeNew = { id: "decision:s:x", type: "Decision", title: "X", summary: "NEW" };
+  const nodeOld = { id: "decision:s:x", type: "Decision", title: "X", summary: "OLD" };
+  try {
+    // vault (現 graph) は NEW。cache 初期化後の新 seq 空間 (seq 0) で build された、
+    // 現 graph と内容一致する fresh な index が既に公開されている。
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    const currentNodes = (await import("./import-vault.ts") as any).importVault(vaultDir).nodes;
+    const fresh = {
+      version: 1,
+      provider: "other",
+      snapshot_seq: 0,
+      graph_fingerprint: "e".repeat(64),
+      rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) }))
+    };
+    writeFileSync(out, JSON.stringify(fresh));
+    // 自分は cache 初期化前の旧 seq 空間 (seq 100) で OLD snapshot から build した stale builder。
+    // 現行の高速パス (existing.seq 0 <= payload.seq 100 → 即 no-regress) だと書けてしまう。
+    const res: any = await buildAndWriteVectorIndex(
+      { vault: vaultDir, out },
+      { provider: fakeProvider(3), graphObject: { nodes: [nodeOld], edges: [] }, snapshotSeq: 100, previousIndex: null }
+    );
+    assert.equal(res.skipped, true, "旧世代の高 seq builder は現 graph と一致する index を上書きできない");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 0, "fresh な index は踏み潰されない");
+    assert.equal(onDisk.provider, "other", "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("issue #27: fingerprint 一致は seq より先に判定され、退行ではない (同一 snapshot 内容の上書きは無害)", async () => {
   const { indexWriteWouldRegress } = await import("./build-vector-index.ts") as any;
   const fp = "a".repeat(64);
