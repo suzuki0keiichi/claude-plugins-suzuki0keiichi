@@ -1058,6 +1058,164 @@ test("precheck/premise_candidates: GRAPHRAG_STATE_DIR 設定時、共有解決�
   }
 });
 
+// ── issue #26: mutation は自身が触った差分以外を stage / commit / rollback しない ──
+// 現行の rollback (`git restore --source=HEAD --staged --worktree -- .`) は vault 全体を
+// HEAD へ戻すため mutation 開始前からの利用者の未コミット変更を消し、成功経路の
+// `git add -- .` は利用者の変更を勝手に commit へ混入させる。以下はその regression 固定。
+
+/** gitInitVaultWithDecision の graph で decision:s:a の summary だけ差し替えた canonical
+ *  serialization を返す。round-trip する編集 (= writeVaultDelta が触らない編集) を作るため。 */
+function editedDecisionAContent(summary: string): string {
+  const g = {
+    generated_at: FIXED_TS,
+    nodes: [
+      { id: "file:s:README.md", type: "File", title: "README.md", path: "README.md" },
+      { id: "decision:s:a", type: "Decision", title: "A", summary },
+    ],
+    edges: [
+      {
+        id: "decision_s_a__documented_by__file_s_README.md",
+        type: "documented_by",
+        from: "decision:s:a",
+        to: "file:s:README.md",
+      },
+    ],
+  };
+  const f = buildVaultFiles(g).find((f) => f.relPath === "Decision/A.md");
+  assert.ok(f, "前提: Decision/A.md が生成される");
+  return f!.content;
+}
+
+test("issue #26: commit 失敗の rollback は mutation 開始前からの利用者の未コミット変更を消さない", async () => {
+  const { repo, vault, stateDir } = gitInitVaultWithDecision();
+  // 生成集合外の利用者ファイル (tracked) を seed して commit しておく。
+  writeFileSync(path.join(vault, "NOTES.txt"), "original notes\n");
+  execFileSync("git", ["-C", repo, "add", "."]);
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "user notes"]);
+  const head0 = vaultHead(vault);
+
+  // 利用者の未コミット編集:
+  //  (a) 生成集合外ファイル NOTES.txt の手編集
+  //  (b) この mutation の delta が触らない既存ノード Decision/A.md への canonical 編集
+  writeFileSync(path.join(vault, "NOTES.txt"), "user edited notes\n");
+  const editedA = editedDecisionAContent("user edited a");
+  writeFileSync(path.join(vault, "Decision", "A.md"), editedA);
+
+  // pre-commit hook で git commit を必ず失敗させる。
+  const hook = path.join(repo, ".git", "hooks", "pre-commit");
+  writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+  chmodSync(hook, 0o755);
+
+  await assert.rejects(() =>
+    applyMutationToVault({
+      plan: decisionPlan("d26", "commit will fail with dirty worktree"),
+      vaultDir: vault,
+      stateDir,
+      git: true,
+      buildIndex: noopIndex,
+    })
+  );
+
+  assert.equal(vaultHead(vault), head0, "HEAD 不変");
+  assert.equal(
+    readFileSync(path.join(vault, "NOTES.txt"), "utf8"),
+    "user edited notes\n",
+    "生成集合外ファイルの未コミット編集は rollback で消されない"
+  );
+  assert.equal(
+    readFileSync(path.join(vault, "Decision", "A.md"), "utf8"),
+    editedA,
+    "delta が触らない既存ノードへの編集も生存する (HEAD へ戻さない)"
+  );
+  // mutation 自身の差分は完全に取り消されている。
+  assert.ok(!existsSync(path.join(vault, "Decision", "D26.md")), "新規ノードファイルは消えている");
+  const after = importVault(vault);
+  assert.ok(!after.nodes.some((n) => n.id === "decision:s:d26"), "新ノードは undo 済み");
+  const stillStaged = execFileSync("git", ["diff", "--cached", "--name-only", "--", "."], {
+    cwd: vault,
+    encoding: "utf8",
+  }).trim();
+  assert.equal(stillStaged, "", "この mutation が stage した分は unstage されている");
+});
+
+test("issue #26: mutation が書くファイルが事前 dirty なら失敗後は利用者の dirty 内容へ戻る (HEAD ではなく)", async () => {
+  const { repo, vault, stateDir } = gitInitVaultWithDecision();
+  // 利用者の未コミット編集が「この mutation が書くファイル」そのものにある状況。
+  const editedA = editedDecisionAContent("user wip a");
+  writeFileSync(path.join(vault, "Decision", "A.md"), editedA);
+
+  const hook = path.join(repo, ".git", "hooks", "pre-commit");
+  writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+  chmodSync(hook, 0o755);
+
+  await assert.rejects(() =>
+    applyMutationToVault({
+      plan: {
+        reason: "update a while user has wip on the same file",
+        nodes: [{ op: "update", id: "decision:s:a", updates: { summary: "mutated summary" } }],
+        edges: [],
+      },
+      vaultDir: vault,
+      stateDir,
+      git: true,
+      buildIndex: noopIndex,
+    })
+  );
+
+  assert.equal(
+    readFileSync(path.join(vault, "Decision", "A.md"), "utf8"),
+    editedA,
+    "rollback 先は mutation 開始前の worktree 内容 (利用者の dirty) であって HEAD ではない"
+  );
+});
+
+test("issue #26: 成功経路で生成集合外の利用者変更は commit に混入せず worktree に dirty のまま残る", async () => {
+  const { repo, vault, stateDir } = gitInitVaultWithDecision();
+  writeFileSync(path.join(vault, "NOTES.txt"), "original notes\n");
+  execFileSync("git", ["-C", repo, "add", "."]);
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "user notes"]);
+
+  // 利用者の未コミット変更: tracked な生成集合外ファイルの編集 + untracked な非ノードファイル
+  // (.obsidian 配下は importVault が .md として読んでしまうので非 .md で置く)。
+  writeFileSync(path.join(vault, "NOTES.txt"), "user edited notes\n");
+  const obsMd = path.join(vault, ".obsidian", "workspace.json");
+  mkdirSync(path.dirname(obsMd), { recursive: true });
+  writeFileSync(obsMd, "{}\n");
+
+  const res = await applyMutationToVault({
+    plan: decisionPlan("ok26", "success path with dirty worktree"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+  });
+  assert.equal(res.applied, true);
+
+  const committed = execFileSync("git", ["-C", repo, "show", "--name-only", "--format=", "HEAD"], {
+    encoding: "utf8",
+  });
+  assert.ok(committed.includes("Decision/"), "mutation 自身の差分は commit される");
+  assert.ok(!committed.includes("NOTES.txt"), "生成集合外の利用者編集は commit に混入しない");
+  assert.ok(!committed.includes(".obsidian"), "untracked な非ノードファイルも commit に混入しない");
+
+  assert.equal(
+    readFileSync(path.join(vault, "NOTES.txt"), "utf8"),
+    "user edited notes\n",
+    "利用者の編集内容は worktree に残る"
+  );
+  assert.ok(existsSync(obsMd), "untracked ファイルは残る");
+  const porcelain = execFileSync("git", ["status", "--porcelain", "--", "."], {
+    cwd: vault,
+    encoding: "utf8",
+  });
+  assert.match(porcelain, /NOTES\.txt/, "生成集合外の変更は dirty のまま可視 (fsck git-uncommitted が拾う)");
+  const stillStaged = execFileSync("git", ["diff", "--cached", "--name-only"], {
+    cwd: vault,
+    encoding: "utf8",
+  }).trim();
+  assert.equal(stillStaged, "", "利用者の変更が stage されっぱなしにもならない");
+});
+
 // ── issue #18: node delete の tombstone 台帳 ────────────────────────────────
 
 test("applyMutationToVault: delete は tombstone 台帳に記録され mutation と同一コミットで確定する", async () => {

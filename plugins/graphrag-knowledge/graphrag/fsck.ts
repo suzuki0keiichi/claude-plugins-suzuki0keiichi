@@ -337,11 +337,14 @@ export function fsckVault(options: {
         status: "error",
         detail: { changes: porcelain.split("\n") },
         hint:
-          "uncommitted changes under the vault are the signature of a torn write (a mutation wrote files " +
-          "but died before its git commit). Inspect with `git -C <vault> status -- .`; if the delta is " +
-          "unwanted, roll back with `git -C <vault> restore --source=HEAD --staged --worktree -- .`; if it " +
-          "is wanted, commit it deliberately. The next successful mutation would otherwise absorb it into " +
-          "its own commit.",
+          "uncommitted changes under the vault can be the signature of a torn write (a mutation wrote files " +
+          "but died before its git commit), or your own uncommitted edits (mutations only stage the files " +
+          "they generate, so your changes are left dirty here on purpose). Inspect with " +
+          "`git -C <vault> status -- .`; if the delta is unwanted, roll back with " +
+          "`git -C <vault> restore --source=HEAD --staged --worktree -- .`; if it is wanted, commit it " +
+          "deliberately. A torn delta of generated node files would otherwise be absorbed by the next " +
+          "successful mutation's commit; files outside the generated set are never staged by mutations and " +
+          "stay dirty until you act on them.",
       };
     } else {
       gitCheck = { id: "git-uncommitted", status: "ok", detail: { changes: [] } };

@@ -16,8 +16,8 @@
  *     **利用者が台帳の競合マーカーを見ることは無い**。各行は独立した事実なので
  *     「全部残す」が常に正しい解決 (union の意味論と一致する)。
  *   - ドットディレクトリなので writeVaultDelta の孤児 .md 削除 / pruneEmptyDirs /
- *     Obsidian の走査対象にならず、gitCommitVault (`git add -- .`) には乗る
- *     (= mutation と同一コミットで確定する)。
+ *     Obsidian の走査対象にならず、sink (delta) に積まれることで gitCommitVault の
+ *     明示 stage pathspec には乗る (= mutation と同一コミットで確定する)。
  *   - 台帳は「リダイレクト情報 (successor)」と「修復ペイロード (cascaded_edges)」の
  *     二層寿命を持つ。肥大化したら修復済み/期限切れエントリを successor だけの
  *     redirect-only 行に圧縮してよい (シャード単位の破棄も可)。圧縮は将来の verb。

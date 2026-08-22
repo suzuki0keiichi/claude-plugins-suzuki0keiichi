@@ -32,7 +32,7 @@ import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
-import { appendTombstones, type TombstoneEntry } from "./tombstones.ts";
+import { appendTombstones, TOMBSTONES_DIR, type TombstoneEntry } from "./tombstones.ts";
 
 // export はフォールト注入テスト用 (writeVaultDelta の deps.writeFile 既定実装)。
 export function writeFileAtomic(abs: string, content: string): void {
@@ -44,7 +44,7 @@ export function writeFileAtomic(abs: string, content: string): void {
   } catch (e) {
     // rename 失敗(Windows EPERM・ハンドル競合等)時に tmp を座礁させない。
     // 旧実装は tmp が新内容を保持したまま残り、手動昇格でしか復旧できなかった。
-    // 失敗は呼び出し元(applyMutationToVault)へ伝播し、そちらが HEAD へ巻き戻す。
+    // 失敗は呼び出し元(applyMutationToVault)へ伝播し、そちらが開始前の状態へ巻き戻す。
     try {
       unlinkSync(tmp);
     } catch {
@@ -109,8 +109,8 @@ export function writeVaultDelta(
   const files = buildVaultFiles(nextGraph);
   const wantAbs = new Set(files.map((f) => path.join(vaultDir, f.relPath)));
   // sink を渡すと途中まで書いた written/created がそこに積まれる。多ファイル適用が
-  // 途中で throw しても呼び出し元が partial を把握でき、HEAD への巻き戻しで untracked
-  // な新規ファイル(created)を確実に消せる。
+  // 途中で throw しても呼び出し元が partial を把握でき、巻き戻しで untracked な
+  // 新規ファイル(created)を確実に消せる。
   const written: string[] = sink?.written ?? [];
   const created: string[] = sink?.created ?? [];
   for (const f of files) {
@@ -140,25 +140,73 @@ export function writeVaultDelta(
 }
 
 /**
- * commit 失敗時に vault working tree を HEAD まで巻き戻す(mutation を完全に取り消す)。
- * tracked な変更/削除は git restore で元に戻し、この mutation が新規作成した untracked
- * ファイル(created)は restore の対象外なので個別に削除する。best effort。
+ * writeVaultDelta の直前に「これから書く/消しうるパス」の元 worktree 内容を in-memory に
+ * 退避する (issue #26)。対象は生成集合 (nextGraph の全 relPath)・既存 .md 全部 (孤児削除
+ * されうる)・tombstone 台帳 (追記されうる)。存在しないパスは記録しない (= 新規作成は
+ * delta.created が示すので rollback は unlink で戻せる)。小さい .md 群なので軽い。
  */
-function rollbackVaultWorktree(vaultDir: string, created: string[]): void {
-  // undo tracked modifications/deletions and unstage, back to HEAD
-  try {
-    execFileSync("git", ["restore", "--source=HEAD", "--staged", "--worktree", "--", "."], {
-      cwd: vaultDir,
-    });
-  } catch {
-    /* best effort */
-  }
-  // remove files this mutation newly created (untracked, unaffected by restore)
-  for (const rel of created) {
+function snapshotVaultPreimages(vaultDir: string, generatedRelPaths: string[]): Map<string, string> {
+  const backup = new Map<string, string>();
+  const record = (rel: string) => {
+    if (backup.has(rel)) return;
+    const abs = path.join(vaultDir, rel);
     try {
-      unlinkSync(path.join(vaultDir, rel));
+      if (existsSync(abs) && statSync(abs).isFile()) backup.set(rel, readFileSync(abs, "utf8"));
     } catch {
-      /* noop */
+      /* best effort */
+    }
+  };
+  for (const rel of generatedRelPaths) record(rel);
+  for (const abs of listMdFiles(vaultDir)) record(path.relative(vaultDir, abs));
+  const tombDir = path.join(vaultDir, TOMBSTONES_DIR);
+  if (existsSync(tombDir)) {
+    for (const e of readdirSync(tombDir)) {
+      if (e.endsWith(".jsonl") || e === ".gitattributes") record(path.join(TOMBSTONES_DIR, e));
+    }
+  }
+  return backup;
+}
+
+/**
+ * apply/commit 失敗時の rollback (issue #26)。vault 全体への `git restore ... -- .` は
+ * 使わない — mutation 開始前から存在した利用者の未コミット変更 (staged/unstaged) を
+ * 消してしまうため。代わりに、この mutation が実際に触ったパス (delta) だけを正確に
+ * 巻き戻す:
+ *   - 新規作成 (created) は unlink
+ *   - 上書き/削除したパスは backup (mutation 開始前の worktree 内容) を書き戻す —
+ *     mutation 前が dirty ならその dirty 内容へ戻る (HEAD ではない)
+ *   - index はこの mutation が stage したパス (stagedPaths) のみ HEAD へ戻す
+ * 触っていないパス (利用者の既存変更含む) には一切手を付けない。best effort。
+ */
+function rollbackVaultWorktree(
+  vaultDir: string,
+  delta: { written: string[]; removed: string[]; created: string[] },
+  backup: Map<string, string>,
+  stagedPaths: string[] | null
+): void {
+  const createdSet = new Set(delta.created);
+  // created は writeVaultDelta では written の部分集合だが、DI された writer が created
+  // だけに積むこともあるため明示的に合流させる。
+  for (const rel of new Set([...delta.written, ...delta.removed, ...delta.created])) {
+    try {
+      if (createdSet.has(rel)) {
+        unlinkSync(path.join(vaultDir, rel));
+      } else {
+        const prev = backup.get(rel);
+        if (prev !== undefined) writeFileAtomic(path.join(vaultDir, rel), prev);
+      }
+    } catch {
+      /* best effort */
+    }
+  }
+  if (stagedPaths && stagedPaths.length > 0) {
+    try {
+      execFileSync("git", ["reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"], {
+        cwd: vaultDir,
+        input: stagedPaths.join("\0"),
+      });
+    } catch {
+      /* best effort (unborn branch 等) */
     }
   }
 }
@@ -194,7 +242,7 @@ export function assertRemovalsExplained(args: {
   const err: any = new Error(
     `post-write self-check failed (unexplained-removal): file(s) [${args.removed.join(", ")}] were removed ` +
       `and node(s) [${lost.join(", ")}] vanished from the graph without a plan delete. This indicates a code ` +
-      `bug that would silently destroy knowledge; the write is rolled back to HEAD (nothing was committed).`
+      `bug that would silently destroy knowledge; the write is rolled back (nothing was committed).`
   );
   err.code = "UNEXPLAINED_REMOVAL";
   err.check_id = "unexplained-removal";
@@ -270,11 +318,49 @@ function assertOnBranch(vaultDir: string): void {
 }
 
 /**
- * vault へ staged 変更を commit する。pathspec (vault 配下だけに限定した commit) は
- * merge/cherry-pick/revert 進行中は git 側の制約で一律拒否される
- * ("cannot do a partial commit during a merge" 等。pathspec が staged 全体と一致していても
- * 中身は見ずに拒否される)。vault は通常プロジェクト repo 内に同居するので、利用者が
- * mid-merge のときに typed-add/commit-mutation を叩くと毎回ここで死んでいた。
+ * この mutation が stage してよいパス集合 (issue #26): 生成集合 (nextGraph から生成される
+ * 全 .md — 内容一致で書かなかったものも含む。crash 由来の torn ファイルは「生成集合に
+ * 含まれ worktree で dirty・内容は既に正しい」なので、この明示 stage が従来の
+ * `git add -- .` と同様に自己回復を維持する) + delta が触ったパス (tombstone シャード等)
+ * + delta.deleted の削除。存在しないパス (削除済み) は tracked のものだけ残す —
+ * untracked だった孤児 .md の削除は git 的に無で、pathspec が何にもマッチしないと
+ * git add が失敗するため。
+ */
+function mutationStagePaths(
+  vaultDir: string,
+  generatedRelPaths: string[],
+  delta: { written: string[]; removed: string[] }
+): string[] {
+  const all = new Set<string>([...generatedRelPaths, ...delta.written, ...delta.removed]);
+  const out: string[] = [];
+  const missing: string[] = [];
+  for (const rel of all) {
+    if (existsSync(path.join(vaultDir, rel))) out.push(rel);
+    else missing.push(rel);
+  }
+  if (missing.length > 0) {
+    const tracked = execFileSync("git", ["ls-files", "-z", "--", ...missing], {
+      cwd: vaultDir,
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter(Boolean);
+    out.push(...tracked);
+  }
+  return out;
+}
+
+/**
+ * vault へ mutation の差分を stage して commit する。stage は vault 全体 (`git add -- .`)
+ * ではなく stagePaths (生成集合 + delta の明示 pathspec) に限定する (issue #26) —
+ * 利用者が vault 内に持つ生成集合外の未コミット変更 (手編集ファイル等) を勝手に
+ * commit へ混入させないため。stage されなかった変更が vault subtree に dirty のまま
+ * 残るのは正しい挙動 (fsck の git-uncommitted check が可視化する)。
+ *
+ * pathspec (限定した commit) は merge/cherry-pick/revert 進行中は git 側の制約で一律
+ * 拒否される ("cannot do a partial commit during a merge" 等。pathspec が staged 全体と
+ * 一致していても中身は見ずに拒否される)。vault は通常プロジェクト repo 内に同居するので、
+ * 利用者が mid-merge のときに typed-add/commit-mutation を叩くと毎回ここで死んでいた。
  *
  * 判定: repo 全体の staged 一覧 (pathspec 無し) と vault 配下限定の staged 一覧
  * (pathspec "." だが cwd=vaultDir で git 自身が解決するので、macOS の /var →
@@ -282,16 +368,22 @@ function assertOnBranch(vaultDir: string): void {
  * 比較するだけで「vault 外に staged 済みの変更が無い」ことを検証できる。
  *   - 一致 (vault-only) → pathspec 無しで commit (mid-merge でも通る。安全性は
  *     「staged 全体が vault 配下だけ」と検証済みであることが担保する)。
- *   - 不一致 (foreign 混在) → 従来どおり pathspec 付きで commit (`--only` 相当、
+ *   - 不一致 (foreign 混在) → stagePaths 限定の pathspec 付きで commit (`--only` 相当、
  *     利用者が別所で事前 stage していた変更を巻き込まない)。mid-merge 等で git に
- *     拒否されたら、この mutation の vault 側 delta は呼び出し元が HEAD へ巻き戻す
+ *     拒否されたら、この mutation の vault 側 delta は呼び出し元が開始前の状態へ巻き戻す
  *     (all-or-nothing) ので、原因と取るべき行動を明示したエラーに変換して投げる。
  */
-export function gitCommitVault(vaultDir: string, message: string): string {
-  // git add は vaultDir を cwd にして "." で stage する。git の toplevel を
-  // path.relative で求める方式は、macOS の /var → /private/var シンボリックリンク
-  // 解決で root と vaultDir の prefix がずれ、"outside repository" になるため使わない。
-  execFileSync("git", ["add", "--", "."], { cwd: vaultDir });
+export function gitCommitVault(vaultDir: string, message: string, stagePaths: string[]): string {
+  // git add は vaultDir を cwd にし、pathspec は stdin (NUL 区切り) で渡す (パス数が
+  // 多くても ARG_MAX を踏まない)。git の toplevel を path.relative で求める方式は、
+  // macOS の /var → /private/var シンボリックリンク解決で root と vaultDir の prefix が
+  // ずれ、"outside repository" になるため使わない。
+  if (stagePaths.length > 0) {
+    execFileSync("git", ["add", "--pathspec-from-file=-", "--pathspec-file-nul"], {
+      cwd: vaultDir,
+      input: stagePaths.join("\0"),
+    });
+  }
 
   const allStaged = execFileSync("git", ["diff", "--cached", "--name-only"], {
     cwd: vaultDir,
@@ -310,7 +402,13 @@ export function gitCommitVault(vaultDir: string, message: string): string {
     execFileSync("git", ["commit", "-q", "-m", message], { cwd: vaultDir });
   } else {
     try {
-      execFileSync("git", ["commit", "-q", "-m", message, "--", "."], { cwd: vaultDir });
+      // 注意: pathspec 付き commit は「listed files の現在内容」を記録するので、pathspec
+      // を "." にすると利用者の unstaged な vault 内編集まで記録してしまう。この mutation
+      // の stagePaths に限定する (それらの worktree 内容 = この mutation が書いた内容)。
+      execFileSync("git", ["commit", "-q", "-m", message, "--pathspec-from-file=-", "--pathspec-file-nul"], {
+        cwd: vaultDir,
+        input: stagePaths.join("\0"),
+      });
     } catch (e: any) {
       const err: any = new Error(
         `git commit failed because unrelated (non-vault) files are also staged in this repo, which ` +
@@ -457,8 +555,11 @@ function assessIndexStale(
  * 索引(vector.json)は再生成可能な二次成果物なので、ビルド失敗しても
  * mutation は中断せず commit まで進め index_status で結果を返す。
  * 原子性: git commit(ref 前進)を唯一の確定境界とし、適用中のどの失敗(writeVaultDelta
- * 途中失敗・commit 失敗)でも作業ツリーを HEAD へ巻き戻す。外から見える正本状態は常に
- * 「古い HEAD」か「新しい HEAD」だけになり、base_sha↔HEAD の OCC が実際に効く。
+ * 途中失敗・commit 失敗)でも「この mutation が触ったパスだけ」を開始前の worktree 内容へ
+ * 巻き戻す (issue #26: vault 全体の HEAD restore は利用者の未コミット変更を消すのでしない)。
+ * 外から見える正本 (committed) 状態は常に「古い HEAD」か「新しい HEAD」だけになり、
+ * base_sha↔HEAD の OCC が実際に効く。stage/commit も生成集合+delta の明示 pathspec に
+ * 限定し、利用者の未コミット変更を commit へ混入させない。
  */
 export async function applyMutationToVault(args: {
   plan: any;
@@ -749,6 +850,15 @@ export async function applyMutationToVault(args: {
     // created が残るので、巻き戻しで untracked な新規ファイルを確実に消せる。
     const delta = { written: [] as string[], removed: [] as string[], created: [] as string[] };
     const writeDelta = args.writeDelta ?? writeVaultDelta;
+    // issue #26: 生成集合 (nextGraph の全 relPath) は stage の明示 pathspec と preimage
+    // backup の両方の基礎。backup は writeVaultDelta の直前に取り、失敗時の rollback は
+    // 「この mutation が触ったパスだけ」を mutation 開始前の worktree 内容へ戻す
+    // (利用者の未コミット変更に手を付けない)。
+    const generatedRelPaths = buildVaultFiles(v.nextGraph).map((f: any) => f.relPath as string);
+    const backup = snapshotVaultPreimages(vaultDir, generatedRelPaths);
+    // gitCommitVault が stage したパス (rollback で unstage する範囲)。stage 前の失敗では
+    // null のまま = index には一切触らない。
+    let stagedPaths: string[] | null = null;
     try {
       // commit を確定境界にするので、確定先 branch が無い(detached HEAD)なら適用前に止める。
       if (args.git !== false) assertOnBranch(vaultDir);
@@ -761,7 +871,8 @@ export async function applyMutationToVault(args: {
       const tombstones = recordTombstones({ vaultDir, plan: effectivePlan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
       let head: string | null = null;
       if (args.git !== false) {
-        head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation");
+        stagedPaths = mutationStagePaths(vaultDir, generatedRelPaths, delta);
+        head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation", stagedPaths);
       }
       return {
         applied: true,
@@ -790,18 +901,11 @@ export async function applyMutationToVault(args: {
         __suggestionsInput: { nextGraph: v.nextGraph, plan: effectivePlan, relations: relationCandidates },
       };
     } catch (applyErr) {
-      // 適用中のどの失敗(writeVaultDelta 途中失敗・commit 失敗等)でも作業ツリーを
-      // HEAD へ巻き戻し、部分適用を残さない。git 無効モードは巻き戻す HEAD が無いので
-      // best-effort で created の untracked ファイルだけ消す。
-      if (args.git !== false) rollbackVaultWorktree(vaultDir, delta.created);
-      else
-        for (const rel of delta.created) {
-          try {
-            unlinkSync(path.join(vaultDir, rel));
-          } catch {
-            /* noop */
-          }
-        }
+      // 適用中のどの失敗(writeVaultDelta 途中失敗・commit 失敗等)でも、この mutation が
+      // 触ったパスだけを開始前の状態へ巻き戻し、部分適用を残さない (issue #26: vault 全体を
+      // HEAD へ restore すると利用者の未コミット変更まで消えるのでしない)。git 無効モード
+      // でも backup ベースの巻き戻しはそのまま効く (index 操作だけ stagedPaths=null で skip)。
+      rollbackVaultWorktree(vaultDir, delta, backup, args.git !== false ? stagedPaths : null);
       throw applyErr;
     } finally {
       endVaultWrite(cacheDir, began);
