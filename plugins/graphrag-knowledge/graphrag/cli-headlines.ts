@@ -47,7 +47,7 @@ import { evidenceStaleNoteForNode, readEvidenceChangesByPath, refuteEvidenceChan
 import { isEchoAlias } from "./delta-check.ts";
 import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
-import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
+import { augmentMatchesWithXRefResolutions, createXRefResolutionContext } from "./xref-resolver.ts";
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph, vaultVectorIndexReadPath } from "./retrieval.ts";
 import { loadLexicalIndex } from "./lexical-index.ts";
 import { embedForIndex } from "./vector.ts";
@@ -716,12 +716,15 @@ export async function runAsk(argv: string[]) {
   // Non-throwing: failures are noted inline, ask output is never dropped.
   if (worldDir) {
     try {
+      // issue #32: brief / evidence の augmentation で 1 つの解決 context を共有し、
+      // 同一 ref / 同一 target vault の world scan・import・台帳読込を command 内 1 回にする。
+      const xrefCtx = createXRefResolutionContext();
       if (briefOut?.query?.matches) {
-        briefOut.query.matches = augmentMatchesWithXRefResolutions(briefOut.query.matches, worldDir);
+        briefOut.query.matches = augmentMatchesWithXRefResolutions(briefOut.query.matches, worldDir, xrefCtx);
       }
       for (const stage of stages) {
         if (stage?.output?.direct_evidence) {
-          stage.output.direct_evidence = augmentMatchesWithXRefResolutions(stage.output.direct_evidence, worldDir);
+          stage.output.direct_evidence = augmentMatchesWithXRefResolutions(stage.output.direct_evidence, worldDir, xrefCtx);
         }
       }
     } catch {

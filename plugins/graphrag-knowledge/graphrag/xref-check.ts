@@ -26,7 +26,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
-import { checkCrossVaultRefs, checkVaultParent } from "./xref-resolver.ts";
+import { checkCrossVaultRefs, checkVaultParent, createXRefResolutionContext } from "./xref-resolver.ts";
 import { resolveWorldDir } from "./world.ts";
 import { grepMarkersInRepo, verifyMarkerRefs, type MarkerRefFinding } from "./markers.ts";
 
@@ -75,7 +75,10 @@ export async function runXRefCheck(argv: string[]): Promise<void> {
     );
   }
 
-  const results = checkCrossVaultRefs(graph, worldDir);
+  // command スコープの解決 context (issue #32): 全 edge 走査で同一 target vault の
+  // import / world scan / 台帳読込を 1 回に畳む。寿命はこの command 内のみ。
+  const xrefCtx = createXRefResolutionContext();
+  const results = checkCrossVaultRefs(graph, worldDir, xrefCtx);
 
   const resolved = results.filter((r) => r.status === "resolved");
   const broken = results.filter((r) => r.status === "broken");

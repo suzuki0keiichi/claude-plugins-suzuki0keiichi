@@ -20,7 +20,7 @@ import path from "node:path";
 import { importVault } from "./import-vault.ts";
 import { loadWorldConfig, WORLD_FILE, type WorldVaultRef } from "./world.ts";
 import { resolveSchema } from "./schema-registry.ts";
-import { latestTombstones, resolveSuccessor } from "./tombstones.ts";
+import { latestTombstones, resolveSuccessor, type TombstoneEntry } from "./tombstones.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -212,46 +212,112 @@ export interface FindVaultResult {
   matchedViaAlias: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Resolution context (issue #32)
+// ---------------------------------------------------------------------------
+
 /**
- * Look up a vault by slug. Resolution strategy:
- *
- *   1. **world.json fast path** — if `<worldDir>/world.json` exists, scan its
- *      entries for a matching `slug` field. This is O(n) in the entry count
- *      with no filesystem probing beyond reading world.json itself. Entries
- *      without a `slug` field are skipped (they fall through to step 2).
- *   2. **VAULT.md probe** — for entries in world.json that lack a slug, and
- *      as a full fallback when world.json is absent, read each vault's
- *      VAULT.md and check `vault_slug` / `vault_slug_aliases`.
- *
- * Resolution order within each strategy:
- *   a. Exact match on vault_slug (or world.json slug) — matchedViaAlias: false
- *   b. Match in vault_slug_aliases (VAULT.md only) — matchedViaAlias: true
+ * DI hooks for the IO primitives the resolver consumes. Tests use these to
+ * count filesystem-heavy calls; production callers never need to set them.
  */
-export function findVaultBySlugWithInfo(slug: string, worldDir: string): FindVaultResult | null {
-  if (!existsSync(worldDir)) return null;
+export interface XRefResolutionContextOptions {
+  importVaultFn?: (vaultDir: string) => { nodes?: any[]; edges?: any[] };
+  loadWorldConfigFn?: (worldDir: string) => { vaults: WorldVaultRef[] };
+  latestTombstonesFn?: (vaultDir: string) => Map<string, TombstoneEntry>;
+}
+
+/** Prebuilt slug → vault lookup for one worldDir (see buildSlugLookup). */
+interface SlugLookup {
+  find(slug: string): FindVaultResult | null;
+}
+
+/**
+ * Command スコープの参照解決 context (issue #32)。
+ *
+ * cross-vault 参照の解決は edge / relation ごとに world slug lookup・target vault の
+ * importVault フル walk・node 線形探索・tombstone シャード再読を繰り返していた。この
+ * context は 1 コマンド実行の間だけ生きるキャッシュで、同じ world / vault / ref への
+ * 再読込を 1 回に畳む。
+ *
+ * 寿命設計: プロセスは短命・vault は読み取り専用という前提で、**寿命は 1 command に
+ * 限定する** — 長期 stale cache は作らない。resolveCrossVaultRef /
+ * checkCrossVaultRefs / augmentMatchesWithXRefResolutions の context 引数は省略可能で、
+ * 省略時は内部で都度作る (= 従来どおりの単発挙動)。
+ */
+export interface XRefResolutionContext {
+  readonly importVaultFn: (vaultDir: string) => { nodes?: any[]; edges?: any[] };
+  readonly loadWorldConfigFn: (worldDir: string) => { vaults: WorldVaultRef[] };
+  readonly latestTombstonesFn: (vaultDir: string) => Map<string, TombstoneEntry>;
+  /** worldDir → prebuilt slug lookup (world.json + VAULT.md scan を 1 回に) */
+  readonly slugLookups: Map<string, SlugLookup>;
+  /** vaultDir → imported graph、または import 失敗 (エラーも 1 回で確定させる) */
+  readonly graphs: Map<string, { graph: { nodes?: any[]; edges?: any[] } } | { error: unknown }>;
+  /** vaultDir → node id → 最初に現れた node (`.find` / `.some` の置換) */
+  readonly nodesById: Map<string, Map<string, any>>;
+  /** vaultDir → 台帳の last-wins Map */
+  readonly tombstones: Map<string, Map<string, TombstoneEntry>>;
+  /** `${worldDir}\n${ref}` → resolveCrossVaultRef の結果 (ref 文字列で dedup) */
+  readonly resolvedRefs: Map<string, ResolvedNode | null>;
+}
+
+export function createXRefResolutionContext(
+  opts: XRefResolutionContextOptions = {}
+): XRefResolutionContext {
+  return {
+    importVaultFn: opts.importVaultFn ?? importVault,
+    loadWorldConfigFn: opts.loadWorldConfigFn ?? loadWorldConfig,
+    latestTombstonesFn: opts.latestTombstonesFn ?? latestTombstones,
+    slugLookups: new Map(),
+    graphs: new Map(),
+    nodesById: new Map(),
+    tombstones: new Map(),
+    resolvedRefs: new Map()
+  };
+}
+
+/** first-wins insert — 元実装の「走査順で最初の一致が勝つ」を map 化しても保存する。 */
+function setFirst<V>(map: Map<string, V>, key: string, value: V): void {
+  if (!map.has(key)) map.set(key, value);
+}
+
+/**
+ * worldDir を 1 回だけ走査して slug → FindVaultResult の lookup 構造を作る。
+ *
+ * 元の per-query 実装 (world.json slug loop → slug 無し entry の VAULT.md probe →
+ * alias fallback、無 world.json 時はディレクトリ走査) の優先順位をそのまま map の
+ * 検索順で再現する:
+ *   1. world.json slug の exact (entry 順で最初)
+ *   2. slug 無し entry の VAULT.md exact (entry 順で最初)
+ *   3. alias (slug あり entry → slug 無し entry の元走査順で最初)
+ * ディレクトリ走査 fallback では exact (走査順) > alias (走査順)。
+ */
+function buildSlugLookup(worldDir: string, ctx: XRefResolutionContext): SlugLookup {
+  if (!existsSync(worldDir)) return { find: () => null };
 
   // --- Strategy 1: world.json slug lookup ---
   let worldConfig: { vaults: WorldVaultRef[] } | null = null;
   try {
-    worldConfig = loadWorldConfig(worldDir);
+    worldConfig = ctx.loadWorldConfigFn(worldDir);
   } catch {
     // world.json absent or malformed — fall through to directory scan
   }
 
   if (worldConfig) {
-    const aliasMatches: FindVaultResult[] = [];
+    const worldExact = new Map<string, FindVaultResult>();
+    const vaultMdExact = new Map<string, FindVaultResult>();
+    const aliasMatches = new Map<string, FindVaultResult>();
     const noSlugEntries: WorldVaultRef[] = [];
 
     for (const ref of worldConfig.vaults) {
       if (ref.slug) {
-        if (ref.slug === slug) {
-          const vaultDir = path.resolve(ref.path);
-          return { vaultDir, currentSlug: ref.slug, matchedViaAlias: false };
-        }
-        // world.json slug doesn't carry aliases — check VAULT.md for alias match
-        const info = readVaultSlugInfoForDir(path.resolve(ref.path));
-        if (info && info.aliases.includes(slug)) {
-          aliasMatches.push({ vaultDir: path.resolve(ref.path), currentSlug: info.slug, matchedViaAlias: true });
+        const vaultDir = path.resolve(ref.path);
+        setFirst(worldExact, ref.slug, { vaultDir, currentSlug: ref.slug, matchedViaAlias: false });
+        // world.json slug doesn't carry aliases — check VAULT.md for alias matches
+        const info = readVaultSlugInfoForDir(vaultDir);
+        if (info) {
+          for (const alias of info.aliases) {
+            setFirst(aliasMatches, alias, { vaultDir, currentSlug: info.slug, matchedViaAlias: true });
+          }
         }
       } else {
         noSlugEntries.push(ref);
@@ -263,17 +329,16 @@ export function findVaultBySlugWithInfo(slug: string, worldDir: string): FindVau
       const vaultDir = path.resolve(ref.path);
       const info = readVaultSlugInfoForDir(vaultDir);
       if (info) {
-        if (info.slug === slug) {
-          return { vaultDir, currentSlug: info.slug, matchedViaAlias: false };
-        }
-        if (info.aliases.includes(slug)) {
-          aliasMatches.push({ vaultDir, currentSlug: info.slug, matchedViaAlias: true });
+        setFirst(vaultMdExact, info.slug, { vaultDir, currentSlug: info.slug, matchedViaAlias: false });
+        for (const alias of info.aliases) {
+          setFirst(aliasMatches, alias, { vaultDir, currentSlug: info.slug, matchedViaAlias: true });
         }
       }
     }
 
-    if (aliasMatches.length > 0) return aliasMatches[0];
-    return null;
+    return {
+      find: (slug) => worldExact.get(slug) ?? vaultMdExact.get(slug) ?? aliasMatches.get(slug) ?? null
+    };
   }
 
   // --- Strategy 2: fallback directory scan (no world.json) ---
@@ -281,43 +346,118 @@ export function findVaultBySlugWithInfo(slug: string, worldDir: string): FindVau
   try {
     entries = readdirSync(worldDir);
   } catch {
-    return null;
+    return { find: () => null };
   }
-  const aliasMatches: FindVaultResult[] = [];
+  const exactMatches = new Map<string, FindVaultResult>();
+  const aliasMatches = new Map<string, FindVaultResult>();
   for (const entry of entries) {
     const entryAbs = path.join(worldDir, entry);
 
+    let dir: string | null = null;
     const canonicalVault = path.join(entryAbs, "vault");
     if (existsSync(canonicalVault)) {
-      const info = readVaultSlugInfoForDir(canonicalVault);
-      if (info) {
-        if (info.slug === slug) {
-          return { vaultDir: path.resolve(canonicalVault), currentSlug: info.slug, matchedViaAlias: false };
-        }
-        if (info.aliases.includes(slug)) {
-          aliasMatches.push({ vaultDir: path.resolve(canonicalVault), currentSlug: info.slug, matchedViaAlias: true });
-        }
+      dir = canonicalVault;
+    } else {
+      try {
+        if (statSync(entryAbs).isDirectory()) dir = entryAbs;
+      } catch {
+        // ignore non-accessible entries
       }
-      continue;
     }
+    if (!dir) continue;
 
-    try {
-      if (statSync(entryAbs).isDirectory()) {
-        const info = readVaultSlugInfoForDir(entryAbs);
-        if (info) {
-          if (info.slug === slug) {
-            return { vaultDir: path.resolve(entryAbs), currentSlug: info.slug, matchedViaAlias: false };
-          }
-          if (info.aliases.includes(slug)) {
-            aliasMatches.push({ vaultDir: path.resolve(entryAbs), currentSlug: info.slug, matchedViaAlias: true });
-          }
-        }
+    const info = readVaultSlugInfoForDir(dir);
+    if (info) {
+      const vaultDir = path.resolve(dir);
+      setFirst(exactMatches, info.slug, { vaultDir, currentSlug: info.slug, matchedViaAlias: false });
+      for (const alias of info.aliases) {
+        setFirst(aliasMatches, alias, { vaultDir, currentSlug: info.slug, matchedViaAlias: true });
       }
-    } catch {
-      // ignore non-accessible entries
     }
   }
-  return aliasMatches.length > 0 ? aliasMatches[0] : null;
+  return { find: (slug) => exactMatches.get(slug) ?? aliasMatches.get(slug) ?? null };
+}
+
+/** context 経由で worldDir の slug lookup を取得する (worldDir ごとに 1 回だけ構築)。 */
+function slugLookupFor(ctx: XRefResolutionContext, worldDir: string): SlugLookup {
+  let lookup = ctx.slugLookups.get(worldDir);
+  if (!lookup) {
+    lookup = buildSlugLookup(worldDir, ctx);
+    ctx.slugLookups.set(worldDir, lookup);
+  }
+  return lookup;
+}
+
+/** context 経由で vault を import する (成功も失敗も vaultDir ごとに 1 回で確定)。 */
+function importVaultCached(
+  ctx: XRefResolutionContext,
+  vaultDir: string
+): { graph: { nodes?: any[]; edges?: any[] } } | { error: unknown } {
+  let entry = ctx.graphs.get(vaultDir);
+  if (!entry) {
+    try {
+      entry = { graph: ctx.importVaultFn(vaultDir) };
+    } catch (error) {
+      entry = { error };
+    }
+    ctx.graphs.set(vaultDir, entry);
+  }
+  return entry;
+}
+
+/**
+ * node id → node の Map (`.find` の置換)。重複 id は最初の node が勝つ
+ * (`Array.prototype.find` と同じ意味論)。
+ */
+function nodeMapFor(
+  ctx: XRefResolutionContext,
+  vaultDir: string,
+  graph: { nodes?: any[] }
+): Map<string, any> {
+  let map = ctx.nodesById.get(vaultDir);
+  if (!map) {
+    map = new Map();
+    for (const node of graph.nodes ?? []) {
+      if (!map.has(node.id)) map.set(node.id, node);
+    }
+    ctx.nodesById.set(vaultDir, map);
+  }
+  return map;
+}
+
+/** context 経由で台帳を読む (vaultDir ごとに 1 回だけシャード読込+ソート)。 */
+function tombstonesFor(ctx: XRefResolutionContext, vaultDir: string): Map<string, TombstoneEntry> {
+  let map = ctx.tombstones.get(vaultDir);
+  if (!map) {
+    map = ctx.latestTombstonesFn(vaultDir);
+    ctx.tombstones.set(vaultDir, map);
+  }
+  return map;
+}
+
+/**
+ * Look up a vault by slug. Resolution strategy:
+ *
+ *   1. **world.json fast path** — if `<worldDir>/world.json` exists, scan its
+ *      entries for a matching `slug` field. Entries without a `slug` field are
+ *      probed via VAULT.md (step 2's mechanism) after all slugged entries.
+ *   2. **VAULT.md probe** — for entries in world.json that lack a slug, and
+ *      as a full fallback when world.json is absent, read each vault's
+ *      VAULT.md and check `vault_slug` / `vault_slug_aliases`.
+ *
+ * Resolution order within each strategy:
+ *   a. Exact match on vault_slug (or world.json slug) — matchedViaAlias: false
+ *   b. Match in vault_slug_aliases (VAULT.md only) — matchedViaAlias: true
+ *
+ * `ctx` (optional) caches the whole worldDir scan for the lifetime of one
+ * command; omitted, a throwaway context is built per call (従来どおり).
+ */
+export function findVaultBySlugWithInfo(
+  slug: string,
+  worldDir: string,
+  ctx?: XRefResolutionContext
+): FindVaultResult | null {
+  return slugLookupFor(ctx ?? createXRefResolutionContext(), worldDir).find(slug);
 }
 
 /**
@@ -339,27 +479,45 @@ export function findVaultBySlug(slug: string, worldDir: string): string | null {
  * @param ref       Full cross-vault ref string, e.g. "vault:billing/deliverable:billing:v2"
  * @param worldDir  Directory to scan for sibling vaults. Falls back to
  *                  process.env.GRAPHRAG_WORLD_DIR when not provided.
+ * @param ctx       Optional command-scoped resolution context (issue #32) —
+ *                  shares world scan / vault import / ref dedup across calls.
  * @returns ResolvedNode when found, null otherwise.
  */
-export function resolveCrossVaultRef(ref: string, worldDir?: string): ResolvedNode | null {
+export function resolveCrossVaultRef(
+  ref: string,
+  worldDir?: string,
+  ctx?: XRefResolutionContext
+): ResolvedNode | null {
   const parts = parseCrossVaultRef(ref);
   if (!parts) return null;
 
   const resolvedWorldDir = worldDir ?? process.env.GRAPHRAG_WORLD_DIR;
   if (!resolvedWorldDir) return null;
 
-  const findResult = findVaultBySlugWithInfo(parts.vaultSlug, resolvedWorldDir);
+  const context = ctx ?? createXRefResolutionContext();
+  // parseCrossVaultRef は純関数なので (worldDir, ref) で結果を dedup できる
+  const cacheKey = `${resolvedWorldDir}\n${ref}`;
+  if (context.resolvedRefs.has(cacheKey)) return context.resolvedRefs.get(cacheKey)!;
+
+  const result = resolveCrossVaultRefUncached(ref, parts, resolvedWorldDir, context);
+  context.resolvedRefs.set(cacheKey, result);
+  return result;
+}
+
+function resolveCrossVaultRefUncached(
+  ref: string,
+  parts: CrossVaultRefParts,
+  resolvedWorldDir: string,
+  context: XRefResolutionContext
+): ResolvedNode | null {
+  const findResult = findVaultBySlugWithInfo(parts.vaultSlug, resolvedWorldDir, context);
   if (!findResult) return null;
 
-  // Read the vault and find the node with matching id
-  let graph: { nodes?: any[]; edges?: any[] };
-  try {
-    graph = importVault(findResult.vaultDir);
-  } catch {
-    return null;
-  }
+  // Read the vault (once per command via context) and find the node by id
+  const imported = importVaultCached(context, findResult.vaultDir);
+  if (!("graph" in imported)) return null;
 
-  const node = (graph.nodes ?? []).find((n: any) => n.id === parts.nodeId);
+  const node = nodeMapFor(context, findResult.vaultDir, imported.graph).get(parts.nodeId);
   if (!node) return null;
 
   return {
@@ -388,9 +546,13 @@ export function resolveCrossVaultRef(ref: string, worldDir?: string): ResolvedNo
  */
 export function checkCrossVaultRefs(
   graph: { nodes?: any[]; edges?: any[] },
-  worldDir?: string
+  worldDir?: string,
+  ctx?: XRefResolutionContext
 ): XRefCheckResult[] {
   const resolvedWorldDir = worldDir ?? process.env.GRAPHRAG_WORLD_DIR;
+  // command スコープ context (issue #32): 同一 target vault への複数 edge が
+  // world scan / importVault / 台帳読込を共有する。省略時は単発 (従来どおり)。
+  const context = ctx ?? createXRefResolutionContext();
 
   const results: XRefCheckResult[] = [];
 
@@ -422,7 +584,7 @@ export function checkCrossVaultRefs(
       continue;
     }
 
-    const findResult = findVaultBySlugWithInfo(parts.vaultSlug, resolvedWorldDir);
+    const findResult = findVaultBySlugWithInfo(parts.vaultSlug, resolvedWorldDir, context);
     if (!findResult) {
       results.push({
         ref,
@@ -435,11 +597,10 @@ export function checkCrossVaultRefs(
 
     const { vaultDir, currentSlug, matchedViaAlias } = findResult;
 
-    // Vault exists — check if the node is there
-    let graph2: { nodes?: any[]; edges?: any[] };
-    try {
-      graph2 = importVault(vaultDir);
-    } catch (err) {
+    // Vault exists — check if the node is there (import once per command)
+    const imported = importVaultCached(context, vaultDir);
+    if (!("graph" in imported)) {
+      const err = imported.error;
       results.push({
         ref,
         edge_id: edgeId,
@@ -449,19 +610,20 @@ export function checkCrossVaultRefs(
       continue;
     }
 
-    const node = (graph2.nodes ?? []).find((n: any) => n.id === parts.nodeId);
+    const nodeMap = nodeMapFor(context, vaultDir, imported.graph);
+    const node = nodeMap.get(parts.nodeId);
     if (!node) {
       // 台帳 (issue #18): 消えた ID が tombstone にあれば「単に壊れた」ではなく
       // 「削除済み・後継はこれ (301)」として報告する。後継チェーンは畳み、後継の
       // 生存も確認する (修復先が実在しない tombstone は 410 相当として扱える)。
-      const tombs = latestTombstones(vaultDir);
+      const tombs = tombstonesFor(context, vaultDir);
       const entry = tombs.get(parts.nodeId);
       if (entry) {
         const resolution = resolveSuccessor(tombs, parts.nodeId);
         const successorAlive =
           resolution.final_successor === null
             ? null
-            : (graph2.nodes ?? []).some((n: any) => n.id === resolution.final_successor);
+            : nodeMap.has(resolution.final_successor);
         results.push({
           ref,
           edge_id: edgeId,
@@ -521,11 +683,15 @@ export function checkCrossVaultRefs(
  */
 export function augmentMatchesWithXRefResolutions(
   matches: any[],
-  worldDir?: string
+  worldDir?: string,
+  ctx?: XRefResolutionContext
 ): any[] {
   if (!matches || matches.length === 0) return matches;
   const resolvedWorldDir = worldDir ?? process.env.GRAPHRAG_WORLD_DIR;
   if (!resolvedWorldDir) return matches;
+  // command スコープ context (issue #32): match × relation の同一 ref 解決を dedup し、
+  // 呼び出し間 (brief / evidence) でも共有できる。省略時は単発 (従来どおり)。
+  const context = ctx ?? createXRefResolutionContext();
 
   return matches.map((match: any) => {
     if (!match) return match;
@@ -536,7 +702,7 @@ export function augmentMatchesWithXRefResolutions(
     for (const rel of relations) {
       const to = rel?.to ?? rel?.target;
       if (typeof to === "string" && to.startsWith("vault:")) {
-        const node = resolveCrossVaultRef(to, resolvedWorldDir);
+        const node = resolveCrossVaultRef(to, resolvedWorldDir, context);
         // brief の relations は edge 型を `relation` に載せる (stub 形:
         // {relation, direction, to})。素の edge 形 ({type, to}) も受ける。
         xrefs.push({ ref: to, edge_type: rel?.relation ?? rel?.type ?? null, resolved: node ?? null });
