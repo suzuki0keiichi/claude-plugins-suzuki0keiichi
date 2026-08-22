@@ -1084,3 +1084,268 @@ test("checkCrossVaultRefs: 後継無しの tombstone は final_successor null (4
   }
 });
 import { appendTombstones } from "./tombstones.ts";
+
+// ---------------------------------------------------------------------------
+// issue #32: command スコープ resolution context — 参照ごとの再読込を解消する
+// ---------------------------------------------------------------------------
+
+import { createXRefResolutionContext } from "./xref-resolver.ts";
+import { importVault } from "./import-vault.ts";
+import { loadWorldConfig } from "./world.ts";
+import { latestTombstones } from "./tombstones.ts";
+
+/** IO 呼び出し回数を数える DI hook 付き context。 */
+function countingContext() {
+  const counts = {
+    importVault: [] as string[],
+    loadWorldConfig: [] as string[],
+    latestTombstones: [] as string[]
+  };
+  const ctx = createXRefResolutionContext({
+    importVaultFn: (dir: string) => {
+      counts.importVault.push(dir);
+      return importVault(dir);
+    },
+    loadWorldConfigFn: (dir: string) => {
+      counts.loadWorldConfig.push(dir);
+      return loadWorldConfig(dir);
+    },
+    latestTombstonesFn: (dir: string) => {
+      counts.latestTombstones.push(dir);
+      return latestTombstones(dir);
+    }
+  });
+  return { ctx, counts };
+}
+
+test("issue #32: checkCrossVaultRefs — 同一 target vault へ複数 edge でも importVault / loadWorldConfig / latestTombstones は各 1 回", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-ctx-io-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    const { vaultDir } = makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
+    });
+    appendTombstones(vaultDir, [
+      { id: "deliverable:billing:gone", deleted_at: "2026-07-13T00:00:00.000Z", reason: "purge", successor: "deliverable:billing:v2" }
+    ]);
+
+    const graph = {
+      nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
+      edges: [
+        { id: "e:1", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" },
+        { id: "e:2", type: "supports", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" },
+        { id: "e:3", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:missing" },
+        { id: "e:4", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:gone" }
+      ]
+    };
+
+    const { ctx, counts } = countingContext();
+    const results = checkCrossVaultRefs(graph, worldDir, ctx);
+    assert.equal(results.length, 4);
+    const byEdge = new Map(results.map((r) => [r.edge_id, r.status]));
+    assert.equal(byEdge.get("e:1"), "resolved");
+    assert.equal(byEdge.get("e:2"), "resolved");
+    assert.equal(byEdge.get("e:3"), "broken");
+    assert.equal(byEdge.get("e:4"), "tombstoned");
+
+    // context 共有により target vault の import は 1 回だけ
+    assert.equal(counts.importVault.length, 1, `importVault should be called once, got ${counts.importVault.length}`);
+    // world config (world.json の probe) も lookup 構造構築の 1 回だけ
+    assert.equal(counts.loadWorldConfig.length, 1, `loadWorldConfig should be called once, got ${counts.loadWorldConfig.length}`);
+    // 台帳 (broken/tombstoned の 2 edge が消費) も 1 回だけ
+    assert.equal(counts.latestTombstones.length, 1, `latestTombstones should be called once, got ${counts.latestTombstones.length}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #32: checkCrossVaultRefs — context あり/なしの出力同値 (resolved/alias/broken/tombstoned 301+410/orphan)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-ctx-eq-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    const { vaultDir } = makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "x" }
+    });
+    appendTombstones(vaultDir, [
+      { id: "deliverable:billing:gone", deleted_at: "2026-07-13T00:00:00.000Z", reason: "purge", successor: "deliverable:billing:v2" },
+      { id: "deliverable:billing:gone410", deleted_at: "2026-07-14T00:00:00.000Z", reason: "purge" }
+    ]);
+
+    const graph = {
+      nodes: [{ id: "goal:proj:a", type: "Goal", title: "A", summary: "x" }],
+      edges: [
+        { id: "e:resolved", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:v2" },
+        { id: "e:alias", type: "has_premise", from: "goal:proj:a", to: "vault:billing-old/deliverable:billing:v2" },
+        { id: "e:broken", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:missing" },
+        { id: "e:tomb301", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:gone" },
+        { id: "e:tomb410", type: "has_premise", from: "goal:proj:a", to: "vault:billing/deliverable:billing:gone410" },
+        { id: "e:orphan", type: "has_premise", from: "goal:proj:a", to: "vault:missing-slug/deliverable:x:y" }
+      ]
+    };
+
+    const withCtx = checkCrossVaultRefs(graph, worldDir, createXRefResolutionContext());
+    const withoutCtx = checkCrossVaultRefs(graph, worldDir);
+    assert.deepEqual(withCtx, withoutCtx, "context の有無で出力が変わってはならない");
+
+    const byEdge = new Map(withCtx.map((r) => [r.edge_id, r]));
+    assert.equal(byEdge.get("e:resolved")?.status, "resolved");
+    assert.equal(byEdge.get("e:resolved")?.alias_warning, undefined);
+    assert.equal(byEdge.get("e:alias")?.status, "resolved");
+    assert.ok(byEdge.get("e:alias")?.alias_warning, "alias 経由の解決には alias_warning が付く");
+    assert.equal(byEdge.get("e:broken")?.status, "broken");
+    assert.equal(byEdge.get("e:tomb301")?.status, "tombstoned");
+    assert.equal(byEdge.get("e:tomb301")?.tombstone?.final_successor, "deliverable:billing:v2");
+    assert.equal(byEdge.get("e:tomb301")?.tombstone?.successor_alive, true);
+    assert.equal(byEdge.get("e:tomb410")?.status, "tombstoned");
+    assert.equal(byEdge.get("e:tomb410")?.tombstone?.final_successor, null);
+    assert.equal(byEdge.get("e:orphan")?.status, "orphan");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #32: findVaultBySlugWithInfo — exact は走査途中の alias 一致より優先 (world.json 順で決定的、context あり/なし同値)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-ctx-prio-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    // entry 1 (先): primary slug "billing"、alias に "billing-old" を持つ
+    const { vaultDir: aliasHolder } = makeVault({
+      root: worldDir,
+      repoName: "alias-holder",
+      slug: "billing",
+      aliases: ["billing-old"],
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "A", summary: "x" }
+    });
+    // entry 2 (後): primary slug がまさに "billing-old"
+    const { vaultDir: exactHolder } = makeVault({
+      root: worldDir,
+      repoName: "exact-holder",
+      slug: "billing-old",
+      node: { id: "deliverable:old:v1", type: "Deliverable", title: "B", summary: "x" }
+    });
+    writeFileSync(
+      path.join(worldDir, "world.json"),
+      JSON.stringify({ vaults: [{ path: aliasHolder, slug: "billing" }, { path: exactHolder, slug: "billing-old" }] }, null, 2)
+    );
+
+    for (const ctx of [undefined, createXRefResolutionContext()]) {
+      const result = findVaultBySlugWithInfo("billing-old", worldDir, ctx);
+      assert.ok(result !== null);
+      assert.equal(result!.matchedViaAlias, false, "後段の exact が先に見つかる alias に勝つ");
+      assert.ok(result!.vaultDir.includes("exact-holder"), `expected exact-holder, got ${result!.vaultDir}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #32: findVaultBySlugWithInfo — alias 競合は元の走査順で最初の vault が勝つ (context あり/なし同値)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-ctx-prio-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    const { vaultDir: first } = makeVault({
+      root: worldDir,
+      repoName: "first-repo",
+      slug: "s1",
+      aliases: ["old"],
+      node: { id: "deliverable:s1:a", type: "Deliverable", title: "A", summary: "x" }
+    });
+    const { vaultDir: second } = makeVault({
+      root: worldDir,
+      repoName: "second-repo",
+      slug: "s2",
+      aliases: ["old"],
+      node: { id: "deliverable:s2:a", type: "Deliverable", title: "B", summary: "x" }
+    });
+    writeFileSync(
+      path.join(worldDir, "world.json"),
+      JSON.stringify({ vaults: [{ path: first, slug: "s1" }, { path: second, slug: "s2" }] }, null, 2)
+    );
+
+    for (const ctx of [undefined, createXRefResolutionContext()]) {
+      const result = findVaultBySlugWithInfo("old", worldDir, ctx);
+      assert.ok(result !== null);
+      assert.equal(result!.matchedViaAlias, true);
+      assert.equal(result!.currentSlug, "s1", "走査順で最初の alias 一致が採用される");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #32: findVaultBySlugWithInfo — world.json slug の exact は先行する slug 無し entry の VAULT.md exact より優先 (context あり/なし同値)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-ctx-prio-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    // entry 1 (先, world.json に slug 無し): VAULT.md の slug が "billing"
+    const { vaultDir: mdExact } = makeVault({
+      root: worldDir,
+      repoName: "md-exact",
+      slug: "billing",
+      node: { id: "deliverable:billing:a", type: "Deliverable", title: "A", summary: "x" }
+    });
+    // entry 2 (後, world.json に slug あり): slug "billing"
+    const { vaultDir: jsonExact } = makeVault({
+      root: worldDir,
+      repoName: "json-exact",
+      slug: "billing",
+      node: { id: "deliverable:billing:b", type: "Deliverable", title: "B", summary: "x" }
+    });
+    writeFileSync(
+      path.join(worldDir, "world.json"),
+      JSON.stringify({ vaults: [{ path: mdExact }, { path: jsonExact, slug: "billing" }] }, null, 2)
+    );
+
+    for (const ctx of [undefined, createXRefResolutionContext()]) {
+      const result = findVaultBySlugWithInfo("billing", worldDir, ctx);
+      assert.ok(result !== null);
+      assert.ok(result!.vaultDir.includes("json-exact"), `world.json slug loop が先に走る (got ${result!.vaultDir})`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #32: augmentMatchesWithXRefResolutions — ref dedup + context 共有で複数回呼んでも import は 1 回、出力は context なしと同値", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "xref-ctx-aug-"));
+  try {
+    const worldDir = makeWorldDir(root);
+    makeVault({
+      root: worldDir,
+      repoName: "billing-repo",
+      slug: "billing",
+      node: { id: "deliverable:billing:v2", type: "Deliverable", title: "Billing API v2", summary: "The release." }
+    });
+
+    const ref = "vault:billing/deliverable:billing:v2";
+    // brief 形 (stub: {relation, direction, to}) — 2 match が同じ ref を持つ
+    const briefMatches = [
+      { node: { id: "goal:proj:a", type: "Goal" }, relations: [{ relation: "has_premise", direction: "out", to: ref }] },
+      { node: { id: "goal:proj:b", type: "Goal" }, relations: [{ relation: "supports", direction: "out", to: ref }] }
+    ];
+    // 素の edge 形 ({type, to}) — evidence 相当の 2 回目の呼び出し
+    const evidenceMatches = [
+      { node: { id: "decision:proj:c", type: "Decision" }, relations: [{ type: "has_premise", to: ref }] }
+    ];
+
+    const { ctx, counts } = countingContext();
+    const aug1 = augmentMatchesWithXRefResolutions(briefMatches, worldDir, ctx);
+    const aug2 = augmentMatchesWithXRefResolutions(evidenceMatches, worldDir, ctx);
+    assert.equal(counts.importVault.length, 1, `brief/evidence をまたいでも import は 1 回, got ${counts.importVault.length}`);
+
+    // 同値性: context なしの従来出力と一致
+    assert.deepEqual(aug1, augmentMatchesWithXRefResolutions(briefMatches, worldDir));
+    assert.deepEqual(aug2, augmentMatchesWithXRefResolutions(evidenceMatches, worldDir));
+    assert.equal((aug1[0].cross_vault_resolved as any[])[0].resolved?.title, "Billing API v2");
+    assert.equal((aug2[0].cross_vault_resolved as any[])[0].resolved?.title, "Billing API v2");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
