@@ -105,6 +105,35 @@ test("indexCodebase incremental: unchanged + deleted detection", () => {
   }
 });
 
+// 回帰 (Issue #35 安全網): 削除 File 検出の deleted_files は「previous.nodes の順序で、
+// 現存しない File ノードだけ」を返す。ghost 複数 + 現存 File + 非 File ghost を混在させ、
+// 内容と順序を完全固定する (検出ロジックの O(N) 化リファクタで挙動が変わらないことの保証)。
+test("indexCodebase deleted detection: 複数 ghost の内容と順序を previous.nodes 順で維持", () => {
+  const root = makeRepo();
+  try {
+    const first = indexCodebase({ root, systemName: "demo" });
+    // previous.nodes の順序: ghost-a → 現存 File 群 (+ Component/Layer) → 非 File ghost → ghost-b → ghost-c
+    const previous = {
+      ...first,
+      nodes: [
+        { id: "file:demo:ghost-a", type: "File", path: "ghost-a.ts", content_hash: "a" },
+        ...first.nodes,
+        { id: "component:demo:ghost", type: "Component", candidate: true },
+        { id: "file:demo:ghost-b", type: "File", path: "ghost-b.ts", content_hash: "b" },
+        { id: "file:demo:ghost-c", type: "File", path: "sub/ghost-c.ts", content_hash: "c" },
+      ],
+    };
+    const next = indexCodebase({ root, systemName: "demo", previous });
+    assert.deepEqual(
+      next.stale_candidates.deleted_files,
+      ["file:demo:ghost-a", "file:demo:ghost-b", "file:demo:ghost-c"],
+      "deleted_files は File ghost のみを previous.nodes の順序で列挙する (非 File ghost・現存 File は含まない)"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // 回帰: 前回 summary を「本物として継ぐ」のは trustPreviousSummaries=true (= 正本 vault が
 // source) のときだけ。scaffold を渡したとき (trust=false) は summary を信用せず作り直して
 // provisional を立てる。これが無いと、機械テンプレ summary が「フラグ無し=本物」と誤認され
