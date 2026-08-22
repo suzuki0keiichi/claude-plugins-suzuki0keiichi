@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveVectorProvider, nodeVectorText, prefixPolicyForModel } from "./vector.ts";
-import { graphDiff } from "./diff.ts";
 import { importVault } from "./import-vault.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
 
@@ -21,19 +20,11 @@ async function resolveGraphForIndex(args) {
 }
 
 export async function buildVectorIndex(args, deps: any = {}) {
-  // vault からの差分 (base delta) ビルドは未対応 (v3.x)。vault current と
-  // graph.json/FalkorDB base はノード表現が異なり graphDiff が誤検出するため、
-  // 黙って壊れた delta を出さず明示エラーにする (no-silent-failure)。
-  if (args.vault && args.base) {
-    throw new Error(
-      "vault + base combination not supported: base-delta build from a vault is v3.x. Do not specify --vault and --base together."
-    );
-  }
   // deps.graphObject はテスト/DI がグラフを直渡しするためのフック (loadGraph を迂回)。
   // CLI 由来の args は汚さない (parseArgs は graphObject を生成しない)。
+  // base/delta (差分ビルド) は撤去済み: v3 は vault 単一正本の全量ビルドのみ
+  // (issue #30 — 書けない delta の読み口だけが残る半端を許さない)。
   const graph = deps.graphObject ?? await resolveGraphForIndex(args);
-  // base delta (差分ビルド) は v3 では未対応。vault+base は上で明示エラー済み。
-  const baseGraph = null;
   // provider 注入: deps.provider があれば外部 endpoint 解決を迂回 (semantic 非交渉は不変)。
   const provider = deps.provider ?? await resolveVectorProvider({
     provider: args.provider,
@@ -53,7 +44,7 @@ export async function buildVectorIndex(args, deps: any = {}) {
   const previousRows = samePrefixPolicy(deps.previousIndex, prefixPolicy)
     ? reusablePreviousRows(deps.previousIndex, provider)
     : [];
-  const nodes = selectNodesForVectorIndex(graph, baseGraph);
+  const nodes = selectNodesForVectorIndex(graph);
   // provisional 要約 (機械テンプレ = 構成要素サマリ) のノードは nodeVectorText が embedding
   // から除外するが、残っていること自体が「意味への書き換え未完」のサインなので警告する。
   const provisionalCount = nodes.filter((n: any) => n.summary_provisional === true).length;
@@ -94,7 +85,6 @@ export async function buildVectorIndex(args, deps: any = {}) {
     generated_at: new Date().toISOString(),
     ...(noiseBaseline ? { noise_baseline: noiseBaseline } : {}),
     ...(vaultHeadStamp ? { vault_head: vaultHeadStamp } : {}),
-    branch_delta: baseGraph ? describeBranchDelta(baseGraph, graph, args.base) : undefined,
     rows
   };
 }
@@ -221,23 +211,8 @@ export async function embedNodes(nodes, provider) {
   return embedNodesIncremental(nodes, provider, []);
 }
 
-export function selectNodesForVectorIndex(graph, baseGraph = null) {
-  if (!baseGraph) return graph.nodes ?? [];
-  const delta = graphDiff(baseGraph, graph);
-  return [
-    ...delta.nodes.added,
-    ...delta.nodes.modified.map((item) => item.after)
-  ];
-}
-
-function describeBranchDelta(baseGraph, graph, basePath) {
-  const delta = graphDiff(baseGraph, graph);
-  return {
-    base: basePath,
-    nodes_added: delta.nodes.added.length,
-    nodes_modified: delta.nodes.modified.length,
-    rows: delta.nodes.added.length + delta.nodes.modified.length
-  };
+export function selectNodesForVectorIndex(graph) {
+  return graph.nodes ?? [];
 }
 
 // 書き込み途中の半端なファイルを残さない: 同一フォルダの一時ファイルに全部
@@ -318,10 +293,8 @@ export function parseArgs(argv) {
   if ((typeof out !== "string" || out.length === 0) && vaultResolved) {
     out = defaultVectorIndexPath(vaultResolved);
   }
-  const base = typeof parsed.base === "string" ? parsed.base : process.env.GRAPHRAG_VECTOR_INDEX_BASE;
   return {
     vault: vaultResolved,
-    base: typeof base === "string" && base.length > 0 ? base : undefined,
     out: typeof out === "string" && out.length > 0 ? out : undefined,
     provider: typeof parsed.provider === "string" ? parsed.provider : undefined,
     endpoint: typeof parsed.endpoint === "string" ? parsed.endpoint : undefined,

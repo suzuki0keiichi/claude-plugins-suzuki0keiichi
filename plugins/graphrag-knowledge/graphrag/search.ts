@@ -8,7 +8,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 
   const graph = await loadGraph(args.vault);
-  const vectorIndex = await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
+  const vectorIndex = await loadRequiredVectorIndex(args.vault, args.vector);
   const vectorSearch = await prepareVectorSearch(args.query, { vectorIndex });
   const matches = searchGraph(graph, args.query, {
     types: args.types,
@@ -64,9 +64,6 @@ export function parseArgs(argv) {
     query: typeof parsed.query === "string" ? parsed.query : "",
     vault: typeof parsed.vault === "string" ? parsed.vault : process.env.GRAPHRAG_VAULT_DIR,
     vector: typeof parsed.vector === "string" ? parsed.vector : undefined,
-    vectorDelta: typeof (parsed.vectorDelta ?? parsed["vector-delta"]) === "string"
-      ? parsed.vectorDelta ?? parsed["vector-delta"]
-      : undefined,
     limit: typeof parsed.limit === "string" ? Number(parsed.limit) : 10,
     neighbors: typeof parsed.neighbors === "string" ? Number(parsed.neighbors) : 1,
     types: typeof parsed.types === "string" ? parsed.types.split(",").filter(Boolean) : []

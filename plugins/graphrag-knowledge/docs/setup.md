@@ -157,7 +157,7 @@ GRAPHRAG_VAULT_DIR=/Users/me/projects/myapp/.graphrag/vault
 | `GRAPHRAG_VAULT_MODE` | — | vault 書き込みモード（`readonly` / `direct`） |
 | `GRAPHRAG_SCHEMA` | `VAULT.md` の `schema` | schema プリセットの上書き |
 
-> ほかに `GRAPHRAG_GRAPH_JSON_PATH` / `GRAPHRAG_INDEXED_GRAPH_PATH` / `GRAPHRAG_STATE_DIR` / `GRAPHRAG_VECTOR_INDEX_PATH` / `GRAPHRAG_VECTOR_INDEX_BASE` / `GRAPHRAG_VAULT_BUILD_FORCE` / `GRAPHRAG_EMBEDDING_PROBE_TIMEOUT_MS` などもありますが、いずれも個別コマンドの引数の代わりで、日常運用では設定不要です。
+> ほかに `GRAPHRAG_GRAPH_JSON_PATH` / `GRAPHRAG_INDEXED_GRAPH_PATH` / `GRAPHRAG_STATE_DIR` / `GRAPHRAG_VECTOR_INDEX_PATH` / `GRAPHRAG_VAULT_BUILD_FORCE` / `GRAPHRAG_EMBEDDING_PROBE_TIMEOUT_MS` などもありますが、いずれも個別コマンドの引数の代わりで、日常運用では設定不要です。
 
 ---
 

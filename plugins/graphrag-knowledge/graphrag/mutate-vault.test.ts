@@ -611,6 +611,27 @@ test("重複ゲート: vector index 不在は非致命 skip で mutation は通�
   assert.ok(res.duplicate_check.reason, "skip 理由を可視化");
 });
 
+// issue #30: 索引破損 (JSON parse 失敗) は不在と違い明示 Error になるが、索引は
+// 二次生成物なので mutation はブロックしない。ただし無音にせず note を残す。
+test("重複ゲート: 破損 index は mutation をブロックせず index_corrupt note を残す", async () => {
+  const { vault, stateDir } = gitInitVaultWithDecision();
+  const indexPath = defaultVectorIndexPath(vault);
+  mkdirSync(path.dirname(indexPath), { recursive: true });
+  writeFileSync(indexPath, "{ broken json !!");
+  // dupDeps 無し = 既定経路で on-disk の破損索引を読む。embed には到達しない。
+  const res = await applyMutationToVault({
+    plan: decisionPlan("a2", "corrupt index present"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex, // 索引は再構築しない = suggest 段も破損索引を踏む
+  });
+  assert.equal(res.applied, true, "mutation はブロックされない");
+  assert.equal(res.duplicate_check.status, "skipped", "ゲートは索引なし扱いで skip");
+  assert.equal(res.duplicate_check.index_corrupt, true, "無音にしない: 破損を明示");
+  assert.match(res.duplicate_check.index_corrupt_reason, /corrupt/i);
+});
+
 test("重複ゲート: embedding 不達は非致命 skip で mutation は通る", async () => {
   const { vault, stateDir } = gitInitVaultWithDecision();
   const res = await applyMutationToVault({

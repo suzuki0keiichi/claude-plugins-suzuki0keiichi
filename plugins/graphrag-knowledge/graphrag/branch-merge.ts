@@ -46,7 +46,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   // Optional: the live vector index powers duplicate-by-meaning detection. It
   // reflects one vault state, so cross-branch coverage is best-effort; absence
   // is reported (not silently dropped) so the agent knows the limitation.
-  const vectorIndex = args.vector ? await loadVectorIndex(args.vector) : undefined;
+  // A corrupt index (loadVectorIndex throws on parse failure) must not block the
+  // merge analysis — the index is a secondary artifact — but is reported, not
+  // silently degraded to "off" (issue #30).
+  let vectorIndex: any = undefined;
+  let vectorIndexCorrupt: string | null = null;
+  if (args.vector) {
+    try {
+      vectorIndex = (await loadVectorIndex(args.vector)) ?? undefined;
+    } catch (e: unknown) {
+      vectorIndex = undefined;
+      vectorIndexCorrupt = e instanceof Error ? e.message : String(e);
+    }
+  }
 
   const deps = await makeGitMergeDeps(args.vault, async (dir) => importVault(dir));
   const result = await prepareMerge(
@@ -60,7 +72,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     main: args.main,
     similarity_detection: vectorIndex
       ? "on"
-      : "off — no --vector index given; duplicate-by-meaning relies on structural signals only",
+      : vectorIndexCorrupt
+        ? `off — --vector index is unreadable (${vectorIndexCorrupt}); duplicate-by-meaning relies on structural signals only`
+        : "off — no --vector index given; duplicate-by-meaning relies on structural signals only",
+    ...(vectorIndexCorrupt ? { index_corrupt: true, index_corrupt_reason: vectorIndexCorrupt } : {}),
     ...result.packet
   };
   console.log(JSON.stringify(out, null, 2));
