@@ -18,7 +18,7 @@ import {
   partitionIdempotentReplays,
   validateMutation,
 } from "./mutation-core.ts";
-import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
+import { buildAndWriteVectorIndex, vectorIndexMatchesGraph } from "./build-vector-index.ts";
 import { defaultVectorIndexPath, vaultVectorIndexReadPath, loadVectorIndex } from "./retrieval.ts";
 import { stateDirForVault, cacheDirUnder } from "./cli-env.ts";
 import { withVaultLock, beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
@@ -421,6 +421,33 @@ async function buildSuggestions(args: {
 }
 
 /**
+ * issue #27: 重複ゲートが使った索引の staleness 判定。
+ * 主判定は graph/index の内容突合 (vectorIndexMatchesGraph) — 手元の currentGraph と
+ * rows の node 集合 + text_hash が一致すれば fresh (vault_head が食い違っていても、
+ * head は dirty vault / 並行 build で嘘をつくので信じない)。text_hash を持たない
+ * 旧形式 index は内容で判定できないので、head 比較の fallback (headStale) に落とす。
+ * 非致命の情報提供のみ (判定で mutation は止めない)。
+ */
+function assessIndexStale(
+  currentGraph: any,
+  dupIndex: any,
+  headStale: { index_stale: true; index_stale_reason: string } | null
+): { index_stale: true; index_stale_reason: string } | null {
+  const contentJudgeable =
+    Array.isArray(dupIndex?.rows) &&
+    dupIndex.rows.length > 0 &&
+    dupIndex.rows.every((row: any) => typeof row?.text_hash === "string");
+  if (!contentJudgeable) return headStale;
+  if (vectorIndexMatchesGraph(currentGraph, dupIndex)) return null;
+  return {
+    index_stale: true,
+    index_stale_reason:
+      "vector index content does not match the current graph (node set / text hashes diverge — " +
+      "a previous index rebuild likely failed or lost a race; the duplicate gate ran on a stale index)",
+  };
+}
+
+/**
  * vault への mutation 適用一式を lock 内で実行する。
  * 流れ: lock → OCC(base_sha vs HEAD) → import → normalize/validate → 重複ゲート(非致命 skip 可) →
  * seq begin → on-branch 保証 → writeVaultDelta → 索引再構築(非致命) → git commit → seq end。
@@ -530,15 +557,19 @@ export async function applyMutationToVault(args: {
     if (vec) return vec;
     return dupEmbed(text);
   };
-  // 索引の staleness: 索引再構築は post-commit 非致命なので、失敗した直後の mutation は
-  // 古い索引でゲートを回すことになる。索引に打刻された vault_head と現 HEAD が違えば
-  // それを正直に出力へ載せる (判定はしない: 非致命の情報提供のみ)。
-  let indexStale: { index_stale: true; index_stale_reason: string } | null = null;
+  // 索引の staleness (fallback 側): 索引再構築は post-commit 非致命なので、失敗した直後の
+  // mutation は古い索引でゲートを回すことになる。索引に打刻された vault_head と現 HEAD が
+  // 違えばそれを正直に出力へ載せる (判定はしない: 非致命の情報提供のみ)。
+  // issue #27: head 比較はここでは fallback に格下げ — 主判定はロック内で graph を読んだ後の
+  // 内容突合 (vectorIndexMatchesGraph)。head は dirty vault / 並行 build で rows と別 snapshot を
+  // 指し得る (rows は working tree 由来・head は git 由来) ので、text_hash を持たない旧形式
+  // index のときだけこの head 比較を使う。
+  let headStaleFallback: { index_stale: true; index_stale_reason: string } | null = null;
   if (typeof dupIndex?.vault_head === "string") {
     try {
       const currentHead = vaultHead(vaultDir);
       if (currentHead !== dupIndex.vault_head) {
-        indexStale = {
+        headStaleFallback = {
           index_stale: true,
           index_stale_reason:
             `vector index was built at vault HEAD ${dupIndex.vault_head} but current HEAD is ` +
@@ -552,6 +583,12 @@ export async function applyMutationToVault(args: {
 
   const result = await withVaultLock(cacheDir, async () => {
     const current = importVault(vaultDir);
+    // issue #27: 索引 staleness の主判定 — 手元に graph (current) があるので、head 比較では
+    // なく内容突合 (vectorIndexMatchesGraph: node 集合 + text_hash) で判定する。索引の
+    // vault_head は並行 build / dirty vault で rows と別 snapshot を指し得る (嘘をつく) が、
+    // 内容突合は「今ゲートが使った索引がこの graph を表しているか」を直接答える。
+    // text_hash を持たない旧形式 index はロック外で計算した head 比較 fallback に落とす。
+    const indexStale = assessIndexStale(current, dupIndex, headStaleFallback);
     // 冪等リプレイの吸収 (issue #24): 同一内容の op:create 再送 (タイムアウト後の
     // リトライ等) は「既に成功した書き込み」なので失敗にしない。plan 全体が再送なら
     // 書き込み自体を skip して成功を返す (連打を毒にしない)。
