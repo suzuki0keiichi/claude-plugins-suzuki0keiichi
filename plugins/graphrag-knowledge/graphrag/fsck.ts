@@ -273,8 +273,8 @@ export function fsckVault(options: {
               "these distilled nodes are not connected to a qualifying source via a provenance edge " +
               "(documented_by/derived_from) — other edge types do not count as source backing. Legacy nodes " +
               "predating strict backing legitimately appear here; re-link each to a ConversationChunk/" +
-              "Investigation with raw_content (status != copied_from_summary) or a File with path via " +
-              "commit-mutation, or stamp honest legacy with raw_content_status: copied_from_summary.",
+              "Investigation with raw_content (status != copied_from_summary), a File with path, or a Source " +
+              "with url via commit-mutation, or stamp honest legacy with raw_content_status: copied_from_summary.",
           }
         : {}),
     });

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { validateGraph, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
+import { parseCrossVaultRef } from "./xref-resolver.ts";
 
 export async function loadMutationPlan(planPath) {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
@@ -575,6 +576,7 @@ type GraphNodeLike = {
   id: string;
   type?: string;
   path?: string;
+  url?: string;
   raw_content?: string;
   raw_content_status?: string;
 };
@@ -585,6 +587,11 @@ function isQualifyingSource(node: GraphNodeLike | undefined) {
   if (!node) return false;
   if (node.type === "File") {
     return typeof node.path === "string" && node.path.trim().length > 0;
+  }
+  // project/principal preset: Source は File の置き換え (外部情報源)。url が接地の実体
+  // なので File.path と対称に url 非空で qualifying とする。
+  if (node.type === "Source") {
+    return typeof node.url === "string" && node.url.trim().length > 0;
   }
   if (node.type === "ConversationChunk" || node.type === "Investigation") {
     return (
@@ -615,14 +622,16 @@ function provenanceEdgeTypes(schema?: SchemaDefinition): readonly string[] {
 }
 
 // backed = provenance edge で qualifying source に接続しているノード id の集合。
-// cross-vault (`vault:` 接頭辞の to) への provenance edge はローカルで実在検証
-// できないので backed に数える (validateGraph の existence skip と同じ整合)。
+// cross-vault への provenance edge はローカルで実在検証できないので backed に数える
+// (validateGraph の existence skip と同じ整合) — ただし parseCrossVaultRef が受理する
+// 整形式 `vault:<slug>/<nodeId>` のみ。prefix だけの奇形 (fsck edge-endpoints が
+// error にする形) を backing に数えると判定が二正本化するため。
 function backedNodeIds(graph: GraphLike, provenance: ReadonlySet<string>): Set<string> {
   const nodesById = new Map<string, GraphNodeLike>((graph.nodes ?? []).map((node) => [node.id, node]));
   const backed = new Set<string>();
   for (const edge of graph.edges ?? []) {
     if (!edge.type || !provenance.has(edge.type)) continue;
-    if (typeof edge.to === "string" && edge.to.startsWith("vault:")) {
+    if (typeof edge.to === "string" && parseCrossVaultRef(edge.to) !== null) {
       backed.add(edge.from);
       continue;
     }
@@ -662,8 +671,8 @@ function sourceBackingFailures({ currentGraph, nextGraph, schema }: {
       // 新規追加なのに unbacked (現行の意図の維持 + provenance edge 限定の厳格化)。
       failures.push(
         `distilled node ${id} has no qualifying source (new node; link it via a provenance edge (${provLabel}) ` +
-          `to a ConversationChunk/Investigation with raw_content (status != copied_from_summary), or a File with path — ` +
-          `other edge types do not count as source backing)`
+          `to a ConversationChunk/Investigation with raw_content (status != copied_from_summary), a File with path, ` +
+          `or a Source with url — other edge types do not count as source backing)`
       );
     } else if (beforeBacked.has(id)) {
       // backed → unbacked 遷移 (edge 削除・source 削除 cascade・source 劣化 update)。
