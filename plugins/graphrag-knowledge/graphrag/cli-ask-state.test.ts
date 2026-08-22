@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -348,6 +348,96 @@ test("#29 実並行: bump と checkpoint 書き込みが競合しても双方の
     assert.equal(st[fingerprintQuestion("parallel question")]?.count, 200, "bump が checkpoint 書き込みに消されない");
     assert.ok(st[kA], "checkpoint entry A が bump に消されない");
     assert.ok(st[kB], "checkpoint entry B が bump に消されない");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #41: lock の ABA — stale 奪取と release に owner 確認が要る ──────────────
+
+const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_OWNER_FILENAME = "owner.json";
+
+// lock (dir と、在れば owner ファイル) の mtime を過去へ偽装して stale 化する。
+const backdateLock = (lockDir: string, ms: number) => {
+  const past = new Date(Date.now() - ms);
+  const ownerFp = path.join(lockDir, LOCK_OWNER_FILENAME);
+  if (existsSync(ownerFp)) utimesSync(ownerFp, past, past);
+  utimesSync(lockDir, past, past);
+};
+
+// 子プロセス: withAskStateLock で lock を取得し、release せずに exit する
+// (fn 内 process.exit → finally が走らない = 「取得して作業中のまま」の他者を再現)。
+const acquireAndHoldChild = (dir: string) =>
+  execFileSync(process.execPath, [
+    ...CHILD_FLAGS,
+    "-e",
+    `const m = await import(process.argv[1]);\n` +
+    `m.withAskStateLock(process.argv[2], () => { process.exit(0); });\n`,
+    SRC_URL,
+    dir
+  ]);
+
+test("#41 ABA: 停止中に stale 奪取された自分の lock の release が、奪取者の lock を消さない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-aba-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    withAskStateLock(dir, () => {
+      // A (このプロセス) が取得後 5 秒超停止したことにする: lock の mtime を過去へ偽装。
+      backdateLock(lockDir, 10_000);
+      // B (子プロセス) が stale 判定で A の lock を奪取し、保持したまま作業中。
+      acquireAndHoldChild(dir);
+      assert.ok(existsSync(lockDir), "B が lock を保持している (前提)");
+    });
+    // A の release (finally) 後も B の lock は残っていること。ここで消えると
+    // C が進入でき、B と C の同時 RMW で lost update が再発する (ABA)。
+    assert.ok(existsSync(lockDir), "A の release が B の lock を消さない");
+    const owner = JSON.parse(readFileSync(path.join(lockDir, LOCK_OWNER_FILENAME), "utf8"));
+    assert.notEqual(owner.pid, process.pid, "残った lock の owner は B (奪取者) のまま");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 release: 奪取されていなければ自分の lock は従来どおり消える", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-release-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    withAskStateLock(dir, () => {
+      assert.ok(existsSync(lockDir), "保持中は lock dir が存在する");
+    });
+    assert.ok(!existsSync(lockDir), "release で自分の lock は消える");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 stale 奪取: owner ファイル付きの残骸 lock を奪取でき、完了後に lock が残らない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-stale-owner-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    // クラッシュした保持者の残骸: owner ファイル入りの lock dir。
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      path.join(lockDir, LOCK_OWNER_FILENAME),
+      JSON.stringify({ pid: 99999999, nonce: "dead-crashed-holder", acquired_at: Date.now() - 60_000 })
+    );
+    backdateLock(lockDir, 60_000);
+    assert.equal(bumpCallCount("q-stale-owner", dir), 1, "奪取して RMW が完了する");
+    assert.ok(!existsSync(lockDir), "残骸 lock は奪取・解放され、残らない");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 stale 奪取: owner ファイル無し (owner 不明) の残骸 lock も奪取できる", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-stale-bare-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    mkdirSync(lockDir, { recursive: true });
+    backdateLock(lockDir, 60_000);
+    assert.equal(bumpCallCount("q-stale-bare", dir), 1, "owner 不明でも stale なら奪取できる");
+    assert.ok(!existsSync(lockDir), "奪取後に自分の lock として解放される");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -7,7 +7,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -601,6 +601,66 @@ test("#29 実並行: /clear の consume と並列 bump 群が競合しても cou
     // (このファイルは依存ゼロ方針で graphrag/*.ts を import しない)。
     const total = Object.values(onDisk).reduce((s, e) => s + (e?.count ?? 0), 0);
     assert.equal(total, 200, "フックの書き戻しが bump を巻き戻さない (lost update 無し)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- #41: lock の owner プロトコル — stale 残骸 (owner ファイルあり/なし) の奪取 ---
+
+const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_OWNER_FILENAME = "owner.json";
+
+// lock (dir と、在れば owner ファイル) の mtime を過去へ偽装して stale 化する。
+const backdateLock = (lockDir, ms) => {
+  const past = new Date(Date.now() - ms);
+  const ownerFp = path.join(lockDir, LOCK_OWNER_FILENAME);
+  if (existsSync(ownerFp)) utimesSync(ownerFp, past, past);
+  utimesSync(lockDir, past, past);
+};
+
+test("#41 stale lock (owner ファイル付き残骸) はフックが奪取して復元し、lock が残らない", () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const fp = writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "奪取後の一手" })
+    });
+    // クラッシュした保持者の残骸: owner ファイル入りの lock dir (#41 の新プロトコルが書く形)。
+    const lockDir = path.join(root, ".graphrag", "cache", LOCK_DIRNAME);
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      path.join(lockDir, LOCK_OWNER_FILENAME),
+      JSON.stringify({ pid: 99999999, nonce: "dead-crashed-holder", acquired_at: Date.now() - 60_000 })
+    );
+    backdateLock(lockDir, 60_000);
+
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /奪取後の一手/, "残骸 lock 越しでも復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "checkpoint は消費されている");
+    assert.ok(!existsSync(lockDir), "残骸 lock は奪取・解放され、残らない");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#41 stale lock (owner ファイル無し・owner 不明の残骸) もフックが奪取して復元する", () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "素の残骸越しの一手" })
+    });
+    const lockDir = path.join(root, ".graphrag", "cache", LOCK_DIRNAME);
+    mkdirSync(lockDir, { recursive: true });
+    backdateLock(lockDir, 60_000);
+
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /素の残骸越しの一手/, "owner 不明の残骸でも奪取して復元される");
+    assert.ok(!existsSync(lockDir), "奪取後に自分の lock として解放される");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
