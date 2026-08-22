@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMode } from "./cli-env.ts";
@@ -145,15 +145,37 @@ export function saveAskState(baseDir: string, state: AskState): void {
 //
 // プロトコル (hooks/clear-restore.mjs に依存ゼロ方針で同一実装を複製する — 変える時は両側を直すこと):
 //   - lock は <baseDir>/ask-state.lock という「ディレクトリ」。mkdir は既存時に EEXIST で
-//     失敗するため、素の node だけで原子的な取得になる (恒久ファイル種は増えない — 一時 dir のみ)。
-//   - 取得失敗時は 25ms 間隔でリトライ。lock dir の mtime が 5 秒より古ければ残骸
-//     (クラッシュした保持者) とみなして奪取する。正常な保持区間は ms オーダーなので誤奪取しない。
+//     失敗するため、素の node だけで原子的な取得になる (恒久ファイル種は増えない — owner ファイル
+//     も一時 dir 内のみ)。
+//   - 取得直後に lock dir 内へ owner ファイル (pid + ランダム nonce + 取得時刻) を書く (#41)。
+//     mkdir 直後の dir mtime は新しいので、owner を書くまでの間に stale 判定されることはない。
+//   - 取得失敗時は 25ms 間隔でリトライ。lock の mtime (owner ファイル、無ければ dir) が 5 秒より
+//     古ければ残骸 (クラッシュした保持者) とみなして奪取する。正常な保持区間は ms オーダーなので
+//     誤奪取しない。奪取前に「最初に読んだ nonce と現在の nonce が同一のままであること」を再確認する
+//     (read→rm 間に別プロセスが奪取済みなら nonce が変わる — 二重奪取の大半を検出。残る窓は
+//     mkdir の原子性が受け止める: 同時奪取しても mkdir に勝つのは一方だけ)。owner ファイルが
+//     無い/読めない lock は owner 不明 — stale なら削除可とする (owner 書き込み失敗や旧実装の残骸)。
+//     削除は owner ファイル → dir の順。dir が空でなければ rmdir が ENOTEMPTY で失敗し retry に戻る。
+//   - release (finally) は owner ファイルの nonce が自分と一致する場合のみ削除する (#41 ABA:
+//     停止中に stale 奪取されていたら lock はもう他者のもの — 不一致/読めない場合は触らない。
+//     従来は無条件 rmdir だったため、奪取者の lock を消して第三者を進入させ lost update が再発した)。
 //   - 10 秒でタイムアウトし「lock なしで続行」する (best-effort)。ask も復元フックも
 //     ブロックで殺すより、最悪ケースで従来同等 (lost update の可能性) に落ちる方を選ぶ。
 const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_OWNER_FILENAME = "owner.json";
 const LOCK_STALE_MS = 5_000;
 const LOCK_TIMEOUT_MS = 10_000;
 const LOCK_POLL_MS = 25;
+
+// owner ファイルの nonce を読む。無い/読めない/形式不正は null (= owner 不明)。
+function readLockOwnerNonce(ownerPath: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(ownerPath, "utf8"));
+    return typeof parsed?.nonce === "string" ? parsed.nonce : null;
+  } catch {
+    return null;
+  }
+}
 
 // 同期 sleep。Atomics.wait はメインスレッドの素 node で使える (timer も child_process も不要)。
 function sleepSync(ms: number): void {
@@ -171,23 +193,44 @@ function sleepSync(ms: number): void {
 export function withAskStateLock<T>(baseDir: string, fn: () => T): T {
   if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
   const lockDir = path.join(baseDir, LOCK_DIRNAME);
+  const ownerPath = path.join(lockDir, LOCK_OWNER_FILENAME);
+  const nonce = `${process.pid}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   let held = false;
   while (!held) {
     try {
       mkdirSync(lockDir); // 非 recursive: 既存なら EEXIST → 原子的な取得判定
       held = true;
+      try {
+        // 取得の証明を即座に書く。失敗しても保持は続行 — owner 不明 lock として振る舞う
+        // (stale 化したら他者に無条件奪取され、release も nonce 不一致で触らない)。
+        writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, nonce, acquired_at: Date.now() }));
+      } catch { /* best-effort */ }
     } catch (e: any) {
       if (e?.code !== "EEXIST") break; // 権限等の想定外 — lock なしで続行 (best-effort)
+      // タイムアウトは全 retry 経路 (stale 奪取の continue 含む) が通る位置で判定する。
+      // 旧実装は stale 分岐の continue が判定を素通りし、消せない残骸で無限 busy loop になった。
+      if (Date.now() > deadline) break; // タイムアウト — lock なしで続行
       try {
-        if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
-          rmdirSync(lockDir); // 残骸を奪取 (rmdir の競合は片方が ENOENT → 次ループで再判定)
+        const seenNonce = readLockOwnerNonce(ownerPath); // null = owner 不明
+        let mtimeMs: number;
+        try {
+          mtimeMs = statSync(ownerPath).mtimeMs; // 保持者の証明の鮮度で判定
+        } catch {
+          mtimeMs = statSync(lockDir).mtimeMs; // owner 無し lock は dir の鮮度で判定
+        }
+        if (Date.now() - mtimeMs > LOCK_STALE_MS) {
+          // 奪取直前に nonce が変わっていないか再確認 (#41: 別プロセスが先に奪取して保持中の
+          // lock を消さない)。owner 不明 (null) かつ stale はそのまま削除可。
+          if (readLockOwnerNonce(ownerPath) === seenNonce) {
+            rmSync(ownerPath, { force: true });
+            rmdirSync(lockDir); // 残骸を奪取 (rmdir の競合は片方が ENOENT/ENOTEMPTY → 次ループで再判定)
+          }
           continue;
         }
       } catch {
-        continue; // stat/rmdir 中に消えた → すぐ再取得を試みる
+        continue; // stat/rm 中に消えた等 → すぐ再取得を試みる
       }
-      if (Date.now() > deadline) break; // タイムアウト — lock なしで続行
       sleepSync(LOCK_POLL_MS);
     }
   }
@@ -195,7 +238,14 @@ export function withAskStateLock<T>(baseDir: string, fn: () => T): T {
     return fn();
   } finally {
     if (held) {
-      try { rmdirSync(lockDir); } catch { /* 奪取済み等 — 触らない */ }
+      try {
+        // 自分の nonce のままの時だけ解放する (#41 ABA)。不一致/読めない場合は停止中に
+        // stale 奪取済み — その lock はもう他者のものなので触らない。
+        if (readLockOwnerNonce(ownerPath) === nonce) {
+          rmSync(ownerPath, { force: true });
+          rmdirSync(lockDir);
+        }
+      } catch { /* 奪取済み等 — 触らない */ }
     }
   }
 }
