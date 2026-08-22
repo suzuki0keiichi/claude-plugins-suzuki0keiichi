@@ -27,6 +27,8 @@ import {
   writeVaultDelta,
   writeFileAtomic,
   vaultHead,
+  writeVaultWriteJournal,
+  vaultWriteJournalPath,
 } from "./mutate-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { validateGraph } from "./schema.ts";
@@ -428,6 +430,12 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   const delta = writeVaultDelta(vault, torn);
   assert.ok(delta.written.length > 0, "前提: 未 commit の delta がディスクに在る");
   assert.equal(vaultHead(vault), head0, "前提: commit はされていない (torn)");
+  // 実 writer は begin → write journal → writeDelta の順で進む (順序は mutate-vault.test.ts
+  // のライフサイクルテストが固定) ので、writeDelta 後 (= この kill 地点) のプロセスは必ず
+  // 触接パスの journal を残している。回復側の吸収 stage はこの journal 記載パスに限定される
+  // (再レビュー指摘3: 生成集合全体を吸収すると crash 以前からの利用者 WIP まで巻き込む)。
+  writeVaultWriteJournal(cacheDir, delta.written);
+  assert.ok(existsSync(vaultWriteJournalPath(cacheDir)), "前提: crash 時点で write journal が在る");
 
   // (a) fsck は torn write を ERROR + 復旧ヒントで検知する。
   const report = fsckVault({ vaultDir: vault });
@@ -457,6 +465,7 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   assert.deepEqual(validateGraph(after), []);
   assert.ok(after.nodes.some((n: any) => n.id === "decision:s:torn"), "torn delta は commit に吸収");
   assert.ok(after.nodes.some((n: any) => n.id === "decision:s:rec1"), "新 mutation も適用");
+  assert.ok(!existsSync(vaultWriteJournalPath(cacheDir)), "journal は回復 commit 成功後に削除される");
 
   // (c) 回復後の fsck は全チェック ok。
   const report2 = fsckVault({ vaultDir: vault });

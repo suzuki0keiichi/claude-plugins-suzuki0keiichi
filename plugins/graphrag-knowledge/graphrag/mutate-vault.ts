@@ -32,7 +32,7 @@ import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
-import { appendTombstones, TOMBSTONES_DIR, type TombstoneEntry } from "./tombstones.ts";
+import { appendTombstones, tombstoneShardRel, TOMBSTONES_DIR, type TombstoneEntry } from "./tombstones.ts";
 
 // export はフォールト注入テスト用 (writeVaultDelta の deps.writeFile 既定実装)。
 export function writeFileAtomic(abs: string, content: string): void {
@@ -51,6 +51,49 @@ export function writeFileAtomic(abs: string, content: string): void {
       /* noop */
     }
     throw e;
+  }
+}
+
+// ── write journal (PR #41 指摘3) ─────────────────────────────────────────────
+// 「これから書く/消す予定の vault 相対パス」を writeDelta の前に cache へ永続化する。
+// writer が writeDelta〜commit の間で hard crash した場合、次の writer は crash 痕跡
+// (seqlock 奇数) とこの journal から「前回 writer が実際に触った可能性のあるパスだけ」を
+// 吸収 stage できる (生成集合全体を stage すると crash 以前から存在した利用者 WIP まで
+// 吸収してしまう)。cache/ 配下 (cli-env.ts cacheDirUnder 参照) なので消えても安全性は
+// 劣化のみ: journal の無い crash 痕跡 (旧版 crash・cache 部分消去) は吸収なし (delta のみ
+// stage) となり、torn 残骸は fsck の git-uncommitted (ERROR) が人手復旧を案内する。
+export const VAULT_WRITE_JOURNAL = "vault.write-journal.json";
+
+export function vaultWriteJournalPath(cacheDir: string): string {
+  return path.join(cacheDir, VAULT_WRITE_JOURNAL);
+}
+
+export function readVaultWriteJournal(cacheDir: string): { paths: string[] } | null {
+  try {
+    const parsed = JSON.parse(readFileSync(vaultWriteJournalPath(cacheDir), "utf8"));
+    if (!Array.isArray(parsed?.paths)) return null;
+    return { paths: parsed.paths.filter((p: unknown): p is string => typeof p === "string") };
+  } catch {
+    return null; // 不在/破損 = journal 無し (吸収は delta のみに劣化)
+  }
+}
+
+// export はテスト用 (crash した writer が残した journal 状態の再現)。atomic (tmp+rename):
+// 書き込み途中の crash で壊れた journal が残っても read 側が null に落ちて吸収が劣化する
+// だけで、誤ったパス集合を吸収することは無い。
+export function writeVaultWriteJournal(cacheDir: string, paths: string[]): void {
+  mkdirSync(cacheDir, { recursive: true });
+  const p = vaultWriteJournalPath(cacheDir);
+  const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ version: 1, pid: process.pid, ts: Date.now(), paths }));
+  renameSync(tmp, p);
+}
+
+function clearVaultWriteJournal(cacheDir: string): void {
+  try {
+    unlinkSync(vaultWriteJournalPath(cacheDir));
+  } catch {
+    /* noop */
   }
 }
 
@@ -137,6 +180,64 @@ export function writeVaultDelta(
   // 型フォルダのリネーム/削除で空になったディレクトリを掃除 (旧型の空フォルダ残骸防止)。
   if (removed.length > 0) pruneEmptyDirs(vaultDir);
   return { written, removed, created };
+}
+
+/** git の出力 (常に "/" 区切り) と比較するためのパス正規化。 */
+function toPosixRel(rel: string): string {
+  return rel.split(path.sep).join("/");
+}
+
+/**
+ * writeVaultDelta と同じ差分計算で「これから書く/消す予定の vault 相対パス」を書き込み
+ * ゼロで先に求める (PR #41 再レビュー指摘2/3)。dirty 事前検査 (書く前に拒否) と write
+ * journal (crash 回復の吸収範囲) の両方の基礎。呼び出しは vault lock 内なので、この予測と
+ * 実書き (writeVaultDelta) の間に他 writer は入らず、集合は一致する (tombstone シャード
+ * だけは recordTombstones が後段で delta に積むため呼び出し元が補う)。
+ */
+export function predictVaultDelta(
+  vaultDir: string,
+  nextGraph: any
+): { written: string[]; removed: string[] } {
+  const files = buildVaultFiles(nextGraph);
+  const wantAbs = new Set(files.map((f) => path.join(vaultDir, f.relPath)));
+  const written: string[] = [];
+  for (const f of files) {
+    const abs = path.join(vaultDir, f.relPath);
+    const cur = existsSync(abs) ? readFileSync(abs, "utf8") : undefined;
+    if (cur === undefined || normalizeEol(cur) !== normalizeEol(f.content)) written.push(f.relPath);
+  }
+  const removed: string[] = [];
+  for (const abs of listMdFiles(vaultDir)) {
+    if (!wantAbs.has(abs)) removed.push(path.relative(vaultDir, abs));
+  }
+  return { written, removed };
+}
+
+/**
+ * candidateRels のうち mutation 開始前から HEAD と差異のあるパス (staged/unstaged の
+ * tracked 差分 + untracked で存在するファイル) を返す (PR #41 再レビュー指摘2)。
+ * docs (graphrag-overview) は「vault の手編集は CLI を迂回するため禁止」と宣言している —
+ * mutation が触る予定のパスに未コミットの手編集があると、git add がパス全体を stage する
+ * ため WIP が mutation の commit に混入するか、writeVaultDelta の正規化書き直しで WIP が
+ * 黙って「正史」へ昇格する。検出したら書き込み前に明示エラーで拒否する (何も書かない)。
+ */
+function preDirtyVaultPaths(vaultDir: string, candidateRels: string[]): string[] {
+  if (candidateRels.length === 0) return [];
+  const dirty = new Set<string>();
+  const collect = (gitArgs: string[]) => {
+    try {
+      for (const p of execFileSync("git", gitArgs, { cwd: vaultDir, encoding: "utf8" }).split("\0")) {
+        if (p) dirty.add(p);
+      }
+    } catch {
+      /* unborn branch 等でその比較軸が引けない → その軸では dirty 無し扱い */
+    }
+  };
+  // staged + unstaged の HEAD 差分 (vault 相対パス)。
+  collect(["diff", "HEAD", "--name-only", "-z", "--relative", "--", "."]);
+  // untracked (worktree に在るが HEAD にも index にも無い)。
+  collect(["ls-files", "--others", "--exclude-standard", "-z", "--", "."]);
+  return candidateRels.filter((rel) => dirty.has(toPosixRel(rel)));
 }
 
 /**
@@ -320,29 +421,30 @@ function assertOnBranch(vaultDir: string): void {
 /**
  * この mutation が stage してよいパス集合 (issue #26 / PR #41)。
  *
- * 通常経路 (absorbGeneratedSet=false): この mutation が実際に触ったパスだけ —
+ * 通常経路 (absorbRelPaths=[]): この mutation が実際に触ったパスだけ —
  * delta.written ∪ delta.removed ∪ delta.created (tombstone シャードは appendTombstones が
- * delta に積むのでここに含まれる)。生成集合全体は stage しない — 利用者が既存ノード .md に
- * 持つ canonical な未コミット手編集は importVault → nextGraph 経由で生成集合と内容一致に
- * なり delta に載らないが、生成集合全体を stage するとその WIP を commit に吸収してしまう。
+ * delta に積むのでここに含まれる)。それ以外の vault 内パスは一切 stage しない。
+ * vault の手編集は禁止 (docs/graphrag-overview の宣言) であり、mutation が触る予定の
+ * パスに事前 dirty があれば書き込み前に拒否済み (DIRTY_VAULT_WIP_BLOCKED)、触らない
+ * パスの WIP はここで stage されない — どちらの経路でも利用者の未コミット変更が
+ * mutation の commit に混入しない。
  *
- * torn recovery 経路 (absorbGeneratedSet=true): 前回 writer の hard crash 痕跡 (seqlock
- * 奇数) を検出した場合のみ、従来どおり生成集合 (nextGraph から生成される全 .md — 内容一致で
- * 書かなかったものも含む) へ広げる。crash 由来の torn ファイルは「生成集合に含まれ worktree
- * で dirty・内容は既に正しい」なので、この明示 stage が従来の `git add -- .` と同様の
- * 自己回復を維持する。
+ * torn recovery 経路 (absorbRelPaths=前回 writer の write journal 記載パス): 前回 writer
+ * の hard crash 痕跡 (seqlock 奇数) を検出し、かつ journal が読めた場合のみ、その journal
+ * 記載パス (= 前回 writer が実際に触った可能性のある集合) へ広げる。生成集合全体では
+ * ない — 生成集合には crash 以前から存在した利用者 WIP (canonical 手編集で dirty のまま
+ * のパス) も含まれ、丸ごと stage するとそれを吸収してしまう (再レビュー指摘3)。
  *
  * 存在しないパス (削除済み) は tracked のものだけ残す — untracked だった孤児 .md の削除は
  * git 的に無で、pathspec が何にもマッチしないと git add が失敗するため。
  */
 function mutationStagePaths(
   vaultDir: string,
-  generatedRelPaths: string[],
-  delta: { written: string[]; removed: string[]; created: string[] },
-  absorbGeneratedSet: boolean
+  absorbRelPaths: string[],
+  delta: { written: string[]; removed: string[]; created: string[] }
 ): string[] {
   const all = new Set<string>([
-    ...(absorbGeneratedSet ? generatedRelPaths : []),
+    ...absorbRelPaths,
     ...delta.written,
     ...delta.removed,
     // created は writeVaultDelta では written の部分集合だが、DI writer が created だけに
@@ -368,12 +470,42 @@ function mutationStagePaths(
 }
 
 /**
+ * merge/cherry-pick/revert が進行中か。進行中の index は「merge の解決状態」そのもので、
+ * commit はその確定を意味する — pathspec 付き commit は git が一律拒否するため、staged が
+ * vault 配下だけと検証できた場合に pathspec 無し commit で merge ごと確定するのが既定挙動
+ * (下の gitCommitVault 本文と mid-merge テスト参照)。この例外があるため、事前 staged WIP
+ * の拒否 (PRESTAGED_WIP_BLOCKED) は進行中でない通常時にのみ適用する。
+ */
+function mergeInProgress(vaultDir: string): boolean {
+  for (const marker of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+    try {
+      const p = execFileSync("git", ["rev-parse", "--git-path", marker], {
+        cwd: vaultDir,
+        encoding: "utf8",
+      }).trim();
+      if (existsSync(path.isAbsolute(p) ? p : path.join(vaultDir, p))) return true;
+    } catch {
+      /* repo で無い等 → 進行中扱いしない */
+    }
+  }
+  return false;
+}
+
+/**
  * vault へ mutation の差分を stage して commit する。stage は vault 全体 (`git add -- .`)
  * ではなく stagePaths (mutationStagePaths が決めた明示 pathspec — 通常は delta 触接パス
- * のみ、crash 痕跡検出時のみ生成集合全体) に限定する (issue #26 / PR #41) —
- * 利用者が vault 内に持つ生成集合外の未コミット変更 (手編集ファイル等) を勝手に
- * commit へ混入させないため。stage されなかった変更が vault subtree に dirty のまま
- * 残るのは正しい挙動 (fsck の git-uncommitted check が可視化する)。
+ * のみ、crash 痕跡検出時のみ前回 writer の write journal 記載パス) に限定する
+ * (issue #26 / PR #41) — 利用者が vault 内に持つ生成集合外の未コミット変更 (手編集
+ * ファイル等) を勝手に commit へ混入させないため。stage されなかった変更が vault subtree
+ * に dirty のまま残るのは正しい挙動 (fsck の git-uncommitted check が可視化する)。
+ *
+ * 事前 staged WIP の拒否 (PR #41 再レビュー指摘1): 従来の allStaged === vaultStaged 判定は
+ * 「staged 全体が vault 配下に収まっているか」しか見ず、利用者が vault 内で事前に stage
+ * していた WIP を pathspec 無し commit が mutation の reason で丸ごと確定していた
+ * (stagePaths が空でも同様)。git add の前に vault 配下の staged 集合をスナップショットし、
+ * stagePaths に含まれないものが居れば明示エラーで拒否する (呼び出し元が vault 側 delta を
+ * rollback する。利用者の staged WIP には手を付けない)。例外は merge 等の進行中のみ
+ * (mergeInProgress 参照)。
  *
  * pathspec (限定した commit) は merge/cherry-pick/revert 進行中は git 側の制約で一律
  * 拒否される ("cannot do a partial commit during a merge" 等。pathspec が staged 全体と
@@ -392,6 +524,30 @@ function mutationStagePaths(
  *     (all-or-nothing) ので、原因と取るべき行動を明示したエラーに変換して投げる。
  */
 export function gitCommitVault(vaultDir: string, message: string, stagePaths: string[]): string {
+  // PR #41 再レビュー指摘1: git add の「前」に vault 配下の事前 staged 集合を取る。
+  // ここに stagePaths 外のパスが居る = 利用者 (または別プロセス) の未確定 WIP であり、
+  // このまま進むと pathspec 無し commit がそれを mutation の reason で確定してしまう。
+  const preStaged = execFileSync(
+    "git",
+    ["diff", "--cached", "--name-only", "-z", "--relative", "--", "."],
+    { cwd: vaultDir, encoding: "utf8" }
+  )
+    .split("\0")
+    .filter(Boolean);
+  const stageSet = new Set(stagePaths.map(toPosixRel));
+  const preStagedForeign = preStaged.filter((p) => !stageSet.has(p));
+  if (preStagedForeign.length > 0 && !mergeInProgress(vaultDir)) {
+    const err: any = new Error(
+      `refusing to commit: the vault has pre-staged uncommitted changes that are not part of this ` +
+        `mutation [${preStagedForeign.join(", ")}]. Committing now would absorb them under this ` +
+        `mutation's reason. The vault change was rolled back (all-or-nothing). Commit them yourself or ` +
+        `unstage them (e.g. \`git -C ${vaultDir} restore --staged -- <path>\`), then retry.`
+    );
+    err.code = "PRESTAGED_WIP_BLOCKED";
+    err.prestaged_paths = preStagedForeign;
+    throw err;
+  }
+
   // git add は vaultDir を cwd にし、pathspec は stdin (NUL 区切り) で渡す (パス数が
   // 多くても ARG_MAX を踏まない)。git の toplevel を path.relative で求める方式は、
   // macOS の /var → /private/var シンボリックリンク解決で root と vaultDir の prefix が
@@ -577,8 +733,10 @@ function assessIndexStale(
  * 巻き戻す (issue #26: vault 全体の HEAD restore は利用者の未コミット変更を消すのでしない)。
  * 外から見える正本 (committed) 状態は常に「古い HEAD」か「新しい HEAD」だけになり、
  * base_sha↔HEAD の OCC が実際に効く。stage/commit も明示 pathspec (通常は delta 触接
- * パスのみ、crash 痕跡 = seq 奇数の検出時のみ生成集合全体) に限定し、利用者の未コミット
- * 変更を commit へ混入させない。
+ * パスのみ、crash 痕跡 = seq 奇数の検出時のみ前回 writer の write journal 記載パス) に
+ * 限定し、さらに「mutation が触る予定のパスの事前 dirty」(DIRTY_VAULT_WIP_BLOCKED) と
+ * 「vault 配下の事前 staged WIP」(PRESTAGED_WIP_BLOCKED) は明示エラーで拒否して、
+ * 利用者の未コミット変更を commit へ混入させない (PR #41 再レビュー指摘1〜3)。
  */
 export async function applyMutationToVault(args: {
   plan: any;
@@ -868,24 +1026,75 @@ export async function applyMutationToVault(args: {
     // 必ず残す (endVaultWrite は withVaultLock 内の finally で commit 後に走るので、
     // kill -9 なら seq は奇数のまま)。いまロックは自分が保持していて並行 writer は
     // 居ないから、自分の beginVaultWrite より前のこの時点で seq 奇数 = crash 痕跡と
-    // 確定できる。この場合のみ stage を生成集合全体へ広げ、前回の torn ファイル
-    // (内容一致で delta に載らない dirty ノード .md) を今回の commit に吸収して
-    // 自己回復する。通常経路 (seq 偶数) では delta 触接パスだけを stage し、利用者の
-    // 未コミット WIP を commit に混入させない。
+    // 確定できる。この場合のみ stage を「前回 writer の write journal 記載パス」へ広げ、
+    // 前回の torn ファイル (内容一致で delta に載らない dirty ノード .md) を今回の
+    // commit に吸収して自己回復する (再レビュー指摘3: 生成集合全体を吸収すると crash
+    // 以前から存在した利用者 WIP まで巻き込むため journal に限定)。通常経路 (seq 偶数)
+    // では delta 触接パスだけを stage し、利用者の未コミット WIP を commit に混入させない。
     // 許容劣化: cache/ を丸ごと消す運用 (cli-env.ts cacheDirUnder: 「cache/ は消して
-    // 安全、vault.seq のリセットは設計上許容」) で crash 痕跡を失った後の torn は
-    // 自己回復しない — fsck の git-uncommitted (ERROR) が検知して人手復旧を案内する。
+    // 安全、vault.seq のリセットは設計上許容」) で crash 痕跡を失った後の torn、および
+    // journal を持たない crash 痕跡 (journal 導入前の旧版 crash・cache 部分消去) は
+    // 自己回復しない (後者は delta のみ stage) — どちらも fsck の git-uncommitted
+    // (ERROR) が検知して人手復旧を案内する。
     const crashResidue = readSeq(cacheDir) % 2 === 1;
+    const priorJournal = crashResidue ? readVaultWriteJournal(cacheDir) : null;
+    // issue #26 / PR #41: 生成集合 (nextGraph の全 relPath) は preimage backup の基礎。
+    // backup は writeVaultDelta の直前に取り、失敗時の rollback は「この mutation が
+    // 触ったパスだけ」を mutation 開始前の worktree 内容へ戻す (利用者の未コミット変更に
+    // 手を付けない)。
+    const generatedRelPaths = buildVaultFiles(v.nextGraph).map((f: any) => f.relPath as string);
+    // 再レビュー指摘2/3: これから触る予定のパス (writeVaultDelta と同じ差分計算 +
+    // delete 時に recordTombstones が書く tombstone シャード)。dirty 事前拒否と write
+    // journal の両方の基礎。シャードは月単位なので実書き時とほぼ常に一致する (月境界を
+    // 跨いだ直後だけ journal から漏れうるが、その劣化は「吸収されない torn シャードを
+    // fsck が案内する」に留まる)。.gitattributes は不在時のみ新規作成される (既存なら
+    // recordTombstones は触らないので dirty 判定にも journal にも載せない)。
+    const predicted = predictVaultDelta(vaultDir, v.nextGraph);
+    const hasDeletes = (effectivePlan.nodes ?? []).some((n: any) => (n.op ?? "create") === "delete");
+    const tombstoneRels: string[] = [];
+    if (hasDeletes) {
+      tombstoneRels.push(tombstoneShardRel(new Date().toISOString()));
+      if (!existsSync(path.join(vaultDir, TOMBSTONES_DIR, ".gitattributes"))) {
+        tombstoneRels.push(path.join(TOMBSTONES_DIR, ".gitattributes"));
+      }
+    }
+    const predictedTouch = [...new Set([...predicted.written, ...predicted.removed, ...tombstoneRels])];
+    // 再レビュー指摘2: mutation が触る予定のパスに mutation 開始前からの未コミット変更
+    // (手編集 WIP) があれば、何も書かずに明示エラーで拒否する。vault の手編集は禁止
+    // (docs の宣言 — preDirtyVaultPaths のコメント参照)。crash 痕跡時は前回 journal
+    // 記載パスを免除する — torn ファイルは定義上 dirty であり、免除しないと torn
+    // ノードを二度と mutate できないデッドロックになる。
+    if (args.git !== false) {
+      const exempt = new Set((priorJournal?.paths ?? []).map(toPosixRel));
+      const dirty = preDirtyVaultPaths(
+        vaultDir,
+        predictedTouch.filter((rel) => !exempt.has(toPosixRel(rel)))
+      );
+      if (dirty.length > 0) {
+        const err: any = new Error(
+          `refusing to mutate: the vault has uncommitted manual changes on path(s) this mutation would ` +
+            `write or remove [${dirty.join(", ")}]. Hand-editing the vault is unsupported (it bypasses ` +
+            `the CLI) and committing now would absorb or normalize away that WIP. Nothing was written. ` +
+            `Inspect with \`git -C ${vaultDir} status\`, then commit the changes yourself or discard ` +
+            `them (\`git -C ${vaultDir} restore -- <path>\`), and retry.`
+        );
+        err.code = "DIRTY_VAULT_WIP_BLOCKED";
+        err.dirty_paths = dirty;
+        throw err;
+      }
+    }
     const began = beginVaultWrite(cacheDir);
+    // 再レビュー指摘3: writeDelta の「前」に write journal を永続化する (直後に hard
+    // crash しても「触った可能性のあるパス」が残り、次の writer が吸収範囲を限定できる)。
+    // crash 痕跡がある場合は前回 journal と merge する — beginVaultWrite は既奇数なら
+    // 据え置く再入設計のため、二重 crash では両 writer のパスを合算した journal が次の
+    // 回復に渡る。削除は endVaultWrite と同じ finally 位置 (書込窓が閉じる時に消える)。
+    const journalPaths = [...new Set([...(priorJournal?.paths ?? []), ...predictedTouch])];
+    writeVaultWriteJournal(cacheDir, journalPaths);
     // 適用中に書いた partial をここに積む。writeVaultDelta が途中で throw しても
     // created が残るので、巻き戻しで untracked な新規ファイルを確実に消せる。
     const delta = { written: [] as string[], removed: [] as string[], created: [] as string[] };
     const writeDelta = args.writeDelta ?? writeVaultDelta;
-    // issue #26 / PR #41: 生成集合 (nextGraph の全 relPath) は preimage backup の基礎、
-    // および crash 痕跡検出時の torn 吸収 stage の基礎。backup は writeVaultDelta の直前に
-    // 取り、失敗時の rollback は「この mutation が触ったパスだけ」を mutation 開始前の
-    // worktree 内容へ戻す (利用者の未コミット変更に手を付けない)。
-    const generatedRelPaths = buildVaultFiles(v.nextGraph).map((f: any) => f.relPath as string);
     const backup = snapshotVaultPreimages(vaultDir, generatedRelPaths);
     // gitCommitVault が stage したパス (rollback で unstage する範囲)。stage 前の失敗では
     // null のまま = index には一切触らない。
@@ -902,7 +1111,12 @@ export async function applyMutationToVault(args: {
       const tombstones = recordTombstones({ vaultDir, plan: effectivePlan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
       let head: string | null = null;
       if (args.git !== false) {
-        stagedPaths = mutationStagePaths(vaultDir, generatedRelPaths, delta, crashResidue);
+        stagedPaths = mutationStagePaths(
+          vaultDir,
+          // crash 痕跡 + journal がある時だけ journal 記載パスを吸収する (指摘3)。
+          crashResidue && priorJournal ? journalPaths : [],
+          delta
+        );
         head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation", stagedPaths);
       }
       return {
@@ -940,6 +1154,10 @@ export async function applyMutationToVault(args: {
       throw applyErr;
     } finally {
       endVaultWrite(cacheDir, began);
+      // journal の寿命は seq 書込窓と同じ: 窓が閉じる (成功 = commit 済み / 失敗 =
+      // rollback 済みで torn 無し) 時に消す。hard crash ではこの finally 自体が走らない
+      // ので journal は seq 奇数と一緒に残り、次の writer の回復材料になる。
+      clearVaultWriteJournal(cacheDir);
     }
   });
 
