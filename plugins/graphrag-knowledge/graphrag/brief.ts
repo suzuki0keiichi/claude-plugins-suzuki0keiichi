@@ -212,9 +212,10 @@ export async function buildQueryBrief(graph, nodesById, options: any = {}) {
   // useVector === false (ask --lexical-only) は明示 degrade: 索引読込も embedding も
   // 一切行わず lexical (alias/ngram/coverage) のみで検索する。無言 fallback ではない —
   // 呼び出し側が出力に degraded を焼き込む責務を持つ。
+  // issue #34: graph を渡して鮮度判定を内容突合にする (vault の mtime walk なし)。
   const vectorIndex = options.useVector === false
     ? null
-    : options.vectorIndex ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath);
+    : options.vectorIndex ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath, { graph });
   // R6: queryVectors (複数) が来ていれば最優先 (gist + 質問の両埋め込み)。
   // 次に従来の単一 queryVector、無ければここで embed する。
   let vectorSearch: any;

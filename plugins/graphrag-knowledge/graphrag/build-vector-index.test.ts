@@ -447,3 +447,50 @@ test("buildVectorIndex stamps noise_baseline into the payload meta", async () =>
   assert.equal(typeof payload.noise_baseline.p90_cosine, "number");
   assert.ok(payload.noise_baseline.pairs > 0);
 });
+
+// ── issue #34: vectorIndexMatchesGraph (graph/index 内容突合による鮮度判定) ──
+
+import { vectorIndexMatchesGraph } from "./build-vector-index.ts";
+
+const freshNodes = [
+  { id: "decision:s:d1", type: "Decision", title: "D1", summary: "alpha" },
+  { id: "decision:s:d2", type: "Decision", title: "D2", summary: "beta" }
+];
+
+function rowsFor(nodes, prefix = "") {
+  return nodes.map((n) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n, prefix) }));
+}
+
+test("vectorIndexMatchesGraph: node_id 集合と text_hash が一致すれば fresh", () => {
+  const graph = { nodes: freshNodes, edges: [] };
+  assert.equal(vectorIndexMatchesGraph(graph, { rows: rowsFor(freshNodes) }), true);
+});
+
+test("vectorIndexMatchesGraph: ノード削除 (index に余分な row) は stale", () => {
+  const graph = { nodes: [freshNodes[0]], edges: [] };
+  assert.equal(vectorIndexMatchesGraph(graph, { rows: rowsFor(freshNodes) }), false);
+});
+
+test("vectorIndexMatchesGraph: ノード追加 (row 不足) は stale", () => {
+  const graph = { nodes: freshNodes, edges: [] };
+  assert.equal(vectorIndexMatchesGraph(graph, { rows: rowsFor([freshNodes[0]]) }), false);
+});
+
+test("vectorIndexMatchesGraph: 内容変更 (text_hash 不一致) は stale", () => {
+  const changed = [freshNodes[0], { ...freshNodes[1], summary: "beta v2" }];
+  assert.equal(vectorIndexMatchesGraph({ nodes: changed, edges: [] }, { rows: rowsFor(freshNodes) }), false);
+});
+
+test("vectorIndexMatchesGraph: prefix_policy は index 記録値で hash を計算する", () => {
+  const graph = { nodes: freshNodes, edges: [] };
+  const prefixed = { prefix_policy: { document: "search_document: ", query: "search_query: " }, rows: rowsFor(freshNodes, "search_document: ") };
+  assert.equal(vectorIndexMatchesGraph(graph, prefixed), true, "記録された document 接頭辞込みで一致");
+  const mismatched = { prefix_policy: { document: "search_document: ", query: "search_query: " }, rows: rowsFor(freshNodes, "") };
+  assert.equal(vectorIndexMatchesGraph(graph, mismatched), false, "接頭辞不整合は stale");
+});
+
+test("vectorIndexMatchesGraph: text_hash を持たない旧形式 row は stale (安全側)", () => {
+  const graph = { nodes: [freshNodes[0]], edges: [] };
+  const rows = [{ node_id: freshNodes[0].id, dimensions: 3, vector: [1, 0, 0] }];
+  assert.equal(vectorIndexMatchesGraph(graph, { rows }), false);
+});

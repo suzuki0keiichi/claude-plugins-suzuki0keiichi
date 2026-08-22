@@ -600,7 +600,9 @@ export async function runAsk(argv: string[]) {
   let sharedQueryVectors: number[][] | null = null;
   try {
     if (lexicalOnly) throw new Error("lexical-only: skip vector index");
-    sharedVectorIndex = await loadRequiredVectorIndex(vaultDir);
+    // issue #34: 読み込み済み graph を渡す — 鮮度判定は graph/index の内容突合
+    // (vault の mtime walk なし)。stale 再 build も同じ graph から行う。
+    sharedVectorIndex = await loadRequiredVectorIndex(vaultDir, undefined, { graph: graphData });
     if (gist) {
       // 質問と gist を index の prefix_policy に従って query 接頭辞付きで埋め込む。
       const qv = await embedForIndex(sharedVectorIndex, question, "query");
