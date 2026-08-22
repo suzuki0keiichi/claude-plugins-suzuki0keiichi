@@ -122,9 +122,12 @@ export function discoverStateDir(cwd: string = process.cwd()): string | null {
  * state dir (`.graphrag`) 直下の機械ローカル cache dir (`<stateDir>/cache`) を冪等に返す。
  *
  * E1: 再生成可能・マシンローカルなファイル (vector.json / vector-index.json /
- * indexed-graph.json / ask-state.json / vault.lock / vault.seq) はすべてここへ集約する。
+ * indexed-graph.json / ask-state.json / vault.lock / vault.seq /
+ * vault.write-journal.json) はすべてここへ集約する。
  * `.env` / `VAULT.md` / `carving.json` / `world.json` (追跡・設定) は stateDir 直下のまま。
- * cache/ は writer が走っていなければ丸ごと消して安全 (vault.seq のリセットは設計上許容)。
+ * cache/ は writer が走っていなければ丸ごと消して安全 (vault.seq のリセットは設計上許容。
+ * vault.write-journal.json を crash 痕跡ごと失った torn は自己回復せず fsck の
+ * git-uncommitted が人手復旧を案内する — mutate-vault.ts の write journal コメント参照)。
  */
 export function cacheDirUnder(stateDir: string): string {
   const abs = path.resolve(stateDir);
