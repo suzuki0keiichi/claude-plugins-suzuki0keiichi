@@ -20,7 +20,7 @@ export async function buildEvidencePacket(args) {
   // 行わない (brief.buildQueryBrief と同じ契約 — 無言 fallback ではない)。
   const vectorIndex = args.useVector === false
     ? null
-    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
+    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector);
   const vectorDescription = describeVectorIndex(vectorIndex);
   // R6 multi-query: 呼び出し側が --gist 込みの queryVectors を渡していればそれを使う。
   const vectorSearch = args.useVector === false
@@ -129,9 +129,6 @@ export function parseArgs(argv) {
     request: typeof parsed.request === "string" ? parsed.request : "",
     vault: typeof parsed.vault === "string" ? parsed.vault : process.env.GRAPHRAG_VAULT_DIR,
     vector: typeof parsed.vector === "string" ? parsed.vector : undefined,
-    vectorDelta: typeof (parsed.vectorDelta ?? parsed["vector-delta"]) === "string"
-      ? parsed.vectorDelta ?? parsed["vector-delta"]
-      : undefined,
     limit: typeof parsed.limit === "string" ? Number(parsed.limit) : 8,
     neighbors: typeof parsed.neighbors === "string" ? Number(parsed.neighbors) : 1,
     types: typeof parsed.types === "string" ? parsed.types.split(",").filter(Boolean) : []

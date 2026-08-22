@@ -377,6 +377,89 @@ test("loadRequiredVectorIndex: 外部 vault + inherited readonly (worktree) で�
   }
 });
 
+// ── issue #30: 索引破損の無音縮退を解消 (parse 失敗は明示 Error / 不存在は null) ──
+
+import { loadVectorIndex } from "./retrieval.ts";
+
+test("loadVectorIndex: 存在しないパスは null (従来どおり「索引なし」)", async () => {
+  const idx = await loadVectorIndex("/no/such/dir/vector.json");
+  assert.equal(idx, null);
+});
+
+test("loadVectorIndex: 壊れた JSON はパスを含む明示 Error を throw する", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vec-corrupt-"));
+  try {
+    const indexPath = path.join(tmp, "vector.json");
+    await writeFile(indexPath, "{ this is not json");
+    await assert.rejects(
+      () => loadVectorIndex(indexPath),
+      (err: Error) => {
+        assert.match(err.message, /corrupt/i, "破損であることを明示する");
+        assert.ok(err.message.includes(indexPath), "どのファイルが壊れているかをパスで示す");
+        return true;
+      }
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// embed 呼び出し回数を数える deterministic fake provider (build-vector-index.test.ts と同型)。
+function countingProvider(dim = 3) {
+  const p: any = {
+    id: "fake", capability: "semantic", semantic: true, dimensions: dim,
+    metadata: { endpoint: "http://fake/v1/embeddings", model: "fake-model" },
+    calls: 0
+  };
+  p.embed = async (text: string) => {
+    p.calls += 1;
+    const v = new Array(dim).fill(0);
+    v[0] = text.length % 5;
+    v[1] = 1;
+    return v;
+  };
+  return p;
+}
+
+test("loadRequiredVectorIndex: 破損索引は破棄して再 build で復旧する (索引は二次生成物)", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vec-corrupt-rebuild-"));
+  try {
+    const vaultDir = path.join(tmp, "vault");
+    await mkdir(path.join(vaultDir, "Decision"), { recursive: true });
+    await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
+    // vault ファイルを過去に (mtime 的には索引の方が新しい = staleness 再構築は発火しない)
+    const past = new Date(Date.now() - 60_000);
+    await utimes(path.join(vaultDir, "Decision", "d1.md"), past, past);
+    // cache/ の索引を破損させる
+    const indexPath = defaultVectorIndexPath(vaultDir);
+    await mkdir(path.dirname(indexPath), { recursive: true });
+    await writeFile(indexPath, "{ broken json !!");
+    const provider = countingProvider(3);
+    const idx = await loadRequiredVectorIndex(vaultDir, undefined, { vectorDeps: { provider } });
+    assert.equal(idx.provider, "fake", "再 build された索引が返る");
+    assert.ok(provider.calls >= 1, "再 build で embed が走る");
+    // on-disk も復旧している (次回以降は正常に読める)
+    const onDisk = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    assert.equal(onDisk.provider, "fake");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("loadRequiredVectorIndex: vault 無し (明示パスのみ) の破損索引は明示 Error のまま伝播", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vec-corrupt-novault-"));
+  try {
+    const indexPath = path.join(tmp, "vector.json");
+    await writeFile(indexPath, "not json at all");
+    await assert.rejects(
+      () => loadRequiredVectorIndex(undefined, indexPath),
+      /parse/i // 「索引なし」でなく parse 失敗そのものが伝わる
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("searchGraph does not match on node id (identifier excluded from search)", () => {
   const graph = { nodes: [{ id: "concern:acme:auth", type: "Concern", title: "認証基盤" }], edges: [] };
   // "concern" は id にしか無い (title は認証基盤)。id 除外なら一致しない。

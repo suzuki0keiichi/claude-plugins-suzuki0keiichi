@@ -103,17 +103,8 @@ test("parseArgs reads --vault and GRAPHRAG_VAULT_DIR", () => {
   }
 });
 
-test("buildVectorIndex rejects vault + base together (loud, no silent broken delta)", async () => {
-  const dir = writeVault({ nodes: [{ id: "system:acme", type: "System", title: "A" }], edges: [] });
-  try {
-    await assert.rejects(
-      () => buildVectorIndex({ vault: dir, base: "/whatever.json" }, { provider: fakeProvider(3) }),
-      /vault \+ base/
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+// (旧テスト「vault + base together を reject」は撤去: --base / base-delta ビルド自体を
+// issue #30 で丸ごと削除したため、ガード対象の引数が存在しない。)
 
 test("buildVectorIndex prefers vault over graph when both are given", async () => {
   const dir = writeVault({

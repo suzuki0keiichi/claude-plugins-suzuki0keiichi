@@ -487,12 +487,21 @@ export async function applyMutationToVault(args: {
   // 出す。endpoint がハングしてもロック保持時間は writeVaultDelta + git commit のまま。
   const dupDeps = args.dupDeps ?? {};
   let dupIndex: any = null;
+  // 破損索引 (loadVectorIndex の parse 失敗 Error 等)。索引は二次生成物なので
+  // mutation はブロックしない (不在扱いで skip) が、無音にせず duplicate_check に
+  // note (index_corrupt) を残す (issue #30: 無音縮退の解消)。
+  let indexCorrupt: { index_corrupt: true; index_corrupt_reason: string } | null = null;
   try {
     dupIndex = await (dupDeps.loadIndex
       ? dupDeps.loadIndex()
       : loadVectorIndex(vaultVectorIndexReadPath(vaultDir)));
-  } catch {
-    dupIndex = null; // 索引が読めない = 不在扱いで skip (NON-FATAL)
+  } catch (e: any) {
+    dupIndex = null; // 不在扱いで skip (NON-FATAL)
+    indexCorrupt = {
+      index_corrupt: true,
+      index_corrupt_reason:
+        `vector index unreadable — the duplicate gate ran without it: ${String(e?.message ?? e)}`,
+    };
   }
   // 索引と同じ document 空間で候補を埋め込む (index の prefix_policy 準拠)。索引行は
   // nodeVectorText を document 接頭辞で埋め込んだものなので、query 埋め込みで比較すると
@@ -626,6 +635,7 @@ export async function applyMutationToVault(args: {
         suspects: dup.suspects,
         cross_type_suspects: dup.cross_type_suspects,
         ...(indexStale ?? {}),
+        ...(indexCorrupt ?? {}),
       };
       throw err;
     }
@@ -636,6 +646,7 @@ export async function applyMutationToVault(args: {
       // 型跨ぎ (D↔OK / Risk↔Constraint) の重複疑い。非ブロッキング (reject に使わない)。
       cross_type_suspects: dup.cross_type_suspects,
       ...(indexStale ?? {}),
+      ...(indexCorrupt ?? {}),
     };
     // relations は副産物 (suggest-only)。lock 外の suggestions 組み立てに渡すため保持。
     const relationCandidates = dup.relations ?? [];
@@ -753,12 +764,14 @@ export async function applyMutationToVault(args: {
   try {
     // binding 用の index は再構築後の on-disk 索引 (新ノードが載っている)。読めなければ null。
     let suggestIndex: any = null;
+    let suggestIndexCorrupt: string | null = null;
     try {
       suggestIndex = await (sd.loadIndex
         ? sd.loadIndex()
         : loadVectorIndex(vaultVectorIndexReadPath(vaultDir)));
-    } catch {
-      suggestIndex = null; // 索引が読めない = 不在扱いで skip (NON-FATAL)
+    } catch (e: any) {
+      suggestIndex = null; // 不在扱いで skip (NON-FATAL) — ただし下で note を残す
+      suggestIndexCorrupt = String(e?.message ?? e);
     }
     // embed: index の document 空間準拠の埋め込み (索引行と同じ側の接頭辞。
     // suggest-policy-edges の契約 = embedForIndex(index, text, "document") 相当)。
@@ -777,6 +790,14 @@ export async function applyMutationToVault(args: {
       recentHitIds,
       schema: args.schema,
     });
+    if (suggestIndexCorrupt) {
+      // 破損索引で index 無しに縮退したことを無音にしない (advisory only)。
+      suggestions = {
+        ...suggestions,
+        index_corrupt: true,
+        index_corrupt_reason: `vector index unreadable — suggestions built without it: ${suggestIndexCorrupt}`,
+      };
+    }
   } catch (e: any) {
     // 想定外の失敗でも apply は確定済み。suggestions を空骨格にして返す。
     suggestions = {

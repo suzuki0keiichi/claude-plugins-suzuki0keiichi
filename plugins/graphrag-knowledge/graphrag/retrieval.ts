@@ -42,13 +42,27 @@ export async function loadGraph(
   return readVaultConsistent(seqDir, () => importVault(vaultDir), seqOpts);
 }
 
-export async function loadVectorIndex(vectorPath: string, deltaPath?: string) {
+// 索引ファイルの読み込み。不存在 (ENOENT/ENOTDIR) は従来どおり「索引なし」= null。
+// JSON parse 失敗は無音で null にしない — どのファイルが壊れているかをパス付きの
+// 明示 Error で伝える (issue #30: 広い catch が parse 失敗まで飲んで無音縮退していた)。
+// 旧 deltaPath 引数 (base/delta merge) は撤去: v3 の builder は delta を書けないので
+// 読み側だけの死経路だった (書けないものは読めなくてよい)。
+export async function loadVectorIndex(vectorPath: string) {
+  let raw: string;
   try {
-    const index = JSON.parse(await readFile(vectorPath, "utf8"));
-    if (!deltaPath) return index;
-    return mergeVectorIndexes(index, await loadVectorIndex(deltaPath));
-  } catch {
-    return deltaPath ? mergeVectorIndexes(null, await loadVectorIndex(deltaPath)) : null;
+    raw = await readFile(vectorPath, "utf8");
+  } catch (error: any) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return null;
+    throw error;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `vector index is corrupt (JSON parse failed): ${vectorPath} — ${msg}. ` +
+      "The index is a secondary artifact: delete it or rebuild with build-vector-index --vault <dir>."
+    );
   }
 }
 
@@ -106,10 +120,12 @@ export async function shouldRebuildVectorIndex(vaultDir: string, indexPath: stri
 // 検索系は semantic 非交渉。索引が無ければ lexical で代替せず明示エラーで促す。
 // 索引パスは明示指定 > vault 隣の既定 の順に解決する。
 // vault が指定されていて索引が無い/古い場合は自動構築を試みる (embedding はローカルなので無料)。
+// deps.vectorDeps は自動 (再) 構築時に buildAndWriteVectorIndex へ渡す DI
+// (テストで provider を差し込み endpoint 非依存にする)。
 export async function loadRequiredVectorIndex(
   vaultDir: string | undefined,
   explicitPath?: string,
-  deltaPath?: string
+  deps: { vectorDeps?: any } = {}
 ) {
   // writePath = 自動再構築の書き出し先 / readPath = 実際に読む場所 (legacy fallback あり)。
   let writePath = explicitPath ?? (vaultDir ? defaultVectorIndexPath(vaultDir) : undefined);
@@ -151,7 +167,7 @@ export async function loadRequiredVectorIndex(
     try {
       const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
       process.stderr.write(`[auto] vector index missing or stale → auto-building: ${writePath}\n`);
-      await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir });
+      await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir }, deps.vectorDeps ?? {});
       process.stderr.write(`[auto]   → build complete\n`);
       readPath = writePath;
     } catch (e: unknown) {
@@ -160,7 +176,22 @@ export async function loadRequiredVectorIndex(
     }
   }
 
-  const index = await loadVectorIndex(readPath, deltaPath);
+  let index;
+  try {
+    index = await loadVectorIndex(readPath);
+  } catch (e: unknown) {
+    // 破損索引 (parse 失敗)。索引は二次生成物なので、vault があれば壊れたものを
+    // 破棄して再 build で復旧する。vault が無ければ再構築できないので明示 Error の
+    // まま伝播させる (無音で「索引なし」に縮退しない)。
+    if (!vaultDir) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    process.stderr.write(`[auto] corrupt vector index → discarding and rebuilding: ${msg}\n`);
+    const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
+    await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir }, deps.vectorDeps ?? {});
+    process.stderr.write(`[auto]   → rebuild complete\n`);
+    readPath = writePath;
+    index = await loadVectorIndex(readPath);
+  }
   if (!index) {
     throw new Error(
       `vector index not found: ${readPath}. Build it first: build-vector-index --vault <dir>. ` +
@@ -168,25 +199,6 @@ export async function loadRequiredVectorIndex(
     );
   }
   return index;
-}
-
-export function mergeVectorIndexes(baseIndex, deltaIndex) {
-  if (!baseIndex) return deltaIndex ?? null;
-  if (!deltaIndex) return baseIndex;
-  if (baseIndex.provider !== deltaIndex.provider) {
-    throw new Error(`Vector index provider mismatch: ${baseIndex.provider} != ${deltaIndex.provider}`);
-  }
-  if (baseIndex.dimensions !== deltaIndex.dimensions) {
-    throw new Error(`Vector index dimensions mismatch: ${baseIndex.dimensions} != ${deltaIndex.dimensions}`);
-  }
-
-  const rowsById = new Map((baseIndex.rows ?? []).map((row) => [row.node_id, row]));
-  for (const row of deltaIndex.rows ?? []) rowsById.set(row.node_id, row);
-  return {
-    ...baseIndex,
-    generated_at: deltaIndex.generated_at ?? baseIndex.generated_at,
-    rows: [...rowsById.values()]
-  };
 }
 
 export async function prepareVectorSearch(query, options: any = {}) {
