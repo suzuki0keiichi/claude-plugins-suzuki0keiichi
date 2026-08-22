@@ -233,6 +233,9 @@ export async function runDuplicateCheck(args: {
   currentGraph: { nodes?: any[] };
   vectorIndex: { rows?: any[] } | null | undefined;
   embed: (text: string) => Promise<number[]>;
+  // issue #31: 複数候補をバッチで埋め込む口 (省略時は embed の直列 fallback)。
+  // 返却順は入力 texts 順であること。
+  embedMany?: (texts: string[]) => Promise<number[][]>;
   threshold?: number;
   schema?: SchemaDefinition;
 }): Promise<DuplicateCheckResult> {
@@ -260,10 +263,28 @@ export async function runDuplicateCheck(args: {
     skipReason = "vector index unavailable (build it to enable the duplicate gate)";
   } else {
     try {
-      for (const candidate of candidates) {
-        const text = duplicateGateText(candidate);
-        if (!text) continue;
-        const candidateVector = await args.embed(text);
+      // issue #31: 候補テキストを先に列挙し、embedMany があれば 1 バッチ (チャンク直列) で
+      // 埋め込む。無ければ従来どおり直列 embed。失敗はバッチ単位 = embedding 段全体の
+      // 非致命 skip (従来の逐次失敗と同じ catch に落ちる)。
+      const embeddable = candidates
+        .map((candidate) => ({ candidate, text: duplicateGateText(candidate) }))
+        .filter((entry) => Boolean(entry.text));
+      const texts = embeddable.map((entry) => entry.text);
+      let candidateVectors: number[][];
+      if (args.embedMany && texts.length > 0) {
+        candidateVectors = await args.embedMany(texts);
+        if (!Array.isArray(candidateVectors) || candidateVectors.length !== texts.length) {
+          throw new Error(
+            `embedMany returned ${Array.isArray(candidateVectors) ? candidateVectors.length : "no"} vector(s) for ${texts.length} text(s)`
+          );
+        }
+      } else {
+        candidateVectors = [];
+        for (const text of texts) candidateVectors.push(await args.embed(text));
+      }
+      for (let entryIndex = 0; entryIndex < embeddable.length; entryIndex += 1) {
+        const candidate = embeddable[entryIndex].candidate;
+        const candidateVector = candidateVectors[entryIndex];
         const candidateNorm = vectorNorm(candidateVector);
         const candidateType = canonicalType(candidate.type);
         const crossGroup = CROSS_TYPE_DUP_GROUPS.find((g) => g.includes(candidateType ?? ""));

@@ -188,3 +188,181 @@ test("circuit breaker: 4xx では開かない (endpoint は生きている)", as
     resetEmbeddingCircuit();
   }
 });
+
+// ── issue #31: embedding バッチ化 (embedMany / chunk / fallback) ─────────────
+import {
+  chunkTextsForEmbedding,
+  embedTextsWithProvider,
+  embedManyForIndex
+} from "./vector.ts";
+
+test("chunkTextsForEmbedding: 件数上限で分割 (境界含む)", () => {
+  assert.deepEqual(
+    chunkTextsForEmbedding(["a", "b", "c", "d", "e"], 2, 1000),
+    [["a", "b"], ["c", "d"], ["e"]]
+  );
+  assert.deepEqual(chunkTextsForEmbedding(["a", "b"], 2, 1000), [["a", "b"]], "上限ちょうどは 1 チャンク");
+  assert.deepEqual(chunkTextsForEmbedding([], 2, 1000), []);
+});
+
+test("chunkTextsForEmbedding: byte 上限 (UTF-8) で分割・単体超過テキストは単独チャンク", () => {
+  // "ああ" = 6 bytes。maxBytes 12 → 2 件 + 1 件。
+  assert.deepEqual(chunkTextsForEmbedding(["ああ", "ああ", "ああ"], 10, 12), [["ああ", "ああ"], ["ああ"]]);
+  // 単体で byte 上限を超えるテキストも捨てず単独チャンクで送る。
+  assert.deepEqual(chunkTextsForEmbedding(["xxxxxxxxxx", "a"], 10, 4), [["xxxxxxxxxx"], ["a"]]);
+});
+
+test("embedTextsWithProvider: embedMany 非対応 provider は従来どおり直列 embed (順序維持)", async () => {
+  const seen: string[] = [];
+  const provider: any = { embed: async (t: string) => { seen.push(t); return [t.length, 0]; } };
+  const out = await embedTextsWithProvider(provider, ["aa", "b", "ccc"]);
+  assert.deepEqual(seen, ["aa", "b", "ccc"]);
+  assert.deepEqual(out, [[2, 0], [1, 0], [3, 0]]);
+});
+
+test("embedTextsWithProvider: embedMany 対応 provider はチャンク単位で直列にまとめて送る (並行なし)", async () => {
+  const batches: string[][] = [];
+  let inFlight = 0;
+  let overlapped = false;
+  const provider: any = {
+    embed: async (t: string) => [t.length],
+    embedMany: async (texts: string[]) => {
+      inFlight += 1;
+      if (inFlight > 1) overlapped = true;
+      batches.push([...texts]);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return texts.map((t) => [t.length]);
+    }
+  };
+  const out = await embedTextsWithProvider(provider, ["aa", "b", "ccc", "dddd", "e"], { maxItems: 2 });
+  assert.deepEqual(batches, [["aa", "b"], ["ccc", "dddd"], ["e"]], "件数上限ごとのチャンク");
+  assert.equal(overlapped, false, "チャンクは直列送出 (並行リクエストはしない — circuit breaker の fail-fast 前提)");
+  assert.deepEqual(out, [[2], [1], [3], [4], [1]], "返却順は入力順");
+});
+
+test("embedTextsWithProvider: 1 件は従来の embed 経路 (リクエスト形の互換維持)", async () => {
+  let manyCalls = 0;
+  const singles: string[] = [];
+  const provider: any = {
+    embed: async (t: string) => { singles.push(t); return [1]; },
+    embedMany: async () => { manyCalls += 1; return [[1]]; }
+  };
+  await embedTextsWithProvider(provider, ["only"]);
+  assert.deepEqual(singles, ["only"]);
+  assert.equal(manyCalls, 0);
+});
+
+test("embedTextsWithProvider: embedMany の件数不一致は明示 Error", async () => {
+  const provider: any = {
+    embed: async () => [1],
+    embedMany: async () => [[1]]
+  };
+  await assert.rejects(() => embedTextsWithProvider(provider, ["a", "b"]), /1 vector\(s\) for 2 input\(s\)/);
+});
+
+test("openai-compatible embedMany: input を配列で送り data[].index で並べ直す", async () => {
+  resetEmbeddingCircuit();
+  const realFetch = globalThis.fetch;
+  let sentInput: any = null;
+  globalThis.fetch = (async (_url: string, opts: any) => {
+    sentInput = JSON.parse(opts.body).input;
+    return {
+      ok: true,
+      json: async () => ({
+        data: [
+          { index: 1, embedding: [0, 1, 0] },
+          { index: 0, embedding: [1, 0, 0] }
+        ]
+      })
+    };
+  }) as any;
+  try {
+    const provider = createVectorProvider({
+      provider: "openai-compatible-embedding",
+      endpoint: "http://batch-reorder.test/v1/embeddings",
+      model: "m"
+    });
+    const out = await provider.embedMany!(["first", "second"]);
+    assert.deepEqual(sentInput, ["first", "second"], "input は配列 1 リクエスト");
+    assert.deepEqual(out[0], [1, 0, 0], "index=0 が先頭 (応答が順不同でも並べ直す)");
+    assert.deepEqual(out[1], [0, 1, 0]);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetEmbeddingCircuit();
+  }
+});
+
+test("openai-compatible embedMany: 応答件数不一致は明示 Error", async () => {
+  resetEmbeddingCircuit();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ data: [{ index: 0, embedding: [1, 0, 0] }] })
+  })) as any;
+  try {
+    const provider = createVectorProvider({
+      provider: "openai-compatible-embedding",
+      endpoint: "http://batch-count.test/v1/embeddings",
+      model: "m"
+    });
+    await assert.rejects(() => provider.embedMany!(["a", "b"]), /sent 2 input\(s\), got 1/);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetEmbeddingCircuit();
+  }
+});
+
+test("openai-compatible embedMany: バッチ内の次元不一致は明示 Error", async () => {
+  resetEmbeddingCircuit();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({
+      data: [
+        { index: 0, embedding: [1, 0, 0] },
+        { index: 1, embedding: [1, 0] }
+      ]
+    })
+  })) as any;
+  try {
+    const provider = createVectorProvider({
+      provider: "openai-compatible-embedding",
+      endpoint: "http://batch-dims.test/v1/embeddings",
+      model: "m"
+    });
+    await assert.rejects(() => provider.embedMany!(["a", "b"]), /inconsistent dimensions/);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetEmbeddingCircuit();
+  }
+});
+
+test("embedManyForIndex: prefix_policy の document 接頭辞を全件に付けて配列で送る", async () => {
+  resetEmbeddingCircuit();
+  const realFetch = globalThis.fetch;
+  let sentInput: any = null;
+  globalThis.fetch = (async (url: string, opts: any) => {
+    if (String(url).endsWith("/models")) {
+      return { ok: true, json: async () => ({ data: [{ id: "nomic-embed-text" }] }) };
+    }
+    sentInput = JSON.parse(opts.body).input;
+    return {
+      ok: true,
+      json: async () => ({
+        data: [
+          { index: 0, embedding: [1, 0, 0] },
+          { index: 1, embedding: [0, 1, 0] }
+        ]
+      })
+    };
+  }) as any;
+  try {
+    const out = await embedManyForIndex(PREFIXED_INDEX, ["認証", "決済"], "document");
+    assert.deepEqual(sentInput, ["search_document: 認証", "search_document: 決済"]);
+    assert.equal(out.length, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetEmbeddingCircuit();
+  }
+});

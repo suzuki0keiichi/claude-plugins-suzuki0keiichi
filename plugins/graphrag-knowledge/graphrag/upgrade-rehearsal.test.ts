@@ -32,7 +32,8 @@ import { vectorTextHash } from "./build-vector-index.ts";
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.ts");
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
 
-/** OpenAI 互換 embedding endpoint のモック。全入力に同一ベクトル [1,0] を返す。 */
+/** OpenAI 互換 embedding endpoint のモック。全入力に同一ベクトル [1,0] を返す。
+ *  実 endpoint と同じく input は string / string[] の両対応 (issue #31 のバッチ形)。 */
 function startEmbeddingMock(): Promise<{ base: string; close: () => Promise<void> }> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -41,9 +42,16 @@ function startEmbeddingMock(): Promise<{ base: string; close: () => Promise<void
         res.end(JSON.stringify({ data: [{ id: "nomic-embed-text" }] }));
         return;
       }
-      req.resume();
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
-        res.end(JSON.stringify({ data: [{ embedding: [1, 0] }] }));
+        let input: unknown = null;
+        try {
+          input = JSON.parse(body)?.input;
+        } catch { /* input 不明なら単発扱い */ }
+        const count = Array.isArray(input) ? input.length : 1;
+        const data = Array.from({ length: count }, (_v, index) => ({ index, embedding: [1, 0] }));
+        res.end(JSON.stringify({ data }));
       });
     });
     server.listen(0, "127.0.0.1", () => {

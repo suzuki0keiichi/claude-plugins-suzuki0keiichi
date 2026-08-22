@@ -27,7 +27,7 @@ import {
   duplicateGateCandidates,
   duplicateGateText,
 } from "./duplicate-check.ts";
-import { embedForIndex } from "./vector.ts";
+import { embedForIndex, embedManyForIndex } from "./vector.ts";
 import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
@@ -352,6 +352,8 @@ async function buildSuggestions(args: {
   relations: any[];
   vectorIndex: { rows?: any[] } | null | undefined;
   embed: ((text: string) => Promise<number[]>) | null;
+  // issue #31: 複数ノードをバッチで埋め込む口 (省略時は embed の直列 fallback)。
+  embedMany?: ((texts: string[]) => Promise<number[][]>) | null;
   recentHitIds: string[];
   schema?: SchemaDefinition;
 }): Promise<any> {
@@ -375,6 +377,7 @@ async function buildSuggestions(args: {
         vectorIndex: args.vectorIndex,
         nodes: createdNodes,
         embed: args.embed,
+        ...(args.embedMany ? { embedMany: args.embedMany } : {}),
       });
       // write path の索引行は {node_id, dimensions, vector, text_hash} のみで path/title を
       // 持たない (suggest 側は best-effort で読むだけ)。候補が「どのファイルか」を id 以外で
@@ -471,6 +474,9 @@ export async function applyMutationToVault(args: {
   dupDeps?: {
     loadIndex?: () => Promise<any> | any;
     embed?: (text: string) => Promise<number[]>;
+    // issue #31: 候補群をバッチで埋め込む口 (省略時: embed 指定なら直列 fallback、
+    // どちらも無ければ embedManyForIndex の既定バッチ経路)。返却順は texts 順。
+    embedMany?: (texts: string[]) => Promise<number[][]>;
     threshold?: number;
   };
   // E0 書き込み時提案の DI (binding 用 index/embed と ask-trail base dir)。
@@ -480,6 +486,9 @@ export async function applyMutationToVault(args: {
   suggestDeps?: {
     loadIndex?: () => Promise<any> | any;
     embed?: (text: string) => Promise<number[]>;
+    // issue #31: binding 埋め込みのバッチ口 (省略時: embed 指定なら直列 fallback、
+    // どちらも無ければ embedManyForIndex の既定バッチ経路)。返却順は texts 順。
+    embedMany?: (texts: string[]) => Promise<number[][]>;
     recentHitIds?: () => string[];
   };
   // テスト用 DI (buildIndex と同様)。途中失敗時の巻き戻しを検証するため、
@@ -535,15 +544,38 @@ export async function applyMutationToVault(args: {
   // 空間がずれ 0.92 閾値が系統的に甘くなる。
   const dupEmbed =
     dupDeps.embed ?? ((text: string) => embedForIndex(dupIndex, text, "document"));
+  // issue #31: 事前埋め込みは候補群を 1 バッチ (チャンク直列) で送る。DI が単発 embed
+  // のみ指定した場合はその embed の直列 fallback (テスト互換)。
+  const dupEmbedMany: (texts: string[]) => Promise<number[][]> =
+    dupDeps.embedMany
+      ?? (dupDeps.embed
+        ? async (texts: string[]) => {
+            const out: number[][] = [];
+            for (const text of texts) out.push(await dupEmbed(text));
+            return out;
+          }
+        : (texts: string[]) => embedManyForIndex(dupIndex, texts, "document"));
   const gateCandidates = duplicateGateCandidates(plan, args.schema);
   const preEmbedded = new Map<string, number[]>();
   let preEmbedError: unknown = null;
   if (gateCandidates.length > 0 && Array.isArray(dupIndex?.rows) && dupIndex.rows.length > 0) {
     try {
+      const texts: string[] = [];
+      const seenTexts = new Set<string>();
       for (const candidate of gateCandidates) {
         const text = duplicateGateText(candidate);
-        if (!text || preEmbedded.has(text)) continue;
-        preEmbedded.set(text, await dupEmbed(text));
+        if (!text || seenTexts.has(text)) continue;
+        seenTexts.add(text);
+        texts.push(text);
+      }
+      if (texts.length > 0) {
+        const vectors = await dupEmbedMany(texts);
+        if (!Array.isArray(vectors) || vectors.length !== texts.length) {
+          throw new Error(
+            `embedMany returned ${Array.isArray(vectors) ? vectors.length : "no"} vector(s) for ${texts.length} text(s)`
+          );
+        }
+        texts.forEach((text, i) => preEmbedded.set(text, vectors[i]));
       }
     } catch (e) {
       preEmbedError = e; // ゲート実行時に同じ理由で skip させる (非致命)
@@ -556,6 +588,29 @@ export async function applyMutationToVault(args: {
     const vec = preEmbedded.get(text);
     if (vec) return vec;
     return dupEmbed(text);
+  };
+  // バッチ版 (runDuplicateCheck へ渡す): 事前計算の参照が基本。miss 分だけまとめて
+  // dupEmbedMany に落とす (候補列挙は同じ関数なので通常 miss は発生しない)。
+  const gateEmbedMany = async (texts: string[]): Promise<number[][]> => {
+    if (preEmbedError) throw preEmbedError;
+    const out: number[][] = new Array(texts.length);
+    const missTexts: string[] = [];
+    const missAt: number[] = [];
+    texts.forEach((text, i) => {
+      const vec = preEmbedded.get(text);
+      if (vec) out[i] = vec;
+      else {
+        missTexts.push(text);
+        missAt.push(i);
+      }
+    });
+    if (missTexts.length > 0) {
+      const vectors = await dupEmbedMany(missTexts);
+      missAt.forEach((at, j) => {
+        out[at] = vectors[j];
+      });
+    }
+    return out;
   };
   // 索引の staleness (fallback 側): 索引再構築は post-commit 非致命なので、失敗した直後の
   // mutation は古い索引でゲートを回すことになる。索引に打刻された vault_head と現 HEAD が
@@ -657,6 +712,7 @@ export async function applyMutationToVault(args: {
       currentGraph: current,
       vectorIndex: dupIndex,
       embed: gateEmbed,
+      embedMany: gateEmbedMany,
       threshold: dupDeps.threshold,
       schema: args.schema,
     });
@@ -818,12 +874,22 @@ export async function applyMutationToVault(args: {
       : suggestIndex
         ? (text: string) => embedForIndex(suggestIndex, text, "document")
         : null;
+    // issue #31: バッチ口。DI が embedMany を指定すればそれを、単発 embed のみの DI は
+    // null (suggestBindingsForNodes 側の直列 fallback)、DI 無しは既定のバッチ経路。
+    const embedMany = sd.embedMany
+      ? sd.embedMany
+      : sd.embed
+        ? null
+        : suggestIndex
+          ? (texts: string[]) => embedManyForIndex(suggestIndex, texts, "document")
+          : null;
     suggestions = await buildSuggestions({
       nextGraph: __suggestionsInput.nextGraph,
       plan: __suggestionsInput.plan,
       relations: __suggestionsInput.relations,
       vectorIndex: suggestIndex,
       embed,
+      embedMany,
       recentHitIds,
       schema: args.schema,
     });

@@ -324,3 +324,21 @@ test("relations モード main: mode/pairs/pair_count・similarity 降順・note
   assert.match(res.pairs[0].note, /refines/);
   assert.match(res.pairs[0].note, /supersede/);
 });
+
+// ── issue #31: embedMany バッチ経由 ──────────────────────────────────────────
+test("embedMany が渡されたら対象ノード全件を 1 バッチで埋め込む (単発 embed は呼ばない)", async () => {
+  const batches: string[][] = [];
+  const out = await suggestBindingsForNodes({
+    vectorIndex: indexWith({ node_id: "file:s:src/a.ts", vector: [1, 0, 0], path: "src/a.ts" }),
+    nodes: [
+      { id: "decision:s:d", type: "Decision", title: "D", summary: "x" },
+      { id: "risk:s:r", type: "Risk", title: "R", summary: "y" },
+    ],
+    embed: async () => { throw new Error("single embed must not be called when embedMany is provided"); },
+    embedMany: async (texts: string[]) => { batches.push([...texts]); return texts.map(() => [1, 0, 0]); },
+  } as any);
+  assert.equal(batches.length, 1, "対象ノードは 1 バッチ");
+  assert.deepEqual(batches[0], ["D x", "R y"], "バッチ内容はノード順の埋め込みテキスト");
+  assert.equal(out.length, 2, "両ノードに候補が返る");
+  assert.deepEqual(out.map((s: any) => s.node_id), ["decision:s:d", "risk:s:r"]);
+});

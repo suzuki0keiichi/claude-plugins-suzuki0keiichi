@@ -677,3 +677,44 @@ test("issue #27: seq 比較不能でも、既存 index が現 graph と一致し
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── issue #31: 逐次 embed → embedMany バッチ ─────────────────────────────────
+test("embedNodesIncremental: miss 分を node 順どおり embedMany で 1 バッチ送出 (再利用行はバッチに載らない)", async () => {
+  const batches: string[][] = [];
+  const provider: any = {
+    id: "fake", capability: "semantic", semantic: true, dimensions: 3,
+    metadata: { endpoint: "http://fake/v1/embeddings", model: "fake-model" },
+    embed: async (text: string) => { batches.push([text]); return [text.length % 5, 1, 0]; },
+    embedMany: async (texts: string[]) => { batches.push([...texts]); return texts.map((t) => [t.length % 5, 1, 0]); }
+  };
+  const a = { id: "decision:s:a", type: "Decision", title: "A", summary: "alpha" };
+  const b = { id: "decision:s:b", type: "Decision", title: "B", summary: "beta" };
+  const c = { id: "decision:s:c", type: "Decision", title: "C", summary: "gamma" };
+  const prev = [{ node_id: "decision:s:b", dimensions: 3, vector: [9, 9, 9], text_hash: vectorTextHash(b) }];
+  const rows = await embedNodesIncremental([a, b, c], provider, prev);
+  assert.equal(batches.length, 1, "miss 2 件は 1 回の embedMany バッチ (現行は 1 件ずつ = red)");
+  assert.deepEqual(batches[0], [nodeVectorText(a), nodeVectorText(c)], "バッチ内容は node 順の miss テキスト");
+  assert.deepEqual(
+    rows.map((r: any) => r.node_id),
+    ["decision:s:a", "decision:s:b", "decision:s:c"],
+    "rows は node 順 (決定論的順序を維持)"
+  );
+  assert.deepEqual(rows[1].vector, [9, 9, 9], "unchanged (text_hash 一致) は再利用しバッチに含めない");
+  assert.equal(rows[1].text_hash, vectorTextHash(b));
+});
+
+test("embedNodesIncremental: documentPrefix はバッチの各 miss テキストにも付く", async () => {
+  const batches: string[][] = [];
+  const provider: any = {
+    id: "fake", capability: "semantic", semantic: true, dimensions: 3,
+    metadata: { endpoint: "http://fake/v1/embeddings", model: "fake-model" },
+    embed: async (text: string) => { batches.push([text]); return [1, 0, 0]; },
+    embedMany: async (texts: string[]) => { batches.push([...texts]); return texts.map(() => [1, 0, 0]); }
+  };
+  const a = { id: "decision:s:a", type: "Decision", title: "A", summary: "alpha" };
+  const b = { id: "decision:s:b", type: "Decision", title: "B", summary: "beta" };
+  const rows = await embedNodesIncremental([a, b], provider, [], "search_document: ");
+  assert.equal(batches.length, 1);
+  assert.deepEqual(batches[0], [`search_document: ${nodeVectorText(a)}`, `search_document: ${nodeVectorText(b)}`]);
+  assert.equal(rows[0].text_hash, vectorTextHash(a, "search_document: "), "text_hash は prefix 込み (従来どおり)");
+});

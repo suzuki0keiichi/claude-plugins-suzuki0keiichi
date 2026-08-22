@@ -610,8 +610,11 @@ export async function runAsk(argv: string[]) {
     sharedVectorIndex = await loadRequiredVectorIndex(vaultDir, undefined, { graph: graphData });
     if (gist) {
       // 質問と gist を index の prefix_policy に従って query 接頭辞付きで埋め込む。
-      const qv = await embedForIndex(sharedVectorIndex, question, "query");
-      const gv = await embedForIndex(sharedVectorIndex, gist, "query");
+      // issue #31: 2 件固定なので直列に待たず並置する (embedMany は不要)。
+      const [qv, gv] = await Promise.all([
+        embedForIndex(sharedVectorIndex, question, "query"),
+        embedForIndex(sharedVectorIndex, gist, "query"),
+      ]);
       sharedQueryVectors = [qv, gv];
       sharedQueryVector = qv; // world ヒント等の単一ベクトル経路には質問側を渡す
     } else {
