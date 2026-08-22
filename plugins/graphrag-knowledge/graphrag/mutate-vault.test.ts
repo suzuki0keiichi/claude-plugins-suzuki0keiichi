@@ -873,6 +873,51 @@ test("重複ゲート: vault_head が現 HEAD と一致 (または打刻無し) 
   assert.equal(res.duplicate_check.index_stale_reason, undefined);
 });
 
+// ── issue #27: index_stale の主判定は内容突合 (vault_head は fallback) ──────────
+
+test("issue #27: 索引内容が graph と食い違えば vault_head が現 HEAD でも index_stale (嘘の head に騙されない)", async () => {
+  const { vault, stateDir } = gitInitVaultWithDecision();
+  const head0 = vaultHead(vault);
+  // rows は text_hash 持ちだが現 graph と食い違う内容。vault_head は現 HEAD (= 嘘の打刻:
+  // 並行 build で rows は古い snapshot 由来・head だけ新しい、を模す)。
+  const lyingIndex = {
+    rows: [{ node_id: "decision:s:a", dimensions: 3, vector: [1, 0, 0], text_hash: "0".repeat(64) }],
+    vault_head: head0,
+  };
+  const res = await applyMutationToVault({
+    plan: decisionPlan("i27a", "content mismatch must win over head"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+    dupDeps: { loadIndex: () => lyingIndex, embed: async () => [0, 1, 0] },
+  });
+  assert.equal(res.applied, true, "index_stale は情報提供のみ");
+  assert.equal(res.duplicate_check.index_stale, true, "内容突合が stale を検出する (head 一致でも)");
+});
+
+test("issue #27: 索引内容が graph と一致していれば vault_head が違っても index_stale は立たない (内容突合が主判定)", async () => {
+  const { vault, stateDir } = gitInitVaultWithDecision();
+  // 現 graph と完全一致する rows (text_hash 込み)。vault_head だけ食い違う
+  // (dirty vault / working-tree 由来 build では head 比較は嘘をつく)。
+  const { vectorTextHash } = await import("./build-vector-index.ts");
+  const currentNodes = importVault(vault).nodes;
+  const freshIndex = {
+    rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) })),
+    vault_head: "deadbeef",
+  };
+  const res = await applyMutationToVault({
+    plan: decisionPlan("i27b", "content match must beat stale head"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+    dupDeps: { loadIndex: () => freshIndex, embed: async () => [0, 1, 0] },
+  });
+  assert.equal(res.applied, true);
+  assert.equal(res.duplicate_check.index_stale, undefined, "内容一致なら head 不一致でも stale にしない");
+});
+
 test("重複ゲート: 候補の embedding はロック取得前に走る (ネットワーク IO をロック外へ)", async () => {
   const { vault, stateDir } = gitInitVaultWithDecision();
   const cacheDir = path.join(stateDir, "cache");

@@ -94,6 +94,21 @@ export async function readVaultConsistent<T>(
   read: () => T,
   opts: { pollMs?: number; timeoutMs?: number } = {}
 ): Promise<T> {
+  return (await readVaultConsistentWithSeq(stateDir, read, opts)).data;
+}
+
+/**
+ * readVaultConsistent の「確定した seq 値も返す」variant (issue #27)。
+ * 返る seq は読みの前後で不変だった値 = この snapshot の世代番号。index builder は
+ * これを payload に打刻し、rename 直前の「自分より新しい snapshot の index を
+ * 踏み潰さない」比較に使う。crash bypass 経路では取り残された奇数値をそのまま返す
+ * (それがその静的状態の世代)。
+ */
+export async function readVaultConsistentWithSeq<T>(
+  stateDir: string,
+  read: () => T,
+  opts: { pollMs?: number; timeoutMs?: number } = {}
+): Promise<{ data: T; seq: number }> {
   const pollMs = opts.pollMs ?? 10;
   const deadline = Date.now() + (opts.timeoutMs ?? 10_000);
   for (;;) {
@@ -106,14 +121,14 @@ export async function readVaultConsistent<T>(
       if (writerCrashed(stateDir)) {
         const data = read();
         const s2 = readSeq(stateDir);
-        if (s1 === s2 && writerCrashed(stateDir)) return data;
+        if (s1 === s2 && writerCrashed(stateDir)) return { data, seq: s1 };
       }
       if (Date.now() > deadline) throw new Error("readVaultConsistent timeout (write in progress)");
       await new Promise((r) => setTimeout(r, pollMs)); continue;
     }
     const data = read();
     const s2 = readSeq(stateDir);
-    if (s1 === s2) return data;
+    if (s1 === s2) return { data, seq: s1 };
     if (Date.now() > deadline) throw new Error("readVaultConsistent timeout (kept changing)");
     await new Promise((r) => setTimeout(r, pollMs));
   }

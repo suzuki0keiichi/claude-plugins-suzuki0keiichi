@@ -494,3 +494,186 @@ test("vectorIndexMatchesGraph: text_hash を持たない旧形式 row は stale 
   const rows = [{ node_id: freshNodes[0].id, dimensions: 3, vector: [1, 0, 0] }];
   assert.equal(vectorIndexMatchesGraph(graph, { rows }), false);
 });
+
+// ── issue #27: 一貫読み・開始時打刻・snapshot 比較書込み ─────────────────────
+
+import { beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
+import { cacheDirForVault } from "./cli-env.ts";
+import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
+
+// vault を root/vault に置く (cacheDirForVault が root/.graphrag/cache になり、
+// 共有 tmpdir 直下に .graphrag を掘らない)。
+function writeVaultUnder(root: string, graph): string {
+  const vaultDir = path.join(root, "vault");
+  for (const f of buildVaultFiles(graph)) {
+    const abs = path.join(vaultDir, f.relPath);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, f.content);
+  }
+  return vaultDir;
+}
+
+test("issue #27: build は writer 進行中 (seq 奇数) に torn snapshot を読まず、確定後の graph から索引を作る", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-consistent-"));
+  const nodeOld = { id: "decision:s:tear", type: "Decision", title: "T", summary: "OLD-summary" };
+  const nodeNew = { id: "decision:s:tear", type: "Decision", title: "T", summary: "NEW-summary" };
+  try {
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeOld], edges: [] });
+    const cacheDir = cacheDirForVault(vaultDir);
+    mkdirSync(cacheDir, { recursive: true });
+    // writer 進行中を模擬 (vault-lock.test.ts の手法): seq を奇数にしてから、
+    // 少し遅れて vault を NEW に書き換えて seq を閉じる。
+    const began = beginVaultWrite(cacheDir);
+    const writer = (async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      for (const f of buildVaultFiles({ generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] })) {
+        const abs = path.join(vaultDir, f.relPath);
+        mkdirSync(path.dirname(abs), { recursive: true });
+        writeFileSync(abs, f.content);
+      }
+      endVaultWrite(cacheDir, began);
+    })();
+    const payload = await buildVectorIndex({ vault: vaultDir }, { provider: fakeProvider(3) });
+    await writer;
+    const row = payload.rows.find((r) => r.node_id === "decision:s:tear");
+    assert.ok(row, "node embedded");
+    assert.equal(row.text_hash, vectorTextHash(nodeNew), "書込完了後の (NEW) snapshot から索引を作る");
+    assert.notEqual(row.text_hash, vectorTextHash(nodeOld), "書込前の (OLD/torn) snapshot を読まない");
+    assert.equal(payload.snapshot_seq, began + 1, "確定した seq (偶数) が payload に打刻される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: vault_head は build 開始時 snapshot の HEAD (embed 中に進んだ HEAD を打刻しない)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-head-"));
+  try {
+    const vaultDir = writeVaultUnder(root, {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      nodes: [{ id: "goal:acme:p99", type: "Goal", title: "p99", summary: "perf" }],
+      edges: []
+    });
+    execFileSync("git", ["-C", vaultDir, "init", "-q"]);
+    execFileSync("git", ["-C", vaultDir, "config", "user.email", "t@t"]);
+    execFileSync("git", ["-C", vaultDir, "config", "user.name", "t"]);
+    execFileSync("git", ["-C", vaultDir, "add", "."]);
+    execFileSync("git", ["-C", vaultDir, "commit", "-q", "-m", "seed"]);
+    const headA = execFileSync("git", ["-C", vaultDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    // embed 中に vault が commit されて HEAD が進む状況を fake provider で模擬する。
+    let advanced = false;
+    const provider: any = fakeProvider(3);
+    const baseEmbed = provider.embed;
+    provider.embed = async (text: string) => {
+      if (!advanced) {
+        advanced = true;
+        execFileSync("git", ["-C", vaultDir, "commit", "-q", "--allow-empty", "-m", "concurrent mutation"]);
+      }
+      return baseEmbed(text);
+    };
+    const payload = await buildVectorIndex({ vault: vaultDir }, { provider });
+    const headB = execFileSync("git", ["-C", vaultDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    assert.notEqual(headA, headB, "embed 中に HEAD が進んでいる (前提)");
+    assert.equal(payload.vault_head, headA, "rows と同じ build 開始時 snapshot の HEAD を打刻する (embed 後の HEAD ではない)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: graph_fingerprint は rows と同一 snapshot の内容を指す (決定論・順序非依存・内容変更で変わる)", async () => {
+  const { computeGraphFingerprint } = await import("./build-vector-index.ts") as any;
+  const a = { id: "decision:s:a", type: "Decision", title: "A", summary: "alpha" };
+  const b = { id: "decision:s:b", type: "Decision", title: "B", summary: "beta" };
+  const g = { version: 1, nodes: [a, b], edges: [] };
+  const payload = await buildVectorIndex({}, { provider: fakeProvider(3), graphObject: g });
+  assert.equal(typeof payload.graph_fingerprint, "string");
+  assert.equal(payload.graph_fingerprint, computeGraphFingerprint(g), "payload の fingerprint は build に使った graph のもの");
+  assert.equal(
+    computeGraphFingerprint({ nodes: [b, a], edges: [] }),
+    computeGraphFingerprint({ nodes: [a, b], edges: [] }),
+    "node 順序に依存しない (id 順ソート)"
+  );
+  assert.notEqual(
+    computeGraphFingerprint({ nodes: [a, { ...b, summary: "beta v2" }], edges: [] }),
+    computeGraphFingerprint(g),
+    "内容が変われば fingerprint も変わる"
+  );
+});
+
+test("issue #27: 新しい snapshot の index が既に在るとき、古い snapshot の builder の書き込みは破棄される (skipped)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-lastwrite-"));
+  try {
+    const vaultDir = writeVaultUnder(root, {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      nodes: [{ id: "decision:s:x", type: "Decision", title: "X", summary: "x" }],
+      edges: []
+    });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    // より新しい snapshot (seq 10) から作られた index が既に公開されている。
+    const newer = { version: 1, provider: "other", snapshot_seq: 10, graph_fingerprint: "f".repeat(64), rows: [] };
+    writeFileSync(out, JSON.stringify(newer));
+    // 自分は seq 0 の snapshot から build (現 seq ファイル無し = 0)。
+    const res: any = await buildAndWriteVectorIndex({ vault: vaultDir, out }, { provider: fakeProvider(3) });
+    assert.equal(res.skipped, true, "古い builder の書き込みは破棄される");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 10, "新しい index は踏み潰されない");
+    assert.equal(onDisk.rows.length, 0, "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: 自分の snapshot の方が新しければ従来どおり上書きする (後勝ちの正しい側)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-newer-"));
+  try {
+    const vaultDir = writeVaultUnder(root, {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      nodes: [{ id: "decision:s:x", type: "Decision", title: "X", summary: "x" }],
+      edges: []
+    });
+    const cacheDir = cacheDirForVault(vaultDir);
+    mkdirSync(cacheDir, { recursive: true });
+    const out = path.join(cacheDir, "vector.json");
+    writeFileSync(out, JSON.stringify({ version: 1, provider: "other", snapshot_seq: 0, graph_fingerprint: "0".repeat(64), rows: [] }));
+    // 現在の seq を 2 に進める (自分の snapshot の方が新しい)。
+    endVaultWrite(cacheDir, beginVaultWrite(cacheDir));
+    const res: any = await buildAndWriteVectorIndex({ vault: vaultDir, out }, { provider: fakeProvider(3) });
+    assert.equal(res.skipped, false);
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 2, "新しい snapshot の index で置き換わる");
+    assert.equal(onDisk.rows.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: seq 比較不能でも、既存 index が現 graph と一致していれば古い builder は破棄される (fingerprint 優先)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-fp-"));
+  const nodeNew = { id: "decision:s:x", type: "Decision", title: "X", summary: "NEW" };
+  const nodeOld = { id: "decision:s:x", type: "Decision", title: "X", summary: "OLD" };
+  try {
+    // vault (現 graph) は NEW。
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    // 既存 index は現 graph (NEW) と一致する内容 (別 builder が先に最新を公開済み)。
+    // seq 打刻は無い = seq では比較できない。
+    const currentNodes = (await import("./import-vault.ts") as any).importVault(vaultDir).nodes;
+    const freshIndex = {
+      version: 1,
+      provider: "other",
+      rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) }))
+    };
+    writeFileSync(out, JSON.stringify(freshIndex));
+    // 自分は OLD snapshot (graphObject 直渡し = seq 不明) から build。
+    const res: any = await buildAndWriteVectorIndex(
+      { vault: vaultDir, out },
+      { provider: fakeProvider(3), graphObject: { nodes: [nodeOld], edges: [] }, previousIndex: null }
+    );
+    assert.equal(res.skipped, true, "現 graph と一致する index を古い snapshot で踏み潰さない");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.provider, "other", "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
