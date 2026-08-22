@@ -1,5 +1,6 @@
 import { confidenceMessage, gradeConfidence } from "./confidence.ts";
 import { expandNeighbors, loadGraph, loadRequiredVectorIndex, nodeForOutput, prepareVectorSearch, searchGraph } from "./retrieval.ts";
+import { loadLexicalIndex } from "./lexical-index.ts";
 import { describeVectorIndex } from "./vector.ts";
 import { pathToFileURL } from "node:url";
 
@@ -29,9 +30,15 @@ export async function buildEvidencePacket(args) {
     : Array.isArray(args.queryVectors) && args.queryVectors.length > 0
       ? { vectorIndex, queryVectors: args.queryVectors }
       : await prepareVectorSearch(args.request, { vectorIndex });
+  // issue #33: 永続転置 index。ask (runAsk) が brief と共有してくれば再利用し、
+  // 単体実行では自前で読む (指紋不一致/破損は loadLexicalIndex 内で自己修復)。
+  const lexicalIndex = args.lexicalIndex !== undefined
+    ? args.lexicalIndex
+    : await loadLexicalIndex(args.vault, graph);
   const matches = searchGraph(graph, args.request, {
     types: args.types,
     limit: args.limit,
+    lexicalIndex,
     ...vectorSearch
   });
   const matchIds = matches.map((match) => match.node.id);

@@ -1,4 +1,5 @@
 import { expandNeighbors, loadGraph, loadRequiredVectorIndex, nodeForOutput, prepareVectorSearch, searchGraph } from "./retrieval.ts";
+import { loadLexicalIndex } from "./lexical-index.ts";
 import { describeVectorIndex } from "./vector.ts";
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -11,10 +12,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   // issue #34: 読み込み済み graph を渡す — 鮮度判定は graph/index の内容突合で行い、
   // vault の mtime walk も importVault の重複実行もしない。
   const vectorIndex = await loadRequiredVectorIndex(args.vault, args.vector, { graph });
+  // issue #33: 永続転置 index (指紋一致時のみ採用、不在/破損/不一致は再計算+再永続化)。
+  const lexicalIndex = await loadLexicalIndex(args.vault, graph);
   const vectorSearch = await prepareVectorSearch(args.query, { vectorIndex });
   const matches = searchGraph(graph, args.query, {
     types: args.types,
     limit: args.limit,
+    lexicalIndex,
     ...vectorSearch
   });
   const neighborEdges = expandNeighbors(

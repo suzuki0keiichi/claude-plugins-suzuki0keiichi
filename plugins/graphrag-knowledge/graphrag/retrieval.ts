@@ -272,30 +272,59 @@ export function searchGraph(graph, query, options: any = {}) {
   const types = new Set(options.types ?? []);
   const limit = options.limit ?? 10;
 
+  // issue #33: 永続転置 index (lexical-index.ts の loadLexicalIndex) があれば、
+  // per-node の正規化/ngram Set 生成を省く。ngram ヒット数は gram → node の
+  // posting list から先に集計し、haystack / aliases は保存済みの正規化文字列を
+  // 使う — スコア計算そのものは従来経路と完全同値 (同じ入力を別経路で得るだけ)。
+  // index に載っていないノード (index 無し / 想定外の欠落) は従来どおりその場で
+  // 計算する = fallback が常に生きている。
+  const lexicalIndex = options.lexicalIndex?.byId && options.lexicalIndex?.postings
+    ? options.lexicalIndex
+    : null;
+  const lexicalHits = lexicalIndex
+    ? queryGramSets.map((grams) => {
+        const counts = new Uint32Array(lexicalIndex.size);
+        for (const gram of grams) {
+          const posting = lexicalIndex.postings.get(gram);
+          if (!posting) continue;
+          for (const nodeIdx of posting) counts[nodeIdx] += 1;
+        }
+        return counts;
+      })
+    : null;
+
   const scored = [];
   for (const node of graph.nodes ?? []) {
     if (types.size > 0 && !types.has(node.type)) continue;
-
-    const fields = buildSearchFields(node);
-    const normalizedFields = fields.map((field) => normalizeText(field));
-    const haystack = normalizedFields.join("\n");
-    const aliases = (node.aliases ?? []).map((alias) => normalizeText(alias));
-
-    const reasons = [];
 
     // --- 文字一致系を 0〜1 に統合 (lexical) ---
     // 完全一致 (別名一致=1) / 単語カバー率 / ngram 比率 の最大値。
     // ngram 比率は confidence 判定 (judgeMatchConfidence) の reason も兼ねるため
     // 別名一致の有無に関わらず常に算出する。全体クエリとスクリプト別部分クエリの max。
-    const fieldNgrams = makeNgrams(haystack);
+    let haystack: string;
+    let aliases: string[];
     let ngramRatio = 0;
-    for (const grams of queryGramSets) {
-      let hits = 0;
-      for (const ngram of grams) {
-        if (fieldNgrams.has(ngram)) hits += 1;
+    const cached = lexicalIndex?.byId.get(node.id);
+    if (cached) {
+      haystack = cached.haystack;
+      aliases = cached.aliases;
+      for (let setIdx = 0; setIdx < queryGramSets.length; setIdx += 1) {
+        ngramRatio = Math.max(ngramRatio, lexicalHits[setIdx][cached.idx] / queryGramSets[setIdx].size);
       }
-      ngramRatio = Math.max(ngramRatio, hits / grams.size);
+    } else {
+      const lexical = computeNodeLexical(node);
+      haystack = lexical.haystack;
+      aliases = lexical.aliases;
+      for (const grams of queryGramSets) {
+        let hits = 0;
+        for (const ngram of grams) {
+          if (lexical.grams.has(ngram)) hits += 1;
+        }
+        ngramRatio = Math.max(ngramRatio, hits / grams.size);
+      }
     }
+
+    const reasons = [];
     if (ngramRatio > 0) reasons.push(`ngram:${ngramRatio.toFixed(2)}`);
 
     const hitTerms = queryTerms.filter((term) => term && haystack.includes(term));
@@ -534,18 +563,31 @@ export function nodeForOutput(node) {
   return out;
 }
 
-function buildSearchFields(node) {
-  // node.id (識別子) と node.type (分類) は意味ではない。文字一致の対象に含めると
-  // canonical 化 / 改名 (vein:→concern:, Vein→Concern) で検索が移行に反応する
-  // ため、除外する。type での絞り込みは searchGraph の types フィルタで行う。
-  return [
-    node.title,
-    node.summary,
-    node.path,
-    ...(node.aliases ?? []),
-    ...(node.tags ?? []),
-    ...displayTextFields(node.display)
-  ].filter((value) => typeof value === "string" && value.length > 0);
+// ノードの lexical 検索素材 (正規化 haystack / 正規化 alias / ngram Set) を一箇所で
+// 計算する。searchGraph の従来経路と lexical-index.ts (永続転置 index の構築) の
+// 双方がこれを単一の正として使う — 二重実装で同値性が割れないように。
+//
+// node.id (識別子) と node.type (分類) は意味ではない。文字一致の対象に含めると
+// canonical 化 / 改名 (vein:→concern:, Vein→Concern) で検索が移行に反応する
+// ため、除外する。type での絞り込みは searchGraph の types フィルタで行う。
+//
+// alias は「別名完全一致」判定と検索フィールドの両方で使うため、ここで一度だけ
+// 正規化して共有する (旧実装は buildSearchFields 内の正規化と別名判定用の正規化で
+// 同じ alias を二重に正規化していた)。haystack のフィールド順は旧実装の
+// buildSearchFields と同一 (title, summary, path, aliases, tags, display)。
+export function computeNodeLexical(node): { haystack: string; aliases: string[]; grams: Set<string> } {
+  const rawAliases = node.aliases ?? [];
+  const aliases = rawAliases.map((alias) => normalizeText(alias));
+  const isText = (value) => typeof value === "string" && value.length > 0;
+  const normalizedFields = [
+    ...[node.title, node.summary, node.path].filter(isText).map((field) => normalizeText(field)),
+    ...aliases.filter((_, index) => isText(rawAliases[index])),
+    ...[...(node.tags ?? []), ...displayTextFields(node.display)]
+      .filter(isText)
+      .map((field) => normalizeText(field))
+  ];
+  const haystack = normalizedFields.join("\n");
+  return { haystack, aliases, grams: makeNgrams(haystack) };
 }
 
 function displayTextFields(display) {
