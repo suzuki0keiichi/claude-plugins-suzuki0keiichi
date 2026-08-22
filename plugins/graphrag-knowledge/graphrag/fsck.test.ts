@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { buildVaultFiles } from "./build-vault.ts";
 import { writeVaultDelta } from "./mutate-vault.ts";
 import { fsckVault, runFsck, type FsckReport } from "./fsck.ts";
+import { PROJECT_SCHEMA } from "./schema-project.ts";
 
 // 固定タイムスタンプ (banner round-trip で決定論的に byte 一致させる)。
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
@@ -210,6 +211,34 @@ test("fsck: copied_from_summary スタンプ付き legacy node は source-backin
   });
   const { vault } = gitVault(g);
   const report = fsckVault({ vaultDir: vault });
+  const c = check(report, "source-backing");
+  assert.equal(c.status, "ok", JSON.stringify(c.detail));
+});
+
+test("fsck: project schema — documented_by → Source(url) で backed な distilled node は source-backing で警告しない (PR #41 指摘A)", () => {
+  // PROJECT_SCHEMA では Source が File の置き換え (documented_by の到達先は Source のみ)。
+  // isQualifyingSource が Source を知らないと project vault の backed 構成にも全数誤警告が出る。
+  const g = {
+    generated_at: FIXED_TS,
+    nodes: [
+      {
+        id: "source:p:rfp", type: "Source", title: "RFP",
+        source_kind: "document", url: "https://example.com/rfp.pdf",
+      },
+      { id: "decision:p:vendor", type: "Decision", title: "Vendor", summary: "v" },
+    ],
+    edges: [
+      {
+        id: "decision_p_vendor__documented_by__source_p_rfp",
+        type: "documented_by",
+        from: "decision:p:vendor",
+        to: "source:p:rfp",
+      },
+    ],
+  };
+  const { vault } = gitVault(g);
+  const report = fsckVault({ vaultDir: vault, schema: PROJECT_SCHEMA });
+  assert.equal(check(report, "schema-validate").status, "ok", JSON.stringify(check(report, "schema-validate").detail));
   const c = check(report, "source-backing");
   assert.equal(c.status, "ok", JSON.stringify(c.detail));
 });
