@@ -97,7 +97,8 @@ export async function buildVectorIndex(args, deps: any = {}) {
   //   「rows がどの graph 内容から作られたか」について真を語る (head は working tree と
   //   ずれ得るが、fingerprint は build に使った graph そのもの)。
   // - snapshot_seq: seqlock の確定世代。同じ vault (同じ cache dir) の builder 同士の
-  //   新旧比較 (踏み潰し防止) に使う。
+  //   新旧比較 (踏み潰し防止) の高速パスに使う (同一 cache 世代内でのみ単調 — PR #41、
+  //   世代を跨ぐ判定は fingerprint fallback が担う)。
   return {
     version: 1,
     provider: provider.id,
@@ -305,22 +306,31 @@ export async function writeFileAtomic(outPath: string, content: string): Promise
 
 // issue #27: 「自分の書き込みが索引を古い世代へ退行させるか」の rename 直前判定。
 // 1. fingerprint 一致 → 既存と同一 snapshot 内容 → 書いても退行しない。
-// 2. 双方に snapshot_seq があれば数値比較。seq は同じ vault の cache dir を共有する
-//    builder 同士でのみ単調 (out を共有する builder は seq も共有する) — 既存の方が
-//    大きければ自分は古い snapshot の builder なので破棄。
-// 3. seq で比較できなければ fingerprint の「現 graph と一致するか」を優先: 既存 index が
-//    現 vault の graph と内容一致していればそれが fresh なので自分は破棄。判定不能
-//    (vault 無し・読めない等) は従来どおり後勝ち。
+// 2. 双方に snapshot_seq があり既存 <= 自分 → 自分の方が新しい snapshot → 退行しない。
+//    これは「同一 cache 世代内の高速パス」でしかない (PR #41 [P2]): seq は同じ vault の
+//    cache dir を共有する builder 同士でのみ単調で、cache 初期化 (seq は 0 に戻る —
+//    cli-env.ts が設計上許容と明文化) や別 GRAPHRAG_STATE_DIR が同じ out を共有した
+//    場合は seq 空間が別物になる。そのため既存の seq が高くても即 skip はせず、
+//    3. の fingerprint fallback (既存 index が現 graph と内容一致するか) に落として裁定
+//    する — 一致するなら真に fresh なので破棄、一致しないなら seq が高くても現実と
+//    乖離した index を守る意味はない (索引は二次生成物で、真実は graph 側) ので書く。
+//    これで #27 の「stale builder が新しい index を踏み潰さない」性質は保たれる:
+//    stale builder の payload は古い graph 由来 → 既存 (新しい) index は現 graph と
+//    一致 → skip。
+// 3. fingerprint fallback: 既存 index が現 vault の graph と内容一致していればそれが
+//    fresh なので自分は破棄。判定不能 (vault 無し・読めない等) は seq 比較できていれば
+//    その結果、できていなければ従来どおり後勝ち。
 export async function indexWriteWouldRegress(payload: any, existing: any, vaultDir?: string): Promise<boolean> {
   if (!existing || typeof existing !== "object") return false;
   if (
     typeof existing.graph_fingerprint === "string" &&
     existing.graph_fingerprint === payload.graph_fingerprint
   ) return false;
-  if (typeof existing.snapshot_seq === "number" && typeof payload.snapshot_seq === "number") {
-    return existing.snapshot_seq > payload.snapshot_seq;
-  }
-  if (!vaultDir) return false;
+  const seqComparable =
+    typeof existing.snapshot_seq === "number" && typeof payload.snapshot_seq === "number";
+  if (seqComparable && existing.snapshot_seq <= payload.snapshot_seq) return false;
+  const seqVerdict = seqComparable && existing.snapshot_seq > payload.snapshot_seq;
+  if (!vaultDir) return seqVerdict; // graph が渡らない経路は現状維持 (seq 比較 or 後勝ち)
   try {
     const { data } = await readVaultConsistentWithSeq(
       cacheDirForVault(vaultDir),
@@ -328,7 +338,7 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
     );
     return vectorIndexMatchesGraph(data, existing);
   } catch {
-    return false; // 現 graph を読めない → 判定不能 → 後勝ち (従来挙動)
+    return seqVerdict; // 現 graph を読めない → 判定不能 → 現状維持 (seq 比較 or 後勝ち)
   }
 }
 

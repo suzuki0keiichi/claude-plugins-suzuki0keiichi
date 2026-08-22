@@ -599,8 +599,46 @@ test("issue #27: graph_fingerprint は rows と同一 snapshot の内容を指�
   );
 });
 
-test("issue #27: 新しい snapshot の index が既に在るとき、古い snapshot の builder の書き込みは破棄される (skipped)", async () => {
+// PR #41 [P2]: seq は同一 cache 世代内でしか単調でない。既存 index の seq が高くても、
+// それだけでは skip しない — 既存が「現 graph と一致するか」(fingerprint fallback) で裁定する。
+// 旧テスト「seq 10 の合成 index (rows: [] = 現 graph と不一致) を seq 0 の builder が
+// 踏まない」は新仕様で意味が変わるため、以下の2本に分解した。
+
+test("issue #27/PR #41: 既存 index が現 graph と一致するなら、古い snapshot の builder は seq に関係なく破棄される (stale builder 防止の維持)", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "vec27-lastwrite-"));
+  const nodeNew = { id: "decision:s:x", type: "Decision", title: "X", summary: "NEW" };
+  const nodeOld = { id: "decision:s:x", type: "Decision", title: "X", summary: "OLD" };
+  try {
+    // vault (現 graph) は NEW。より新しい snapshot (seq 10) から作られた、現 graph と
+    // 内容一致する index が既に公開されている。
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    const currentNodes = (await import("./import-vault.ts") as any).importVault(vaultDir).nodes;
+    const newer = {
+      version: 1,
+      provider: "other",
+      snapshot_seq: 10,
+      graph_fingerprint: "f".repeat(64),
+      rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) }))
+    };
+    writeFileSync(out, JSON.stringify(newer));
+    // 自分は OLD snapshot (seq 0) から build した stale builder。
+    const res: any = await buildAndWriteVectorIndex(
+      { vault: vaultDir, out },
+      { provider: fakeProvider(3), graphObject: { nodes: [nodeOld], edges: [] }, snapshotSeq: 0, previousIndex: null }
+    );
+    assert.equal(res.skipped, true, "古い builder の書き込みは破棄される");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 10, "新しい index は踏み潰されない");
+    assert.equal(onDisk.provider, "other", "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("PR #41: cache 初期化後 (seq リセット)、現 graph と一致しない高 seq の既存 index は低 seq の builder が上書きできる (恒久 skip の解消)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec41-reinit-"));
   try {
     const vaultDir = writeVaultUnder(root, {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -609,18 +647,26 @@ test("issue #27: 新しい snapshot の index が既に在るとき、古い sna
     });
     const out = path.join(root, ".graphrag", "cache", "vector.json");
     mkdirSync(path.dirname(out), { recursive: true });
-    // より新しい snapshot (seq 10) から作られた index が既に公開されている。
-    const newer = { version: 1, provider: "other", snapshot_seq: 10, graph_fingerprint: "f".repeat(64), rows: [] };
-    writeFileSync(out, JSON.stringify(newer));
-    // 自分は seq 0 の snapshot から build (現 seq ファイル無し = 0)。
+    // cache 初期化前の旧世代 index: seq 10 だが rows は現 graph と不一致 (別 seq 空間の遺物)。
+    const relic = { version: 1, provider: "other", snapshot_seq: 10, graph_fingerprint: "f".repeat(64), rows: [] };
+    writeFileSync(out, JSON.stringify(relic));
+    // cache 初期化後の builder: 現 seq ファイル無し = 0 から build。
     const res: any = await buildAndWriteVectorIndex({ vault: vaultDir, out }, { provider: fakeProvider(3) });
-    assert.equal(res.skipped, true, "古い builder の書き込みは破棄される");
+    assert.equal(res.skipped, false, "現 graph と乖離した index を高 seq が恒久に守らない");
     const onDisk = JSON.parse(readFileSync(out, "utf8"));
-    assert.equal(onDisk.snapshot_seq, 10, "新しい index は踏み潰されない");
-    assert.equal(onDisk.rows.length, 0, "ファイル内容は不変");
+    assert.equal(onDisk.rows.length, 1, "現 graph の index で置き換わる");
+    assert.equal(onDisk.snapshot_seq, 0, "新しい seq 空間の打刻に置き換わる");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("issue #27: fingerprint 一致は seq より先に判定され、退行ではない (同一 snapshot 内容の上書きは無害)", async () => {
+  const { indexWriteWouldRegress } = await import("./build-vector-index.ts") as any;
+  const fp = "a".repeat(64);
+  const existing = { version: 1, snapshot_seq: 10, graph_fingerprint: fp, rows: [] };
+  const payload = { version: 1, snapshot_seq: 0, graph_fingerprint: fp, rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false, "fingerprint 一致 → seq が高くても退行扱いしない");
 });
 
 test("issue #27: 自分の snapshot の方が新しければ従来どおり上書きする (後勝ちの正しい側)", async () => {
