@@ -49,6 +49,7 @@ import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-stat
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
 import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph, vaultVectorIndexReadPath } from "./retrieval.ts";
+import { loadLexicalIndex } from "./lexical-index.ts";
 import { embedForIndex } from "./vector.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { importVault } from "./import-vault.ts";
@@ -595,6 +596,10 @@ export async function runAsk(argv: string[]) {
   // When --gist is specified, pass both question and gist as 2 R6 queryVectors.
   const worldDir = resolveWorldDir(typeof f.world === "string" ? f.world : undefined);
   const graphData = await loadGraph(vaultDir);
+  // issue #33: 永続転置 index を 1 回だけ読み、brief / evidence の両段で共有する
+  // (loadLexicalIndex は指紋不一致/破損なら再計算+再永続化し、失敗時は null =
+  //  searchGraph の従来経路のまま)。
+  const sharedLexicalIndex = await loadLexicalIndex(vaultDir, graphData);
   let sharedVectorIndex: any = null;
   let sharedQueryVector: number[] | null = null;
   let sharedQueryVectors: number[][] | null = null;
@@ -629,6 +634,7 @@ export async function runAsk(argv: string[]) {
     graphData,
     limit,
     callNumber,
+    lexicalIndex: sharedLexicalIndex,
     vectorIndex: sharedVectorIndex ?? undefined,
     queryVector: sharedQueryVector ?? undefined,
     queryVectors: sharedQueryVectors ?? undefined,
@@ -675,6 +681,7 @@ export async function runAsk(argv: string[]) {
       types: [],
       // brief と同じ graph / 索引 / query embedding を共有する (再読込・再 embed しない)。
       graphData,
+      lexicalIndex: sharedLexicalIndex,
       vectorIndex: sharedVectorIndex ?? undefined,
       queryVectors: sharedQueryVectors ?? (sharedQueryVector ? [sharedQueryVector] : undefined),
       ...(lexicalOnly ? { useVector: false } : {})
