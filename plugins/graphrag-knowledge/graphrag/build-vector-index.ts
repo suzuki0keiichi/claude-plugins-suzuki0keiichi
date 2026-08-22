@@ -215,6 +215,30 @@ export function selectNodesForVectorIndex(graph) {
   return graph.nodes ?? [];
 }
 
+// issue #34: 索引の鮮度判定 = 読み込み済み graph と index の内容突合。
+// selectNodesForVectorIndex(graph) の node_id 集合が rows と一致し、かつ各ノードの
+// vectorTextHash (index に記録された prefix_policy の document 接頭辞で計算) が
+// rows の text_hash と一致すれば fresh。追加/削除/変更のどれでも false になる —
+// mtime 判定と違いファイル削除も検出できる。prefix は index 自身の記録値を使う
+// (索引が自分の内容と整合しているかを問う。provider/model の互換は従来どおり
+// 再 build 時の reusablePreviousRows / query 時の assertEmbeddingModelAvailable が見る)。
+export function vectorIndexMatchesGraph(graph, index): boolean {
+  if (!index || !Array.isArray(index.rows)) return false;
+  const prefix = typeof index.prefix_policy?.document === "string" ? index.prefix_policy.document : "";
+  const nodes = selectNodesForVectorIndex(graph);
+  if (nodes.length !== index.rows.length) return false;
+  const rowHashById = new Map<string, string>();
+  for (const row of index.rows) {
+    if (!row || typeof row.node_id !== "string" || typeof row.text_hash !== "string") return false;
+    rowHashById.set(row.node_id, row.text_hash);
+  }
+  if (rowHashById.size !== nodes.length) return false; // 重複 node_id = 不整合
+  for (const node of nodes) {
+    if (rowHashById.get(node.id) !== vectorTextHash(node, prefix)) return false;
+  }
+  return true;
+}
+
 // 書き込み途中の半端なファイルを残さない: 同一フォルダの一時ファイルに全部
 // 書いてから rename で置き換える (同一ファイルシステム上の rename は原子的)。
 // 複数エージェントが同じ索引を作り直しても壊れない (同時の場合は後勝ち=索引は

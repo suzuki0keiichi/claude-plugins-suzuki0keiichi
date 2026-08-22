@@ -249,7 +249,7 @@ test("loadGraph throws when no vault directory is given", async () => {
   }
 });
 
-import { defaultVectorIndexPath, loadRequiredVectorIndex, shouldRebuildVectorIndex } from "./retrieval.ts";
+import { defaultVectorIndexPath, loadRequiredVectorIndex } from "./retrieval.ts";
 import { writeFile, mkdir, utimes } from "node:fs/promises";
 import os from "node:os";
 import fs from "node:fs";
@@ -529,50 +529,6 @@ test("searchGraph does not match on node type name (type is a filter, not search
   assert.equal(filtered.length, 1);
 });
 
-// --- shouldRebuildVectorIndex ---
-
-test("shouldRebuildVectorIndex returns true when index file is absent", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "srvi-"));
-  const vaultDir = path.join(tmp, "vault");
-  await mkdir(path.join(vaultDir, "Decision"), { recursive: true });
-  await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
-  const indexPath = path.join(tmp, ".graphrag", "vector.json");
-  assert.equal(await shouldRebuildVectorIndex(vaultDir, indexPath), true);
-  fs.rmSync(tmp, { recursive: true, force: true });
-});
-
-test("shouldRebuildVectorIndex returns false when index is newer than all vault files", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "srvi-"));
-  const vaultDir = path.join(tmp, "vault");
-  await mkdir(path.join(vaultDir, "Decision"), { recursive: true });
-  await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
-  const graphragDir = path.join(tmp, ".graphrag");
-  await mkdir(graphragDir, { recursive: true });
-  const indexPath = path.join(graphragDir, "vector.json");
-  // vault ファイルを過去に設定し、索引を現在時刻で作成
-  const past = new Date(Date.now() - 60_000);
-  await utimes(path.join(vaultDir, "Decision", "d1.md"), past, past);
-  await writeFile(indexPath, "{}");
-  assert.equal(await shouldRebuildVectorIndex(vaultDir, indexPath), false);
-  fs.rmSync(tmp, { recursive: true, force: true });
-});
-
-test("shouldRebuildVectorIndex returns true when a vault file is newer than index", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "srvi-"));
-  const vaultDir = path.join(tmp, "vault");
-  await mkdir(path.join(vaultDir, "Decision"), { recursive: true });
-  const graphragDir = path.join(tmp, ".graphrag");
-  await mkdir(graphragDir, { recursive: true });
-  const indexPath = path.join(graphragDir, "vector.json");
-  // 索引を過去に設定し、vault ファイルを現在時刻で作成
-  await writeFile(indexPath, "{}");
-  const past = new Date(Date.now() - 60_000);
-  await utimes(indexPath, past, past);
-  await writeFile(path.join(vaultDir, "Decision", "d1.md"), "---\nid: d1\n---\n");
-  assert.equal(await shouldRebuildVectorIndex(vaultDir, indexPath), true);
-  fs.rmSync(tmp, { recursive: true, force: true });
-});
-
 // --- lexical scoring fixes (per-token ngram / weighted coverage / script partition) ---
 
 test("makeNgrams (via searchGraph): Latin bigrams no longer match unrelated English", () => {
@@ -738,4 +694,122 @@ test("edgePriority: backbone < default < provenance", () => {
   assert.ok(edgePriority("supersedes") < edgePriority("led_to"));
   assert.ok(edgePriority("led_to") < edgePriority("documented_by"));
   assert.ok(edgePriority("refines") < edgePriority("discussed_in"));
+});
+
+// ── issue #34: 索引鮮度判定 = graph/index 内容突合 (mtime walk 廃止) ──────────
+// ask/search は loadGraph 済みの graph を deps.graph で渡す。鮮度は
+// selectNodesForVectorIndex(graph) の node_id 集合と各ノードの vectorTextHash
+// (index の prefix_policy で計算) を rows と突合して決める。mtime walk は行わない
+// (mtime しか見ない旧判定はファイル削除を検出できず、変更なしの通常ケースこそ
+// vault 全走査していた)。
+
+import { importVault } from "./import-vault.ts";
+import { buildAndWriteVectorIndex, vectorTextHash } from "./build-vector-index.ts";
+
+const FRESHNESS_GRAPH = {
+  generated_at: "2026-01-01T00:00:00.000Z",
+  nodes: [
+    { id: "decision:s:d1", type: "Decision", title: "D1", summary: "alpha" },
+    { id: "decision:s:d2", type: "Decision", title: "D2", summary: "beta" }
+  ],
+  edges: []
+};
+
+function writeVaultGraph(vaultDir: string, graph: any): void {
+  for (const f of buildVaultFiles(structuredClone(graph))) {
+    const abs = path.join(vaultDir, f.relPath);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, f.content);
+  }
+}
+
+function vaultMdFiles(vaultDir: string): string[] {
+  return (fs.readdirSync(vaultDir, { recursive: true }) as string[])
+    .filter((rel) => rel.endsWith(".md"))
+    .map((rel) => path.join(vaultDir, rel));
+}
+
+// 全 .md を索引より過去の mtime にする: 「mtime では fresh に見えるが内容は
+// 変わっている」状況を明示的に作る (旧 mtime 判定なら再 build されない)。
+async function backdateVaultFiles(vaultDir: string): Promise<void> {
+  const past = new Date(Date.now() - 60_000);
+  for (const abs of vaultMdFiles(vaultDir)) await utimes(abs, past, past);
+}
+
+async function seedVaultWithIndex(prefix: string) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const vaultDir = path.join(tmp, "vault");
+  writeVaultGraph(vaultDir, FRESHNESS_GRAPH);
+  const indexPath = defaultVectorIndexPath(vaultDir);
+  await buildAndWriteVectorIndex({ out: indexPath, vault: vaultDir }, { provider: countingProvider(3) });
+  return { tmp, vaultDir, indexPath };
+}
+
+test("loadRequiredVectorIndex: ノード削除を内容突合で検出して再 build (削除 row が消える)", async () => {
+  const { tmp, vaultDir, indexPath } = await seedVaultWithIndex("vec-fresh-del-");
+  try {
+    const d2File = vaultMdFiles(vaultDir).find((abs) => fs.readFileSync(abs, "utf8").includes("decision:s:d2"))!;
+    fs.rmSync(d2File);
+    await backdateVaultFiles(vaultDir); // mtime 的には索引の方が新しい = mtime では fresh に見える
+    const graph = importVault(vaultDir);
+    assert.equal(graph.nodes.length, 1, "前提: 削除が graph に反映されている");
+    const provider = countingProvider(3);
+    const idx = await loadRequiredVectorIndex(vaultDir, undefined, { graph, vectorDeps: { provider } });
+    assert.deepEqual(idx.rows.map((r: any) => r.node_id), ["decision:s:d1"], "削除ノードの row が索引から消える");
+    const onDisk = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    assert.deepEqual(onDisk.rows.map((r: any) => r.node_id), ["decision:s:d1"], "on-disk も再 build される");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("loadRequiredVectorIndex: ノード内容変更 (text_hash 変化) を突合で検出して再 build", async () => {
+  const { tmp, vaultDir } = await seedVaultWithIndex("vec-fresh-chg-");
+  try {
+    const changed = structuredClone(FRESHNESS_GRAPH);
+    changed.nodes[1].summary = "beta v2 (rewritten)";
+    writeVaultGraph(vaultDir, changed); // d2 のファイルを上書き
+    await backdateVaultFiles(vaultDir); // mtime 的には fresh に見える状況を明示的に作る
+    const graph = importVault(vaultDir);
+    const provider = countingProvider(3);
+    const idx = await loadRequiredVectorIndex(vaultDir, undefined, { graph, vectorDeps: { provider } });
+    const d2 = graph.nodes.find((n: any) => n.id === "decision:s:d2");
+    const row = idx.rows.find((r: any) => r.node_id === "decision:s:d2");
+    assert.equal(row.text_hash, vectorTextHash(d2), "変更後の内容で再 embed された row になる");
+    assert.ok(provider.calls >= 1, "変更ノードは再 embed される");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("loadRequiredVectorIndex: 変更なしなら再 build しない (mtime が索引より新しくても)", async () => {
+  const { tmp, vaultDir, indexPath } = await seedVaultWithIndex("vec-fresh-same-");
+  try {
+    // mtime 判定なら stale に見える状況 (touch / git pull 相当) でも、内容が同一なら fresh。
+    const future = new Date(Date.now() + 60_000);
+    for (const abs of vaultMdFiles(vaultDir)) await utimes(abs, future, future);
+    const before = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    await new Promise((r) => setTimeout(r, 5)); // 再 build されれば generated_at が確実にずれるように
+    const graph = importVault(vaultDir);
+    const provider = countingProvider(3);
+    const idx = await loadRequiredVectorIndex(vaultDir, undefined, { graph, vectorDeps: { provider } });
+    assert.equal(provider.calls, 0, "embed は一切走らない");
+    const after = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+    assert.equal(after.generated_at, before.generated_at, "索引は書き換えられない (再 build なし)");
+    assert.equal(idx.rows.length, 2);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("loadRequiredVectorIndex: graph 渡し経路は vault を再走査しない (vault が消えていても成功)", async () => {
+  const { tmp, vaultDir } = await seedVaultWithIndex("vec-fresh-nowalk-");
+  try {
+    const graph = importVault(vaultDir);
+    fs.rmSync(vaultDir, { recursive: true, force: true }); // これ以降 vault は一切読めない
+    const idx = await loadRequiredVectorIndex(vaultDir, undefined, { graph });
+    assert.equal(idx.rows.length, 2, "fresh 判定は graph/index の内容突合のみで完結する");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

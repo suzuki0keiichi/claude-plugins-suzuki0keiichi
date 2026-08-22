@@ -18,9 +18,10 @@ export async function buildEvidencePacket(args) {
   const graph = args.graphData ?? await loadGraph(args.vault);
   // useVector === false (ask --lexical-only) は明示 degrade: 索引読込も embedding も
   // 行わない (brief.buildQueryBrief と同じ契約 — 無言 fallback ではない)。
+  // issue #34: graph を渡して鮮度判定を内容突合にする (vault の mtime walk なし)。
   const vectorIndex = args.useVector === false
     ? null
-    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector);
+    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector, { graph });
   const vectorDescription = describeVectorIndex(vectorIndex);
   // R6 multi-query: 呼び出し側が --gist 込みの queryVectors を渡していればそれを使う。
   const vectorSearch = args.useVector === false

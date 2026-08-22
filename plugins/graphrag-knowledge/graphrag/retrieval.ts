@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
@@ -89,43 +89,24 @@ export function vaultVectorIndexReadPath(vaultDir: string): string {
   return next;
 }
 
-// vault 内のファイルが vector index より新しいかを mtime で判定する。
-// git pull 直後は取得ファイルの mtime が更新されるため、これだけで「索引が古い」を検知できる。
-// 全サブディレクトリを走査するが stat 呼び出しのみなので数 ms で終わる。
-async function hasNewerVaultFiles(vaultDir: string, indexMtimeMs: number): Promise<boolean> {
-  let entries: string[];
-  try {
-    entries = await readdir(vaultDir, { recursive: true }) as string[];
-  } catch { return false; }
-  for (const rel of entries) {
-    if (!rel.endsWith(".md")) continue;
-    try {
-      const s = await stat(path.join(vaultDir, rel));
-      if (s.mtimeMs > indexMtimeMs) return true;
-    } catch { /* skip unreadable */ }
-  }
-  return false;
-}
-
-// 索引が存在しない or vault より古い場合に true を返す。ファイルシステム操作のみ。
-export async function shouldRebuildVectorIndex(vaultDir: string, indexPath: string): Promise<boolean> {
-  try {
-    const indexStat = await stat(indexPath);
-    return hasNewerVaultFiles(vaultDir, indexStat.mtimeMs);
-  } catch {
-    return true; // 索引ファイルが無い
-  }
-}
-
 // 検索系は semantic 非交渉。索引が無ければ lexical で代替せず明示エラーで促す。
 // 索引パスは明示指定 > vault 隣の既定 の順に解決する。
 // vault が指定されていて索引が無い/古い場合は自動構築を試みる (embedding はローカルなので無料)。
 // deps.vectorDeps は自動 (再) 構築時に buildAndWriteVectorIndex へ渡す DI
 // (テストで provider を差し込み endpoint 非依存にする)。
+//
+// issue #34: 鮮度判定は「deps.graph (呼び出し側が loadGraph 済みの graph) と index の
+// 内容突合」(vectorIndexMatchesGraph) の一本。旧 mtime walk (recursive readdir + 全 .md
+// stat) は廃止した — 変更なしの通常ケースこそ毎 query 全走査になり、しかも mtime しか
+// 見ないためファイル削除を検出できず、readdir 失敗時は「新鮮扱い」にフェイルオープン
+// していた。ask/search/brief/evidence の全経路は graph を渡す。deps.graph が無い呼び出し
+// は鮮度判定なし (索引の不在/破損の復旧のみ) — vault を勝手に再走査しない。
+// stale 時の再 build は手元の graph を graphObject として渡し、importVault の重複実行を
+// 避ける (build-vector-index の deps.graphObject)。
 export async function loadRequiredVectorIndex(
   vaultDir: string | undefined,
   explicitPath?: string,
-  deps: { vectorDeps?: any } = {}
+  deps: { vectorDeps?: any; graph?: any } = {}
 ) {
   // writePath = 自動再構築の書き出し先 / readPath = 実際に読む場所 (legacy fallback あり)。
   let writePath = explicitPath ?? (vaultDir ? defaultVectorIndexPath(vaultDir) : undefined);
@@ -163,18 +144,16 @@ export async function loadRequiredVectorIndex(
     }
   }
 
-  if (vaultDir && await shouldRebuildVectorIndex(vaultDir, readPath)) {
-    try {
-      const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
-      process.stderr.write(`[auto] vector index missing or stale → auto-building: ${writePath}\n`);
-      await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir }, deps.vectorDeps ?? {});
-      process.stderr.write(`[auto]   → build complete\n`);
-      readPath = writePath;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      process.stderr.write(`[auto]   → auto-build failed (embedding endpoint unreachable, etc.): ${msg}\n`);
-    }
-  }
+  // 再 build の共通口。deps.graph があれば graphObject として渡し、build 側の
+  // importVault (vault の 3 本目のフル walk) を省く。
+  const rebuild = async () => {
+    const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
+    await buildAndWriteVectorIndex(
+      { out: writePath, vault: vaultDir },
+      { ...(deps.vectorDeps ?? {}), ...(deps.graph !== undefined ? { graphObject: deps.graph } : {}) }
+    );
+    readPath = writePath;
+  };
 
   let index;
   try {
@@ -186,12 +165,43 @@ export async function loadRequiredVectorIndex(
     if (!vaultDir) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     process.stderr.write(`[auto] corrupt vector index → discarding and rebuilding: ${msg}\n`);
-    const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
-    await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir }, deps.vectorDeps ?? {});
+    await rebuild();
     process.stderr.write(`[auto]   → rebuild complete\n`);
-    readPath = writePath;
     index = await loadVectorIndex(readPath);
   }
+
+  if (!index) {
+    // 索引が無い: vault があれば自動構築を試みる (失敗は警告に留め、下の明示 Error へ)。
+    if (vaultDir) {
+      try {
+        process.stderr.write(`[auto] vector index missing → auto-building: ${writePath}\n`);
+        await rebuild();
+        process.stderr.write(`[auto]   → build complete\n`);
+        index = await loadVectorIndex(readPath);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[auto]   → auto-build failed (embedding endpoint unreachable, etc.): ${msg}\n`);
+      }
+    }
+  } else if (vaultDir && deps.graph !== undefined) {
+    // 鮮度判定: graph と index の内容突合 (ファイルシステムには一切触れない)。
+    // 不一致 (ノードの追加/削除/内容変更/prefix policy 不整合) なら stale → 再 build。
+    // 再 build に失敗した場合は警告して手元の (stale な) 索引で続行する — 従来の
+    // stale 時 auto-build 失敗と同じ縮退 (semantic 自体は生きている)。
+    const { vectorIndexMatchesGraph } = await import("./build-vector-index.ts");
+    if (!vectorIndexMatchesGraph(deps.graph, index)) {
+      try {
+        process.stderr.write(`[auto] vector index stale (graph/index content mismatch) → rebuilding: ${writePath}\n`);
+        await rebuild();
+        process.stderr.write(`[auto]   → rebuild complete\n`);
+        index = await loadVectorIndex(readPath) ?? index;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[auto]   → rebuild failed (embedding endpoint unreachable, etc.): ${msg}\n`);
+      }
+    }
+  }
+
   if (!index) {
     throw new Error(
       `vector index not found: ${readPath}. Build it first: build-vector-index --vault <dir>. ` +

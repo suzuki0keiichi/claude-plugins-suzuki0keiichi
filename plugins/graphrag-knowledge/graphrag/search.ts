@@ -8,7 +8,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 
   const graph = await loadGraph(args.vault);
-  const vectorIndex = await loadRequiredVectorIndex(args.vault, args.vector);
+  // issue #34: 読み込み済み graph を渡す — 鮮度判定は graph/index の内容突合で行い、
+  // vault の mtime walk も importVault の重複実行もしない。
+  const vectorIndex = await loadRequiredVectorIndex(args.vault, args.vector, { graph });
   const vectorSearch = await prepareVectorSearch(args.query, { vectorIndex });
   const matches = searchGraph(graph, args.query, {
     types: args.types,
