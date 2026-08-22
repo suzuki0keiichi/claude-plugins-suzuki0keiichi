@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 // Clear 復元フック (SessionStart)。
-// 直前の checkpoint (`checkpoint-mark` verb が ask-state.json の予約キー __checkpoint__ に
-// 刻んだ work_state と「最初の一手」) を、source==="clear" のときだけ additionalContext に注入する。
+// 直前の checkpoint (`checkpoint-mark` verb が ask-state.json の identity 別予約キー
+// __checkpoint__:<hash> に刻んだ work_state と「最初の一手」) を、source==="clear" のときだけ
+// additionalContext に注入する。
 //
 // 設計:
 //   - compact では復元しない。compact は古い checkpoint を無条件再注入するミスリード源なので、
 //     source!=="clear" なら即終了 (キーにも触らない)。引き継ぎは /clear 経由のみ。
 //   - 予約キーは checkpoint-mark 側で検証済み (id 実在・active・work_state 書式・first_action 非空・
 //     8KB 以内)。よってこのフックは CLI も graph パースもせず、キーの中身をそのまま組んで注入する。
-//   - one-shot: 読んだら「判定より先に」キーを消費 (削除して書き戻す)。鮮度判定で先に return して
+//   - 予約キーは identity 別 (#29): 全 `__checkpoint__:*` entry のうち同一性判定 (下記三段) で
+//     自分に一致するものだけを扱う。他 session/project の entry は読みも消費もしない
+//     (単一キー時代は別 project の /clear が判定前消費で予約を先食いしていた)。
+//     一致が無ければ「予約キー無し」と同じ無音。旧単一キー `__checkpoint__` は読み互換として
+//     従来どおり無条件に消費して扱う (移行措置 — 一度消費されれば消える)。
+//   - one-shot: 扱う entry は「判定より先に」消費 (削除して書き戻す)。鮮度判定で先に return して
 //     キーが残ると、次の無関係な /clear で同じ指示が再注入される事故が実際に起きた。だから全分岐
-//     (注入する/しない) より前に必ず消す。
+//     (注入する/しない) より前に、自分が扱う entry は必ず消す (entry 単位の consume-first)。
 //   - 予約キーの置き場所は書き手 (checkpoint-mark の cacheDirForVault(vault)) と同じ規則で解決する:
 //     walk-up した anchor の .graphrag/.env が GRAPHRAG_VAULT_DIR で外部 vault を指していれば
 //     「vault の親の .graphrag/cache」を読む。ここを anchor 側固定で読むと共有 vault 構成で
@@ -26,17 +32,74 @@
 // plugin 配布先に node_modules を要求しないため。
 // どんな失敗でもセッション開始をブロックしない (何も出さず正常終了)。
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-// 予約キー名。graphrag/cli-ask-state.ts の CHECKPOINT_STATE_KEY と揃える
+// 予約キーの stem。graphrag/cli-ask-state.ts の CHECKPOINT_STATE_KEY と揃える
 // (依存ゼロ方針で import せず複製する — 変える時は両側を直すこと)。
+// 実キーは identity 別の `__checkpoint__:<hash>` (#29)。suffix hash は書き手の衝突回避用で、
+// このフックは解釈しない (照合は entry の中身 session_dir/root/cwd で行う)。
+// stem 単体のキーは旧フォーマット (単一予約キー時代) の読み互換。
 const CHECKPOINT_KEY = "__checkpoint__";
 
 // 予約キーの失効窓。主の消費は下の one-shot 削除であり、これは「checkpoint-mark を撃ったが
 // clear しなかった」古い意図が翌日の無関係な /clear で暴発しないための保険。
-// graphrag/checkpoint-marker.ts の CHECKPOINT_TTL_MS と揃える (依存ゼロ方針で import しない)。
+// graphrag/cli-ask-state.ts の CHECKPOINT_TTL_MS と揃える (依存ゼロ方針で import しない)。
 const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
+
+// ── mkdir ベースの軽量 lock (#29) ─────────────────────────────────────────
+// graphrag/cli-ask-state.ts の withAskStateLock と同一プロトコルの依存ゼロ複製
+// (変える時は両側を直すこと):
+//   - lock は <baseDir>/ask-state.lock という「ディレクトリ」。mkdir は既存時に EEXIST で
+//     失敗するため、素の node だけで原子的な取得になる (恒久ファイル種は増えない — 一時 dir のみ)。
+//   - 取得失敗時は 25ms 間隔でリトライ。lock dir の mtime が 5 秒より古ければ残骸
+//     (クラッシュした保持者) とみなして奪取する。正常な保持区間は ms オーダーなので誤奪取しない。
+//   - 10 秒でタイムアウトし「lock なしで続行」する (best-effort)。セッション開始をブロックしない。
+const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_STALE_MS = 5_000;
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_POLL_MS = 25;
+
+// 同期 sleep。Atomics.wait はメインスレッドの素 node で使える (timer も child_process も不要)。
+function sleepSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // SharedArrayBuffer が使えない環境では即リトライ (busy loop 側に倒す)。
+  }
+}
+
+function withAskStateLock(baseDir, fn) {
+  if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
+  const lockDir = path.join(baseDir, LOCK_DIRNAME);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let held = false;
+  while (!held) {
+    try {
+      mkdirSync(lockDir); // 非 recursive: 既存なら EEXIST → 原子的な取得判定
+      held = true;
+    } catch (e) {
+      if (e?.code !== "EEXIST") break; // 権限等の想定外 — lock なしで続行 (best-effort)
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
+          rmdirSync(lockDir); // 残骸を奪取 (rmdir の競合は片方が ENOENT → 次ループで再判定)
+          continue;
+        }
+      } catch {
+        continue; // stat/rmdir 中に消えた → すぐ再取得を試みる
+      }
+      if (Date.now() > deadline) break; // タイムアウト — lock なしで続行
+      sleepSync(LOCK_POLL_MS);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) {
+      try { rmdirSync(lockDir); } catch { /* 奪取済み等 — 触らない */ }
+    }
+  }
+}
 
 // 与えられたパスを realpath 解決してから上方向に辿り、.git (ディレクトリ、または worktree の
 // ように .git ファイル) を持つ最寄りの祖先ディレクトリを返す。見つからなければ null。
@@ -127,18 +190,54 @@ function askStatePath(vaultDir) {
   return path.join(stateDir, "cache", "ask-state.json");
 }
 
-// 予約キーを消費 (削除) して原子書き込みで書き戻す。他キーは保つ。
-// tmp+rename で「壊れた JSON を読ませない」ところまで保証する (ask-state.json の saveAskState と同じ規約)。
-function consumeCheckpointKey(fp, state) {
-  delete state[CHECKPOINT_KEY];
-  try {
-    if (!existsSync(path.dirname(fp))) mkdirSync(path.dirname(fp), { recursive: true });
-    const tmp = `${fp}.tmp.${process.pid}`;
-    writeFileSync(tmp, JSON.stringify(state, null, 2));
-    renameSync(tmp, fp);
-  } catch {
-    // 書き戻せなくても復元判定自体は続行する (best-effort な消費)。
+// realpath 解決 (不能ならそのままの文字列)。素の文字列比較だと symlink で偽陰性になる —
+// checkpoint-mark 側の process.cwd() は OS 解決済み (/private/var/…) だが、フック input.cwd は
+// 未解決 (/var/…) で届き得る。
+function realOrSelf(p) {
+  try { return realpathSync(p); } catch { return p; }
+}
+
+// 同一性判定 (三段フォールバック。精度の高い順に session_dir → root → cwd)。
+// graphrag/cli-ask-state.ts の CheckpointStateEntry のコメントも参照。
+//   cwd: フックに届いたプロジェクト位置 (input.cwd、無ければ process.cwd())。
+//   inputRoot: cwd から解決したプロジェクトルート (findProjectRoot)。
+//   inputCwd: 生の input.cwd (三段目の厳密一致は従来どおりこちらで見る)。
+function matchesProject(entry, cwd, inputRoot, inputCwd) {
+  const entrySessionDir =
+    typeof entry.session_dir === "string" && entry.session_dir ? entry.session_dir : null;
+  const entryRoot = typeof entry.root === "string" && entry.root ? entry.root : null;
+  if (entrySessionDir) {
+    // [1] session_dir はモデルがシステムプロンプトの Primary working directory を
+    // `checkpoint-mark --session-dir` で宣言したもので、こちらの input.cwd (Claude Code の
+    // プロジェクトディレクトリそのもの) と同じ土俵にある最精密の情報。よってこれ「だけ」で判定し、
+    // 不一致なら root へフォールバックせず拒否する: モノレポでサブディレクトリをプロジェクトとして
+    // 開いた別セッションは、git ルートが同じでも別プロジェクト位置だから。
+    return realOrSelf(cwd) === realOrSelf(entrySessionDir);
   }
+  if (entryRoot && inputRoot) {
+    // [2] session_dir を持たない entry (旧フォーマット / skill を経ない直接実行) の近似。
+    // プロジェクトルート (最寄りの .git を持つ祖先) 同士の実体パス一致で見る。
+    // かつて cwd 厳密一致で判定していたが、Claude Code の Bash ツールは作業ディレクトリが
+    // セッション中持続するので、AI が `cd <subdir>` して checkpoint-mark を撃つと記録される
+    // cwd はサブディレクトリになり、フックに届く input.cwd (セッションルート) と食い違って
+    // 復元が拒否された (実際に起きた)。同じリポジトリなら同じ作業とみなす。
+    return realOrSelf(inputRoot) === realOrSelf(entryRoot);
+  }
+  // [3] root がどちらかで欠ける (git 外 / root を持たない旧フォーマット entry) —
+  // 従来の cwd 厳密一致。
+  return (
+    typeof entry.cwd === "string" &&
+    typeof inputCwd === "string" &&
+    realOrSelf(inputCwd) === realOrSelf(entry.cwd)
+  );
+}
+
+// entry の打刻 (ms epoch)。marked_at (ISO) を優先し、parse 不能なら last_at で代替。
+// どちらも無ければ NaN (= 失効扱い)。
+function stampOf(entry) {
+  const markedMs = Date.parse(entry.marked_at);
+  if (Number.isFinite(markedMs)) return markedMs;
+  return typeof entry.last_at === "number" ? entry.last_at : NaN;
 }
 
 function emit(additionalContext) {
@@ -167,63 +266,69 @@ async function main() {
 
   const fp = askStatePath(resolveVaultDir(anchorDir));
   if (!existsSync(fp)) return; // ask-state.json 自体が無い — 無音 (checkpoint 未実行と同義)
-  let state;
-  try {
-    state = JSON.parse(readFileSync(fp, "utf8"));
-  } catch {
-    return; // パース不能 — 無音 (他キーごと壊すより触らない)
-  }
-  if (!state || typeof state !== "object") return;
-  const entry = state[CHECKPOINT_KEY];
-  if (!entry || typeof entry !== "object") return; // 予約キー無し — 無音
 
-  // 消費を「判定より先に」。以降どの分岐に落ちても予約キーは既に消えている
-  // (鮮度で先に return してキーが残る事故を構造的に防ぐ)。
-  consumeCheckpointKey(fp, state);
+  const inputRoot = findProjectRoot(cwd);
+
+  // 読み → 自分の entry の選別 → 消費 (書き戻し) を lock で囲む。CLI 側の ask 書き込み
+  // (bumpCallCount / recordAskHits / checkpoint-mark) と同一ファイルの RMW なので、
+  // lock なしだと相互に lost update する (#29)。判定と注入は lock の外で行う (保持は短く)。
+  const consumed = withAskStateLock(path.dirname(fp), () => {
+    let state;
+    try {
+      state = JSON.parse(readFileSync(fp, "utf8"));
+    } catch {
+      return null; // パース不能 — 無音 (他キーごと壊すより触らない)
+    }
+    if (!state || typeof state !== "object") return null;
+
+    // identity 別キー (`__checkpoint__:*`) のうち、同一性判定で自分に一致する entry だけを選ぶ。
+    // 一致しない entry は本来の持ち主の /clear のために読みも消費もしない。
+    const keys = [];
+    const matched = [];
+    for (const [key, value] of Object.entries(state)) {
+      if (!key.startsWith(`${CHECKPOINT_KEY}:`)) continue;
+      if (!value || typeof value !== "object") continue;
+      if (matchesProject(value, cwd, inputRoot, input.cwd)) {
+        keys.push(key);
+        matched.push(value);
+      }
+    }
+    // 旧単一キーの読み互換: 従来どおり無条件に消費して扱う (移行措置。一度消費されれば消える)。
+    const legacyValue = state[CHECKPOINT_KEY];
+    const legacyEntry = legacyValue && typeof legacyValue === "object" ? legacyValue : null;
+    if (legacyEntry) keys.push(CHECKPOINT_KEY);
+    if (keys.length === 0) return null; // 一致なし — 予約キー無しと同じ無音 (書き戻しもしない)
+
+    // 消費を「判定より先に」(entry 単位の consume-first)。以降どの分岐に落ちても自分が扱う
+    // entry は既に消えている (鮮度で先に return してキーが残り、次の無関係な /clear で
+    // 再注入される事故を構造的に防ぐ)。tmp+rename で「壊れた JSON を読ませない」ところまで
+    // 保証する (ask-state.json の saveAskState と同じ規約)。他キーは保つ。
+    for (const key of keys) delete state[key];
+    try {
+      const tmp = `${fp}.tmp.${process.pid}`;
+      writeFileSync(tmp, JSON.stringify(state, null, 2));
+      renameSync(tmp, fp);
+    } catch {
+      // 書き戻せなくても復元判定自体は続行する (best-effort な消費)。
+    }
+    return { matched, legacyEntry };
+  });
+  if (!consumed) return;
+
+  // 注入対象の選択: 自分に一致した entry (identity キー群 + 一致する旧単一キー) のうち最新のもの。
+  // 一致が旧単一キーの不一致 entry しか無い場合も、従来どおり「復元しなかった理由」を注入する。
+  const candidates = [...consumed.matched];
+  if (consumed.legacyEntry && matchesProject(consumed.legacyEntry, cwd, inputRoot, input.cwd)) {
+    candidates.push(consumed.legacyEntry);
+  }
+  candidates.sort((a, b) => (stampOf(b) || 0) - (stampOf(a) || 0));
+  const sameProject = candidates.length > 0;
+  const entry = candidates[0] ?? consumed.legacyEntry;
 
   // 失効判定: marked_at が 60 分以内か。parse 不能なら last_at (ms epoch) で代替、
   // それも無ければ失効扱い。
-  const markedMs = Date.parse(entry.marked_at);
-  const stampMs = Number.isFinite(markedMs)
-    ? markedMs
-    : (typeof entry.last_at === "number" ? entry.last_at : NaN);
+  const stampMs = stampOf(entry);
   const fresh = Number.isFinite(stampMs) && Date.now() - stampMs <= CHECKPOINT_TTL_MS;
-
-  // 同一性判定 (三段フォールバック。精度の高い順に session_dir → root → cwd)。
-  // 素の文字列比較だと symlink で偽陰性になる — checkpoint-mark 側の process.cwd() は
-  // OS 解決済み (/private/var/…) だが、フック input.cwd は未解決 (/var/…) で届き得る。
-  // realpath 不能 (削除済み等) はそのままの文字列で比較する。
-  const realOrSelf = (p) => {
-    try { return realpathSync(p); } catch { return p; }
-  };
-  const entrySessionDir =
-    typeof entry.session_dir === "string" && entry.session_dir ? entry.session_dir : null;
-  const entryRoot = typeof entry.root === "string" && entry.root ? entry.root : null;
-  const inputRoot = findProjectRoot(cwd);
-  let sameProject;
-  if (entrySessionDir) {
-    // [1] session_dir はモデルがシステムプロンプトの Primary working directory を
-    // `checkpoint-mark --session-dir` で宣言したもので、こちらの input.cwd (Claude Code の
-    // プロジェクトディレクトリそのもの) と同じ土俵にある最精密の情報。よってこれ「だけ」で判定し、
-    // 不一致なら root へフォールバックせず拒否する: モノレポでサブディレクトリをプロジェクトとして
-    // 開いた別セッションは、git ルートが同じでも別プロジェクト位置だから。
-    sameProject = realOrSelf(cwd) === realOrSelf(entrySessionDir);
-  } else if (entryRoot && inputRoot) {
-    // [2] session_dir を持たない entry (旧フォーマット / skill を経ない直接実行) の近似。
-    // プロジェクトルート (最寄りの .git を持つ祖先) 同士の実体パス一致で見る。
-    // かつて cwd 厳密一致で判定していたが、Claude Code の Bash ツールは作業ディレクトリが
-    // セッション中持続するので、AI が `cd <subdir>` して checkpoint-mark を撃つと記録される
-    // cwd はサブディレクトリになり、フックに届く input.cwd (セッションルート) と食い違って
-    // 復元が拒否された (実際に起きた)。同じリポジトリなら同じ作業とみなす。
-    sameProject = realOrSelf(inputRoot) === realOrSelf(entryRoot);
-  } else {
-    // [3] root がどちらかで欠ける (git 外 / root を持たない旧フォーマット entry) —
-    // 従来の cwd 厳密一致。
-    sameProject =
-      typeof entry.cwd === "string" &&
-      typeof input.cwd === "string" &&
-      realOrSelf(input.cwd) === realOrSelf(entry.cwd);
-  }
 
   if (!fresh || !sameProject) {
     // 沈黙は「なぜ復元しなかったか」の切り分けを不能にするので、理由を一行だけ注入する。

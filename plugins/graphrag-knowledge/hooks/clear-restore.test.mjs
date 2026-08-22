@@ -3,11 +3,15 @@
 // 予約キー方式: ask-state.json の __checkpoint__ キーを clear で one-shot 消費して注入する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { execFile, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+const execFileP = promisify(execFile);
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "clear-restore.mjs");
 const CHECKPOINT_KEY = "__checkpoint__";
@@ -452,6 +456,151 @@ test("clear + session_dir が symlink 経由の表記違い: 実体パス一致�
     const ctx = JSON.parse(runHook({ source: "clear", cwd: root })).hookSpecificOutput.additionalContext;
     assert.match(ctx, /Automatic restore/, "未解決表記の input.cwd でも実体が同じなら復元される");
     assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- #29: identity 別キー (__checkpoint__:<hash>) — 複数 session/project の共存 ---
+
+// 書き手 (checkpoint-mark) と同じ identity 別キー。suffix hash の中身をフックは解釈しない
+// (照合は entry の session_dir/root/cwd で行う) が、実物と同じ形で作る。
+const ckptKeyFor = (identity) =>
+  `${CHECKPOINT_KEY}:${createHash("sha1").update(identity).digest("hex").slice(0, 12)}`;
+
+test("#29 clear + identity 別キー2件: 自分の entry だけ復元・消費し、他 project の entry は残る (2回目は無音)", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const realA = realpathSync(rootA);
+    const otherReal = realpathSync(otherDir);
+    const fp = writeState(rootA, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: rootA, session_dir: realA, first_action: "A の一手" }),
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal, first_action: "B の一手" })
+    });
+
+    const out = runHook({ source: "clear", cwd: rootA });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "自分の identity に一致する entry から復元される");
+    assert.match(ctx, /A の一手/, "復元されるのは自分の checkpoint");
+    assert.ok(!ctx.includes("B の一手"), "他 project の checkpoint は注入されない");
+
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "自分の entry は one-shot 消費される");
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "他 project の entry は消費されず残る");
+
+    // 同一 project の 2 回目の /clear は無音 (consume-first のセマンティクス維持)。
+    assert.equal(runHook({ source: "clear", cwd: rootA }), "", "2回目は無音");
+    const onDisk2 = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(ckptKeyFor(otherReal) in onDisk2, "2回目でも他 project の entry は残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+test("#29 clear + 一致 identity 無し: 無音で、他 project の entry は判定前消費されない (先食いバグの解消)", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const otherReal = realpathSync(otherDir);
+    const fp = writeState(rootA, {
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal, first_action: "B の一手" })
+    });
+    assert.equal(runHook({ source: "clear", cwd: rootA }), "", "一致なしは予約キー無しと同じ無音");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "本来の持ち主のために entry は残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+test("#29 clear + 旧単一キー互換: __checkpoint__ は従来どおり消費・復元され、他 project の identity キーは残る", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const otherReal = realpathSync(otherDir);
+    const fp = writeState(rootA, {
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: rootA, first_action: "旧キーの一手" }),
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal, first_action: "B の一手" })
+    });
+    const out = runHook({ source: "clear", cwd: rootA });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "旧単一キーからの復元互換");
+    assert.match(ctx, /旧キーの一手/);
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(CHECKPOINT_KEY in onDisk), "旧単一キーは従来どおり消費される (移行措置)");
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "他 project の identity キーは残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+test("#29 clear + identity キーが失効 (60分超): 理由一行を注入し自分の entry のみ消費", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const realA = realpathSync(rootA);
+    const otherReal = realpathSync(otherDir);
+    const oldMs = Date.now() - 2 * 60 * 60 * 1000;
+    const fp = writeState(rootA, {
+      [ckptKeyFor(realA)]: checkpointEntry({
+        cwd: rootA, session_dir: realA, marked_at: new Date(oldMs).toISOString(), last_at: oldMs
+      }),
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal })
+    });
+    const out = runHook({ source: "clear", cwd: rootA });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /freshness window/);
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "失効した自分の entry は消費される");
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "他 project の entry は残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+// --- #29: 実並行 — フックの consume と CLI の bump が同一ファイルで競合しても lost update しない ---
+
+test("#29 実並行: /clear の consume と並列 bump 群が競合しても count が失われず checkpoint は一度だけ消費される", async () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const cacheDir = path.join(root, ".graphrag", "cache");
+    const fp = writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "並行の一手" })
+    });
+
+    const askStateUrl = pathToFileURL(
+      path.join(path.dirname(SCRIPT), "..", "graphrag", "cli-ask-state.ts")
+    ).href;
+    const bumpChild = () =>
+      execFileP(process.execPath, [
+        "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--input-type=module",
+        "-e",
+        `const { bumpCallCount } = await import(process.argv[1]);\n` +
+        `for (let i = 0; i < 50; i++) bumpCallCount("hook parallel q", process.argv[2]);\n`,
+        askStateUrl,
+        cacheDir
+      ]);
+
+    // 子プロセス群を走らせつつ、途中でフック (同期) を実行して consume を混ぜる。
+    const children = Array.from({ length: 4 }, () => bumpChild());
+    const out = runHook({ source: "clear", cwd: root });
+    await Promise.all(children);
+
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /並行の一手/, "並行中でも自分の checkpoint が復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "checkpoint は消費されている");
+    // fingerprintQuestion("hook parallel q") の複製はせず、count 合計で検証する
+    // (このファイルは依存ゼロ方針で graphrag/*.ts を import しない)。
+    const total = Object.values(onDisk).reduce((s, e) => s + (e?.count ?? 0), 0);
+    assert.equal(total, 200, "フックの書き戻しが bump を巻き戻さない (lost update 無し)");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
