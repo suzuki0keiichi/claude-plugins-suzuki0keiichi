@@ -12,6 +12,7 @@ export interface SchemaDefinition {
     knowledge: readonly string[];
     crosscut: readonly string[];
     distilled: readonly string[];       // source backing 必須
+    provenance: readonly string[];      // source backing に数える edge type (出自エッジ)
     duplicateCheck: readonly string[];  // 重複検査対象
     staleness: readonly string[];       // 陳腐化検査対象
     premiseCandidate: readonly string[]; // has_premise 候補
@@ -295,6 +296,9 @@ export const DEFAULT_SCHEMA: SchemaDefinition = {
     knowledge: ANY_KNOWLEDGE_NODE,
     crosscut: ANY_CROSSCUT_NODE,
     distilled: ["Decision", "RejectedOption", "Risk", "OperationalKnowledge"],
+    // source backing に数える出自エッジの単一正本 (issue #28)。schema 上正当でも
+    // sets_policy_for / risks_in 等の非 provenance edge は backing に数えない。
+    provenance: ["documented_by", "derived_from"],
     duplicateCheck: [
       "Decision", "RejectedOption", "Constraint", "Goal", "Risk",
       "OperationalKnowledge", "Investigation", "Concern", "Component", "Layer",

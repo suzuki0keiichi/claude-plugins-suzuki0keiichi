@@ -12,6 +12,9 @@
  *                             (型 dir 不一致 = error / basename のみ不一致 = warn)
  *   - edge-endpoints        : 全エッジ端点が実在ノードに解決する (`vault:` 参照は形のみ検査)
  *   - schema-validate       : validateGraph (schema レベル) が通る
+ *   - source-backing        : provenance edge (documented_by/derived_from) で qualifying source に
+ *                             接続していない distilled node の列挙 (WARN — legacy が存在し得るため
+ *                             error にしない。mutation ゲートと同じ判定を事後検出として提供)
  *   - round-trip            : import → 再構築 → ディスクと byte 比較。差分 = 非 canonical
  *                             直列化 (WARN — 破損ではなく、次の書き込みが書き直す漂流)
  *   - tombstones            : 削除台帳 (.tombstones/*.jsonl) がパースできる (不能行 = ERROR)。
@@ -31,6 +34,7 @@ import { pathToFileURL } from "node:url";
 import { importVaultFile, normalizeEol } from "./import-vault.ts";
 import { buildVaultFiles } from "./build-vault.ts";
 import { validateGraph, type SchemaDefinition } from "./schema.ts";
+import { unbackedDistilledNodes } from "./mutation-core.ts";
 import { resolveSchema } from "./schema-registry.ts";
 import { readTombstones } from "./tombstones.ts";
 import { parseCrossVaultRef } from "./xref-resolver.ts";
@@ -253,6 +257,28 @@ export function fsckVault(options: {
     status: schemaFailures.length > 0 ? "error" : "ok",
     detail: { failures: schemaFailures },
   });
+
+  // ── 5b. source-backing (unbacked distilled node の事後検出 — issue #28) ─────
+  // mutation ゲート (enforceSourceBacking) と同じ判定。legacy (厳格化以前の登記・
+  // copied_from_summary スタンプ無しの unbacked) が存在し得るため error にしない。
+  {
+    const unbacked = unbackedDistilledNodes({ nodes, edges }, options.schema);
+    checks.push({
+      id: "source-backing",
+      status: unbacked.length > 0 ? "warn" : "ok",
+      detail: { unbacked },
+      ...(unbacked.length > 0
+        ? {
+            hint:
+              "these distilled nodes are not connected to a qualifying source via a provenance edge " +
+              "(documented_by/derived_from) — other edge types do not count as source backing. Legacy nodes " +
+              "predating strict backing legitimately appear here; re-link each to a ConversationChunk/" +
+              "Investigation with raw_content (status != copied_from_summary) or a File with path via " +
+              "commit-mutation, or stamp honest legacy with raw_content_status: copied_from_summary.",
+          }
+        : {}),
+    });
+  }
 
   // ── 6. round-trip (非 canonical 直列化 = WARN — 漂流であって破損ではない) ────
   checks.push({
