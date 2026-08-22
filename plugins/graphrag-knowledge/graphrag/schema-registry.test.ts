@@ -18,6 +18,7 @@ const FAKE_PRESET: SchemaDefinition = {
     knowledge: ["TestNode"],
     crosscut: [],
     distilled: [],
+    provenance: [],
     duplicateCheck: ["TestNode"],
     staleness: [],
     premiseCandidate: [],

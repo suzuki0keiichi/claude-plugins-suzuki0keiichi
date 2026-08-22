@@ -413,7 +413,17 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
       { id: "file:s:README.md", type: "File", title: "README.md", path: "README.md" },
       { id: "decision:s:torn", type: "Decision", title: "Torn", summary: "written but never committed" },
     ],
-    edges: [],
+    // source backing (issue #28): torn ノードにも provenance edge を持たせ、回復後の
+    // fsck (source-backing check) が全 ok になる前提を保つ — この test の焦点は torn
+    // write 回復であって unbacked legacy ではない。
+    edges: [
+      {
+        id: "decision_s_torn__documented_by__file_s_README.md",
+        type: "documented_by",
+        from: "decision:s:torn",
+        to: "file:s:README.md",
+      },
+    ],
   };
   const delta = writeVaultDelta(vault, torn);
   assert.ok(delta.written.length > 0, "前提: 未 commit の delta がディスクに在る");

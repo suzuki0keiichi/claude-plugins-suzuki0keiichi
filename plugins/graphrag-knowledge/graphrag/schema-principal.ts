@@ -71,6 +71,9 @@ export const PRINCIPAL_SCHEMA: SchemaDefinition = {
     knowledge: pruneList(PROJECT_SCHEMA.categories.knowledge),
     crosscut: pruneList(PROJECT_SCHEMA.categories.crosscut),
     distilled: pruneList(PROJECT_SCHEMA.categories.distilled),
+    // provenance はノード型でなく edge type — REMOVED_TYPES の剪定でなく
+    // 「principal に残った edge type」で絞る。
+    provenance: PROJECT_SCHEMA.categories.provenance.filter((e) => edgeTypes.includes(e)),
     duplicateCheck: pruneList(PROJECT_SCHEMA.categories.duplicateCheck),
     staleness: pruneList(PROJECT_SCHEMA.categories.staleness),
     premiseCandidate: pruneList(PROJECT_SCHEMA.categories.premiseCandidate),

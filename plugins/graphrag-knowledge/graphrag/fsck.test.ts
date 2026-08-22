@@ -76,6 +76,7 @@ const ALL_CHECK_IDS = [
   "id-path-consistency",
   "edge-endpoints",
   "schema-validate",
+  "source-backing",
   "round-trip",
   "tombstones",
   "git-uncommitted",
@@ -166,6 +167,51 @@ test("fsck: vault: 参照は形のみ検査 — 正形は ok、slash 無しの�
   assert.match(problems[0].problem, /malformed cross-vault ref/);
   // validateGraph は vault: 参照を一律 skip するので、この奇形は fsck だけが捕まえる
   assert.equal(check(report, "schema-validate").status, "ok");
+});
+
+test("fsck: unbacked distilled node は source-backing WARN で列挙 (legacy が居るので error にしない)", () => {
+  const g = seedGraph();
+  // provenance edge を持たない Decision と、非 provenance edge (sets_policy_for → File)
+  // しか持たない Decision — どちらも unbacked として報告されること。
+  g.nodes.push(
+    { id: "decision:s:orphan", type: "Decision", title: "Orphan", summary: "o" },
+    { id: "decision:s:policy-only", type: "Decision", title: "PolicyOnly", summary: "p" }
+  );
+  g.edges.push({
+    id: "decision_s_policy-only__sets_policy_for__file_s_README.md",
+    type: "sets_policy_for",
+    from: "decision:s:policy-only",
+    to: "file:s:README.md",
+  });
+  const { vault } = gitVault(g);
+  const report = fsckVault({ vaultDir: vault });
+  assert.equal(report.status, "warn");
+  const c = check(report, "source-backing");
+  assert.equal(c.status, "warn");
+  const unbacked: any[] = (c.detail as any).unbacked;
+  assert.deepEqual(
+    unbacked.map((u: any) => u.id).sort(),
+    ["decision:s:orphan", "decision:s:policy-only"]
+  );
+  assert.match(c.hint ?? "", /provenance/);
+  // seed の decision:s:a (documented_by → File) は報告されない
+  assert.ok(!unbacked.some((u: any) => u.id === "decision:s:a"));
+});
+
+test("fsck: copied_from_summary スタンプ付き legacy node は source-backing で報告しない (honest marker)", () => {
+  const g = seedGraph();
+  g.nodes.push({
+    id: "decision:s:stamped",
+    type: "Decision",
+    title: "Stamped",
+    summary: "s",
+    raw_content: "s",
+    raw_content_status: "copied_from_summary",
+  });
+  const { vault } = gitVault(g);
+  const report = fsckVault({ vaultDir: vault });
+  const c = check(report, "source-backing");
+  assert.equal(c.status, "ok", JSON.stringify(c.detail));
 });
 
 test("fsck: 手編集でパースは通るが直列化が非 canonical → round-trip WARN (破損ではなく漂流)", () => {

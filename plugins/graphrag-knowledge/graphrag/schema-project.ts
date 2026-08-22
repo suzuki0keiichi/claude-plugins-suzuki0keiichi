@@ -202,6 +202,7 @@ export const PROJECT_SCHEMA: SchemaDefinition = {
     knowledge: KNOWLEDGE_NODES as unknown as readonly string[],
     crosscut: ["Theme"] as readonly string[],
     distilled: ["Decision", "RejectedOption", "Risk", "OperationalKnowledge", "Agreement"] as readonly string[],
+    provenance: ["documented_by", "derived_from"] as readonly string[],
     duplicateCheck: [
       "Decision", "RejectedOption", "Constraint", "Goal", "Risk",
       "OperationalKnowledge", "Investigation", "Assumption", "Agreement",
