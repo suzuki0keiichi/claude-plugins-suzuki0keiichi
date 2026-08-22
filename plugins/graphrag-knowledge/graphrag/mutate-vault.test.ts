@@ -1187,3 +1187,65 @@ test("applyMutationToVault: 残作業がある plan は従来どおり stale bas
     (err: any) => err.code === "OCC_STALE"
   );
 });
+
+// ── issue #31: 重複ゲート事前埋め込み / 提案 binding のバッチ化 ──────────────
+test("重複ゲート: dupDeps.embedMany で候補を 1 バッチ事前埋め込みする (単発 embed の逐次 loop ではない)", async () => {
+  const { vault, stateDir } = gitInitVaultWithDecision();
+  const p1 = decisionPlan("bm1", "batch pre-embed");
+  const p2 = decisionPlan("bm2", "batch pre-embed");
+  const plan = {
+    reason: "batch pre-embed",
+    nodes: [...p1.nodes, ...p2.nodes],
+    edges: [...p1.edges, ...p2.edges],
+  };
+  const manyBatches: string[][] = [];
+  let singleCalls = 0;
+  const res = await applyMutationToVault({
+    plan,
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+    dupDeps: {
+      loadIndex: () => dupIndexFor([1, 0, 0]),
+      embed: async () => { singleCalls += 1; return [0, 1, 0]; },
+      embedMany: async (texts: string[]) => { manyBatches.push([...texts]); return texts.map(() => [0, 1, 0]); },
+    } as any,
+  });
+  assert.equal(res.applied, true);
+  assert.equal(manyBatches.length, 1, "事前埋め込みは 1 バッチ (現行は候補ごとの逐次 embed = red)");
+  assert.equal(manyBatches[0].length, 2, "Decision 候補 2 件が同一バッチ");
+  assert.equal(singleCalls, 0, "単発 embed へは落ちない (preEmbedded が全候補を覆う)");
+});
+
+test("suggestions: suggestDeps.embedMany で binding 埋め込みを 1 バッチにする", async () => {
+  const { vault, stateDir } = gitInitVaultWithDecision();
+  const p1 = decisionPlan("bs1", "batch binding");
+  const p2 = decisionPlan("bs2", "batch binding");
+  const plan = {
+    reason: "batch binding",
+    nodes: [...p1.nodes, ...p2.nodes],
+    edges: [...p1.edges, ...p2.edges],
+  };
+  const manyBatches: string[][] = [];
+  const res = await applyMutationToVault({
+    plan,
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+    dupDeps: { loadIndex: () => ({ rows: [] }) }, // dup ゲートは index 不在扱いで素通り
+    suggestDeps: {
+      loadIndex: () => ({
+        rows: [{ node_id: "file:s:src/bs1.ts", dimensions: 3, vector: [1, 0, 0], text_hash: "x" }],
+      }),
+      embed: async () => { throw new Error("single embed must not be called when embedMany is provided"); },
+      embedMany: async (texts: string[]) => { manyBatches.push([...texts]); return texts.map(() => [1, 0, 0]); },
+      recentHitIds: () => [],
+    } as any,
+  });
+  assert.equal(res.applied, true);
+  assert.equal(manyBatches.length, 1, "新規知識ノードの binding 埋め込みは 1 バッチ");
+  assert.equal(manyBatches[0].length, 2, "Decision 2 件が同一バッチ");
+  assert.ok(res.suggestions.binding.suggestions.length >= 1, "binding 提案自体は従来どおり返る");
+});
