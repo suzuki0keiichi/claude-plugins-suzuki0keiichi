@@ -8,7 +8,7 @@ import { buildVaultFiles } from "./build-vault.ts";
 import { writeVaultDelta, applyMutationToVault, vaultHead } from "./mutate-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
-import { readSeq } from "./vault-lock.ts";
+import { readSeq, beginVaultWrite } from "./vault-lock.ts";
 import { recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
 
@@ -1214,6 +1214,99 @@ test("issue #26: 成功経路で生成集合外の利用者変更は commit に�
     encoding: "utf8",
   }).trim();
   assert.equal(stillStaged, "", "利用者の変更が stage されっぱなしにもならない");
+});
+
+// ── PR #41: 通常経路の stage は delta 触接パス限定 — 生成集合全体の吸収は
+// crash 痕跡 (seqlock 奇数) 検出時のみ ──────────────────────────────────────
+// 生成集合内の既存ノード .md への利用者の canonical 手編集は、importVault が読んで
+// nextGraph に載るが writeVaultDelta は内容一致で書かない (= delta に載らない)。
+// 従来はそれでも generatedRelPaths 経由で stage され WIP が commit に混入していた。
+
+test("PR#41: crash 痕跡なし (seq 偶数) では生成集合内の未コミット手編集は commit に混入せず dirty のまま残る", async () => {
+  const { repo, vault, stateDir } = gitInitVaultWithDecision();
+  // 利用者の WIP: この mutation の delta が触らない既存ノード Decision/A.md への
+  // canonical 編集 (round-trip するので delta.written に載らない)。
+  const editedA = editedDecisionAContent("user wip inside generated set");
+  writeFileSync(path.join(vault, "Decision", "A.md"), editedA);
+
+  const res = await applyMutationToVault({
+    plan: decisionPlan("gs41", "unrelated mutation while user has wip on another node"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+  });
+  assert.equal(res.applied, true);
+  assert.ok(
+    !res.files.written.includes("Decision/A.md"),
+    "前提: A.md は内容一致で delta に載らない"
+  );
+
+  const committed = execFileSync("git", ["-C", repo, "show", "--name-only", "--format=", "HEAD"], {
+    encoding: "utf8",
+  });
+  assert.ok(committed.includes("Decision/GS41.md"), "mutation 自身の差分は commit される");
+  assert.ok(
+    !committed.includes("Decision/A.md"),
+    "生成集合内でも delta が触らない利用者 WIP は commit に混入しない"
+  );
+  assert.equal(
+    readFileSync(path.join(vault, "Decision", "A.md"), "utf8"),
+    editedA,
+    "利用者の WIP 内容は worktree に残る"
+  );
+  const porcelain = execFileSync("git", ["status", "--porcelain", "--", "."], {
+    cwd: vault,
+    encoding: "utf8",
+  });
+  assert.match(porcelain, /Decision\/A\.md/, "WIP は dirty のまま可視 (fsck git-uncommitted が拾う)");
+  const stillStaged = execFileSync("git", ["diff", "--cached", "--name-only"], {
+    cwd: vault,
+    encoding: "utf8",
+  }).trim();
+  assert.equal(stillStaged, "", "WIP が stage されっぱなしにもならない");
+});
+
+test("PR#41: crash 痕跡 (seq 奇数) 検出時は生成集合全体が stage され torn ファイルが吸収される", async () => {
+  const { repo, vault, stateDir } = gitInitVaultWithDecision();
+  // torn write の再現: 前回 writer が Decision/A.md を書いた直後・commit 前に kill された。
+  // worktree の A.md は canonical (生成集合と内容一致 = delta に載らない) で dirty。
+  const tornA = editedDecisionAContent("torn but canonical content");
+  writeFileSync(path.join(vault, "Decision", "A.md"), tornA);
+  // crash 痕跡: seqlock が奇数のまま取り残されている (endVaultWrite は withVaultLock 内の
+  // finally で走るので、kill -9 でだけこの状態が残る)。
+  const cacheDir = path.join(stateDir, "cache");
+  mkdirSync(cacheDir, { recursive: true });
+  const began = beginVaultWrite(cacheDir);
+  assert.equal(began % 2, 1, "前提: 書込窓が開いたまま (seq 奇数)");
+
+  const res = await applyMutationToVault({
+    plan: decisionPlan("rec41", "recovery mutation absorbs torn file"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+  });
+  assert.equal(res.applied, true);
+
+  const committed = execFileSync("git", ["-C", repo, "show", "--name-only", "--format=", "HEAD"], {
+    encoding: "utf8",
+  });
+  assert.ok(
+    committed.includes("Decision/A.md"),
+    "crash 痕跡ありでは torn ファイルが commit に吸収される (自己回復)"
+  );
+  assert.equal(
+    readFileSync(path.join(vault, "Decision", "A.md"), "utf8"),
+    tornA,
+    "吸収された内容は torn 時点の worktree 内容そのもの"
+  );
+  const porcelain = execFileSync("git", ["status", "--porcelain", "--", "."], {
+    cwd: vault,
+    encoding: "utf8",
+  }).trim();
+  assert.equal(porcelain, "", "回復後は vault 配下に dirty が残らない");
+  assert.equal(readSeq(cacheDir) % 2, 0, "書込窓は閉じて回復");
 });
 
 // ── issue #18: node delete の tombstone 台帳 ────────────────────────────────

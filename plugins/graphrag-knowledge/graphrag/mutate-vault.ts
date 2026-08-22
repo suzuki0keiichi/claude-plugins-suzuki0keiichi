@@ -21,7 +21,7 @@ import {
 import { buildAndWriteVectorIndex, vectorIndexMatchesGraph } from "./build-vector-index.ts";
 import { defaultVectorIndexPath, vaultVectorIndexReadPath, loadVectorIndex } from "./retrieval.ts";
 import { stateDirForVault, cacheDirUnder } from "./cli-env.ts";
-import { withVaultLock, beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
+import { withVaultLock, beginVaultWrite, endVaultWrite, readSeq } from "./vault-lock.ts";
 import {
   runDuplicateCheck,
   duplicateGateCandidates,
@@ -318,20 +318,37 @@ function assertOnBranch(vaultDir: string): void {
 }
 
 /**
- * この mutation が stage してよいパス集合 (issue #26): 生成集合 (nextGraph から生成される
- * 全 .md — 内容一致で書かなかったものも含む。crash 由来の torn ファイルは「生成集合に
- * 含まれ worktree で dirty・内容は既に正しい」なので、この明示 stage が従来の
- * `git add -- .` と同様に自己回復を維持する) + delta が触ったパス (tombstone シャード等)
- * + delta.deleted の削除。存在しないパス (削除済み) は tracked のものだけ残す —
- * untracked だった孤児 .md の削除は git 的に無で、pathspec が何にもマッチしないと
- * git add が失敗するため。
+ * この mutation が stage してよいパス集合 (issue #26 / PR #41)。
+ *
+ * 通常経路 (absorbGeneratedSet=false): この mutation が実際に触ったパスだけ —
+ * delta.written ∪ delta.removed ∪ delta.created (tombstone シャードは appendTombstones が
+ * delta に積むのでここに含まれる)。生成集合全体は stage しない — 利用者が既存ノード .md に
+ * 持つ canonical な未コミット手編集は importVault → nextGraph 経由で生成集合と内容一致に
+ * なり delta に載らないが、生成集合全体を stage するとその WIP を commit に吸収してしまう。
+ *
+ * torn recovery 経路 (absorbGeneratedSet=true): 前回 writer の hard crash 痕跡 (seqlock
+ * 奇数) を検出した場合のみ、従来どおり生成集合 (nextGraph から生成される全 .md — 内容一致で
+ * 書かなかったものも含む) へ広げる。crash 由来の torn ファイルは「生成集合に含まれ worktree
+ * で dirty・内容は既に正しい」なので、この明示 stage が従来の `git add -- .` と同様の
+ * 自己回復を維持する。
+ *
+ * 存在しないパス (削除済み) は tracked のものだけ残す — untracked だった孤児 .md の削除は
+ * git 的に無で、pathspec が何にもマッチしないと git add が失敗するため。
  */
 function mutationStagePaths(
   vaultDir: string,
   generatedRelPaths: string[],
-  delta: { written: string[]; removed: string[] }
+  delta: { written: string[]; removed: string[]; created: string[] },
+  absorbGeneratedSet: boolean
 ): string[] {
-  const all = new Set<string>([...generatedRelPaths, ...delta.written, ...delta.removed]);
+  const all = new Set<string>([
+    ...(absorbGeneratedSet ? generatedRelPaths : []),
+    ...delta.written,
+    ...delta.removed,
+    // created は writeVaultDelta では written の部分集合だが、DI writer が created だけに
+    // 積む可能性に備え rollback 側 (rollbackVaultWorktree) と同様に明示的に合流させる。
+    ...delta.created,
+  ]);
   const out: string[] = [];
   const missing: string[] = [];
   for (const rel of all) {
@@ -352,7 +369,8 @@ function mutationStagePaths(
 
 /**
  * vault へ mutation の差分を stage して commit する。stage は vault 全体 (`git add -- .`)
- * ではなく stagePaths (生成集合 + delta の明示 pathspec) に限定する (issue #26) —
+ * ではなく stagePaths (mutationStagePaths が決めた明示 pathspec — 通常は delta 触接パス
+ * のみ、crash 痕跡検出時のみ生成集合全体) に限定する (issue #26 / PR #41) —
  * 利用者が vault 内に持つ生成集合外の未コミット変更 (手編集ファイル等) を勝手に
  * commit へ混入させないため。stage されなかった変更が vault subtree に dirty のまま
  * 残るのは正しい挙動 (fsck の git-uncommitted check が可視化する)。
@@ -558,8 +576,9 @@ function assessIndexStale(
  * 途中失敗・commit 失敗)でも「この mutation が触ったパスだけ」を開始前の worktree 内容へ
  * 巻き戻す (issue #26: vault 全体の HEAD restore は利用者の未コミット変更を消すのでしない)。
  * 外から見える正本 (committed) 状態は常に「古い HEAD」か「新しい HEAD」だけになり、
- * base_sha↔HEAD の OCC が実際に効く。stage/commit も生成集合+delta の明示 pathspec に
- * 限定し、利用者の未コミット変更を commit へ混入させない。
+ * base_sha↔HEAD の OCC が実際に効く。stage/commit も明示 pathspec (通常は delta 触接
+ * パスのみ、crash 痕跡 = seq 奇数の検出時のみ生成集合全体) に限定し、利用者の未コミット
+ * 変更を commit へ混入させない。
  */
 export async function applyMutationToVault(args: {
   plan: any;
@@ -845,15 +864,27 @@ export async function applyMutationToVault(args: {
     // relations は副産物 (suggest-only)。lock 外の suggestions 組み立てに渡すため保持。
     const relationCandidates = dup.relations ?? [];
 
+    // PR #41: torn recovery の判別。前回 writer の hard crash は seqlock の奇数 seq を
+    // 必ず残す (endVaultWrite は withVaultLock 内の finally で commit 後に走るので、
+    // kill -9 なら seq は奇数のまま)。いまロックは自分が保持していて並行 writer は
+    // 居ないから、自分の beginVaultWrite より前のこの時点で seq 奇数 = crash 痕跡と
+    // 確定できる。この場合のみ stage を生成集合全体へ広げ、前回の torn ファイル
+    // (内容一致で delta に載らない dirty ノード .md) を今回の commit に吸収して
+    // 自己回復する。通常経路 (seq 偶数) では delta 触接パスだけを stage し、利用者の
+    // 未コミット WIP を commit に混入させない。
+    // 許容劣化: cache/ を丸ごと消す運用 (cli-env.ts cacheDirUnder: 「cache/ は消して
+    // 安全、vault.seq のリセットは設計上許容」) で crash 痕跡を失った後の torn は
+    // 自己回復しない — fsck の git-uncommitted (ERROR) が検知して人手復旧を案内する。
+    const crashResidue = readSeq(cacheDir) % 2 === 1;
     const began = beginVaultWrite(cacheDir);
     // 適用中に書いた partial をここに積む。writeVaultDelta が途中で throw しても
     // created が残るので、巻き戻しで untracked な新規ファイルを確実に消せる。
     const delta = { written: [] as string[], removed: [] as string[], created: [] as string[] };
     const writeDelta = args.writeDelta ?? writeVaultDelta;
-    // issue #26: 生成集合 (nextGraph の全 relPath) は stage の明示 pathspec と preimage
-    // backup の両方の基礎。backup は writeVaultDelta の直前に取り、失敗時の rollback は
-    // 「この mutation が触ったパスだけ」を mutation 開始前の worktree 内容へ戻す
-    // (利用者の未コミット変更に手を付けない)。
+    // issue #26 / PR #41: 生成集合 (nextGraph の全 relPath) は preimage backup の基礎、
+    // および crash 痕跡検出時の torn 吸収 stage の基礎。backup は writeVaultDelta の直前に
+    // 取り、失敗時の rollback は「この mutation が触ったパスだけ」を mutation 開始前の
+    // worktree 内容へ戻す (利用者の未コミット変更に手を付けない)。
     const generatedRelPaths = buildVaultFiles(v.nextGraph).map((f: any) => f.relPath as string);
     const backup = snapshotVaultPreimages(vaultDir, generatedRelPaths);
     // gitCommitVault が stage したパス (rollback で unstage する範囲)。stage 前の失敗では
@@ -871,7 +902,7 @@ export async function applyMutationToVault(args: {
       const tombstones = recordTombstones({ vaultDir, plan: effectivePlan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
       let head: string | null = null;
       if (args.git !== false) {
-        stagedPaths = mutationStagePaths(vaultDir, generatedRelPaths, delta);
+        stagedPaths = mutationStagePaths(vaultDir, generatedRelPaths, delta, crashResidue);
         head = gitCommitVault(vaultDir, args.reason ?? plan.reason ?? "graphrag mutation", stagedPaths);
       }
       return {
