@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMode } from "./cli-env.ts";
@@ -6,10 +6,33 @@ import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMo
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 時間
 const STATE_FILENAME = "ask-state.json";
 
-// checkpoint 復元の予約キー。8 文字 fingerprint (fingerprintQuestion) とは長さで
+// checkpoint 復元の予約キーの stem。8 文字 fingerprint (fingerprintQuestion) とは長さで
 // 衝突しない (14 文字・アンダースコア境界)。checkpoint-mark verb が書き、clear-restore
 // フックが one-shot で消費する。ask の連打カウントとは別レーンで ask-state.json に同居する。
+// #29 以降の実キーは identity 別の `__checkpoint__:<hash>` (checkpointStateKey)。この stem
+// 単体のキーは旧フォーマット (単一予約キー時代) で、フック側が読み互換で消費する。
 export const CHECKPOINT_STATE_KEY = "__checkpoint__";
+
+// checkpoint 予約キーの失効窓 (60 分)。主の消費はフック側の one-shot 削除であり、これは
+// 「checkpoint-mark を撃ったが clear しなかった」古い意図の暴発防止と、identity 別キーで
+// map が育たないための inline GC (下の gcInPlace) の両方に使う。
+// hooks/clear-restore.mjs は依存ゼロ方針でこの値を import せず複製する (相互参照コメントを両側に置く)。
+export const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
+
+/**
+ * checkpoint 予約キーを identity (session_dir ?? git root ?? cwd を realpath 正規化した文字列) 別に
+ * 分ける (#29)。単一キーだと同じ vault を共有する複数 session の checkpoint が後勝ちで消え、
+ * 別 project の /clear に判定前消費 (先食い) される。hash は衝突回避のためだけの短縮で、
+ * 復元フックはキーの suffix を解釈しない (照合は entry の session_dir/root/cwd で行う)。
+ */
+export function checkpointStateKey(identity: string): string {
+  return `${CHECKPOINT_STATE_KEY}:${createHash("sha1").update(identity).digest("hex").slice(0, 12)}`;
+}
+
+/** key が checkpoint 予約キー (旧単一キー / identity 別キー) か。TTL の使い分けに使う。 */
+export function isCheckpointStateKey(key: string): boolean {
+  return key === CHECKPOINT_STATE_KEY || key.startsWith(`${CHECKPOINT_STATE_KEY}:`);
+}
 
 // hits: その質問の直近の top≤3 ヒットノード id (E4 ask-trail)。premise 候補提案が
 // 「直近で見ていたノード」を引くために使う。既存 count/last_at の entry に同居する。
@@ -107,21 +130,91 @@ export function saveAskState(baseDir: string, state: AskState): void {
   // 原子書き込み: 同ディレクトリの一時ファイルへ書いてから rename する。
   // rename は同一 FS 上で原子的なので、並行 load→save が競合しても読み手は
   // 常に「古い完全な JSON」か「新しい完全な JSON」を見る (中途半端な切れた
-  // ファイルを読まない)。完全な排他ではない — 片方の更新が消える可能性は残るが、
-  // lock を持ち込まずに「壊れた JSON を読ませない」ところまでを保証する。
+  // ファイルを読まない)。これ単体は排他ではない — read-modify-write の lost update は
+  // 呼び手側が withAskStateLock で囲んで防ぐ (#29。read-only の読み手は lock 不要)。
   const fp = stateFilePath(baseDir);
   const tmp = `${fp}.tmp.${process.pid}`;
   writeFileSync(tmp, JSON.stringify(state, null, 2));
   renameSync(tmp, fp);
 }
 
-export function gcAskState(baseDir: string, now: number = Date.now()): void {
-  const state = loadAskState(baseDir);
-  const fresh: AskState = {};
-  for (const [key, entry] of Object.entries(state)) {
-    if (now - entry.last_at < TTL_MS) fresh[key] = entry;
+// ── mkdir ベースの軽量 lock (#29) ─────────────────────────────────────────
+// saveAskState の tmp+rename は「壊れた JSON を読ませない」までしか保証せず、load→save の
+// read-modify-write は並行実行で片方の更新が消える (lost update: bump 同士 / bump と
+// checkpoint-mark / フックの consume 書き戻し、が実際に競合する)。RMW 全経路をこの lock で囲む。
+//
+// プロトコル (hooks/clear-restore.mjs に依存ゼロ方針で同一実装を複製する — 変える時は両側を直すこと):
+//   - lock は <baseDir>/ask-state.lock という「ディレクトリ」。mkdir は既存時に EEXIST で
+//     失敗するため、素の node だけで原子的な取得になる (恒久ファイル種は増えない — 一時 dir のみ)。
+//   - 取得失敗時は 25ms 間隔でリトライ。lock dir の mtime が 5 秒より古ければ残骸
+//     (クラッシュした保持者) とみなして奪取する。正常な保持区間は ms オーダーなので誤奪取しない。
+//   - 10 秒でタイムアウトし「lock なしで続行」する (best-effort)。ask も復元フックも
+//     ブロックで殺すより、最悪ケースで従来同等 (lost update の可能性) に落ちる方を選ぶ。
+const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_STALE_MS = 5_000;
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_POLL_MS = 25;
+
+// 同期 sleep。Atomics.wait はメインスレッドの素 node で使える (timer も child_process も不要)。
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // SharedArrayBuffer が使えない環境では即リトライ (busy loop 側に倒す)。
   }
-  saveAskState(baseDir, fresh);
+}
+
+/**
+ * ask-state.json への read-modify-write を排他する。fn は同期で短く保つこと
+ * (保持が LOCK_STALE_MS を超えると他プロセスに残骸として奪取される)。
+ */
+export function withAskStateLock<T>(baseDir: string, fn: () => T): T {
+  if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
+  const lockDir = path.join(baseDir, LOCK_DIRNAME);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let held = false;
+  while (!held) {
+    try {
+      mkdirSync(lockDir); // 非 recursive: 既存なら EEXIST → 原子的な取得判定
+      held = true;
+    } catch (e: any) {
+      if (e?.code !== "EEXIST") break; // 権限等の想定外 — lock なしで続行 (best-effort)
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
+          rmdirSync(lockDir); // 残骸を奪取 (rmdir の競合は片方が ENOENT → 次ループで再判定)
+          continue;
+        }
+      } catch {
+        continue; // stat/rmdir 中に消えた → すぐ再取得を試みる
+      }
+      if (Date.now() > deadline) break; // タイムアウト — lock なしで続行
+      sleepSync(LOCK_POLL_MS);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) {
+      try { rmdirSync(lockDir); } catch { /* 奪取済み等 — 触らない */ }
+    }
+  }
+}
+
+// inline GC: ask entry は 24h、checkpoint 予約キー (identity 別で増える) は 60 分で掃除する。
+// last_at はどちらも必ず持つ不変条件 (CheckpointStateEntry のコメント参照)。
+function gcInPlace(state: AskState, now: number): void {
+  for (const key of Object.keys(state)) {
+    const ttl = isCheckpointStateKey(key) ? CHECKPOINT_TTL_MS : TTL_MS;
+    if (now - state[key].last_at >= ttl) delete state[key];
+  }
+}
+
+export function gcAskState(baseDir: string, now: number = Date.now()): void {
+  withAskStateLock(baseDir, () => {
+    const state = loadAskState(baseDir);
+    gcInPlace(state, now);
+    saveAskState(baseDir, state);
+  });
 }
 
 /**
@@ -129,17 +222,16 @@ export function gcAskState(baseDir: string, now: number = Date.now()): void {
  */
 export function bumpCallCount(question: string, baseDir: string, now: number = Date.now()): number {
   const fp = fingerprintQuestion(question);
-  const state = loadAskState(baseDir);
-  // inline GC
-  for (const key of Object.keys(state)) {
-    if (now - state[key].last_at >= TTL_MS) delete state[key];
-  }
-  const prev = state[fp];
-  const next = (prev?.count ?? 0) + 1;
-  // hits は record 専用なので bump では保持する (連打カウントが hits を消さない)。
-  state[fp] = { count: next, last_at: now, ...(prev?.hits ? { hits: prev.hits } : {}) };
-  saveAskState(baseDir, state);
-  return next;
+  return withAskStateLock(baseDir, () => {
+    const state = loadAskState(baseDir);
+    gcInPlace(state, now);
+    const prev = state[fp] as AskStateEntry | undefined;
+    const next = (prev?.count ?? 0) + 1;
+    // hits は record 専用なので bump では保持する (連打カウントが hits を消さない)。
+    state[fp] = { count: next, last_at: now, ...(prev?.hits ? { hits: prev.hits } : {}) };
+    saveAskState(baseDir, state);
+    return next;
+  });
 }
 
 /**
@@ -154,15 +246,14 @@ export function recordAskHits(
   now: number = Date.now()
 ): void {
   const fp = fingerprintQuestion(question);
-  const state = loadAskState(baseDir);
-  // inline GC (bumpCallCount と同じ TTL 掃除を同居させる)。
-  for (const key of Object.keys(state)) {
-    if (now - state[key].last_at >= TTL_MS) delete state[key];
-  }
-  const prev = state[fp];
-  const hits = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string").slice(0, 3);
-  state[fp] = { count: prev?.count ?? 0, last_at: now, hits };
-  saveAskState(baseDir, state);
+  withAskStateLock(baseDir, () => {
+    const state = loadAskState(baseDir);
+    gcInPlace(state, now);
+    const prev = state[fp] as AskStateEntry | undefined;
+    const hits = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string").slice(0, 3);
+    state[fp] = { count: prev?.count ?? 0, last_at: now, hits };
+    saveAskState(baseDir, state);
+  });
 }
 
 /**

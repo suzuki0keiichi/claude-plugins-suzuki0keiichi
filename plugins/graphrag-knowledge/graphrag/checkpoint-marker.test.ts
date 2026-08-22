@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
 import { cacheDirForVault } from "./cli-env.ts";
-import { CHECKPOINT_STATE_KEY } from "./cli-ask-state.ts";
+import { CHECKPOINT_STATE_KEY, checkpointStateKey } from "./cli-ask-state.ts";
 import { CHECKPOINT_TTL_MS, extractFirstAction, findProjectRoot, runCheckpointMark } from "./checkpoint-marker.ts";
 
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
@@ -45,6 +45,11 @@ async function runCaptured(argv: string[]): Promise<{ out: string; err: string }
 function askStateFile(vaultDir: string): string {
   return path.join(cacheDirForVault(vaultDir), "ask-state.json");
 }
+
+// #29: 書き込まれる予約キーは identity 別。identity = session_dir ?? git root ?? realpath(cwd)。
+// --session-dir 無しのテストは実行時 cwd から書き手と同じ規則で期待キーを組む。
+const ownIdentityKey = () =>
+  checkpointStateKey(findProjectRoot(process.cwd()) ?? realpathSync(process.cwd()));
 
 const validRaw =
   "current focus: 復元機構を予約キー方式へ移行中\n" +
@@ -141,7 +146,7 @@ test("正常系: 予約キーが書かれ他キーは保たれ stdout JSON が�
     assert.match(err, /checkpoint state:/);
 
     const onDisk = JSON.parse(readFileSync(stateFp, "utf8"));
-    const entry = onDisk[CHECKPOINT_STATE_KEY];
+    const entry = onDisk[ownIdentityKey()];
     assert.equal(entry.investigation_id, "investigation:s:live");
     assert.equal(entry.first_action, printed.first_action);
     assert.equal(entry.work_state, validRaw);
@@ -168,7 +173,7 @@ test("サブディレクトリから撃っても root にはプロジェクト�
   try {
     process.chdir(sub);
     await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
-    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[ownIdentityKey()];
     assert.equal(entry.root, repo, "最寄りの .git を持つ祖先が root");
     assert.equal(realpathSync(entry.cwd), sub, "cwd は従来どおり実行時のサブディレクトリ");
   } finally {
@@ -192,7 +197,7 @@ test("--session-dir を渡すと session_dir に記録される (root / cwd の�
     const { out } = await runCaptured([
       "--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", repo
     ]);
-    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[checkpointStateKey(repo)];
     assert.equal(entry.session_dir, repo, "渡されたセッションディレクトリが記録される");
     assert.equal(entry.root, repo, "root の記録は従来どおり");
     assert.equal(realpathSync(entry.cwd), sub, "cwd の記録も従来どおり");
@@ -210,7 +215,7 @@ test("--session-dir 未指定なら session_dir フィールドは省略され�
   ]);
   try {
     const { out } = await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
-    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[ownIdentityKey()];
     assert.ok(!("session_dir" in entry), "未指定では書かない (フックは root/cwd 判定へ)");
     assert.ok(!("session_dir" in JSON.parse(out)), "stdout JSON にも出さない");
   } finally {
@@ -229,7 +234,7 @@ test("--session-dir は realpath 解決して記録される (symlink 表記で�
     await runCaptured([
       "--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", link
     ]);
-    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[checkpointStateKey(repo)];
     assert.equal(entry.session_dir, repo, "symlink は実体パスへ解決される");
 
     // realpath 不能 (存在しないパス) でも落とさず絶対化だけして残す。
@@ -237,7 +242,7 @@ test("--session-dir は realpath 解決して記録される (symlink 表記で�
     await runCaptured([
       "--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", ghost
     ]);
-    const entry2 = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    const entry2 = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[checkpointStateKey(path.resolve(ghost))];
     assert.equal(entry2.session_dir, path.resolve(ghost), "解決不能なら path.resolve へフォールバック");
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
@@ -254,7 +259,7 @@ test("git 外から撃つと root フィールドは省略される (フック�
   try {
     process.chdir(plain);
     await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
-    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[CHECKPOINT_STATE_KEY];
+    const entry = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"))[ownIdentityKey()];
     assert.ok(!("root" in entry), "git 外では root を書かない");
     assert.equal(typeof entry.cwd, "string");
   } finally {
@@ -390,5 +395,62 @@ test("raw_content が 8KB 超で hard-error", async () => {
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- #29: identity 別キー (複数 session の checkpoint 共存) ---
+
+test("#29: 予約キーは identity 別 (__checkpoint__:<hash>) — 別 session_dir の 2 つの checkpoint が後勝ちで消えず共存する", async () => {
+  const { root, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  const repoA = makeRepo("dir");
+  const repoB = makeRepo("dir");
+  try {
+    await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", repoA]);
+    await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir, "--session-dir", repoB]);
+
+    const onDisk = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"));
+    const keyA = checkpointStateKey(repoA); // identity = session_dir (realpath 済み)
+    const keyB = checkpointStateKey(repoB);
+    assert.ok(onDisk[keyA], "session A の checkpoint が identity キーで残る");
+    assert.equal(onDisk[keyA].session_dir, repoA);
+    assert.ok(onDisk[keyB], "session B の checkpoint も共存する (後勝ち上書きされない)");
+    assert.equal(onDisk[keyB].session_dir, repoB);
+    assert.ok(!(CHECKPOINT_STATE_KEY in onDisk), "旧単一キーにはもう書かない");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(repoA, { recursive: true, force: true });
+    rmSync(repoB, { recursive: true, force: true });
+  }
+});
+
+test("#29: --session-dir 無しの identity は root (git 内) / cwd (git 外) で決まる", async () => {
+  const { root, vaultDir } = makeVault([
+    { id: "investigation:s:live", type: "Investigation", title: "現役", state: "active", raw_content: validRaw }
+  ]);
+  const repo = makeRepo("dir");
+  const sub = path.join(repo, "plugins", "x");
+  mkdirSync(sub, { recursive: true });
+  const plain = realpathSync(mkdtempSync(path.join(tmpdir(), "ckpt-nogit-")));
+  const origCwd = process.cwd();
+  try {
+    // git 内サブディレクトリから → identity は root
+    process.chdir(sub);
+    await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
+    let onDisk = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"));
+    assert.ok(onDisk[checkpointStateKey(repo)], "git 内では root が identity");
+
+    // git 外から → identity は cwd (realpath)
+    process.chdir(plain);
+    await runCaptured(["--investigation", "investigation:s:live", "--vault", vaultDir]);
+    onDisk = JSON.parse(readFileSync(askStateFile(vaultDir), "utf8"));
+    assert.ok(onDisk[checkpointStateKey(plain)], "git 外では cwd が identity");
+    assert.ok(onDisk[checkpointStateKey(repo)], "別 identity の既存 entry は消えない");
+  } finally {
+    process.chdir(origCwd);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(plain, { recursive: true, force: true });
   }
 });

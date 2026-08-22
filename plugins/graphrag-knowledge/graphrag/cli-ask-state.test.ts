@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fingerprintQuestion, bumpCallCount, loadAskState, saveAskState, gcAskState, recordAskHits, readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { fingerprintQuestion, bumpCallCount, loadAskState, saveAskState, gcAskState, recordAskHits, readRecentHitIds, resolveAskStateDir, checkpointStateKey, withAskStateLock, CHECKPOINT_STATE_KEY } from "./cli-ask-state.ts";
+
+const execFileP = promisify(execFile);
 
 test("fingerprintQuestion is stable and short", () => {
   const a = fingerprintQuestion("hello world");
@@ -208,6 +213,142 @@ test("resolveAskStateDir: GRAPHRAG_STATE_DIR 設定時、共有解決関数で�
   } finally {
     if (prevEnv === undefined) delete process.env.GRAPHRAG_STATE_DIR;
     else process.env.GRAPHRAG_STATE_DIR = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #29: checkpoint の identity 別キー化 ──────────────────────────────────
+
+test("checkpointStateKey: __checkpoint__:<hash> 形式で identity 毎に安定した別キーを返す", () => {
+  const a = checkpointStateKey("/proj/a");
+  const b = checkpointStateKey("/proj/b");
+  assert.match(a, /^__checkpoint__:[0-9a-f]{12}$/);
+  assert.equal(a, checkpointStateKey("/proj/a"), "同一 identity なら安定");
+  assert.notEqual(a, b, "別 identity なら別キー");
+  assert.ok(a.startsWith(`${CHECKPOINT_STATE_KEY}:`), "旧単一キーの prefix 拡張");
+});
+
+// checkpoint 形の entry を作る (last_at = marked 時刻)。
+const ckptEntry = (at: number) => ({
+  count: 0,
+  last_at: at,
+  marked_at: new Date(at).toISOString(),
+  cwd: "/x",
+  investigation_id: "investigation:s:i",
+  first_action: "f",
+  work_state: "current focus: X\nnext: f"
+});
+
+test("#29 inline GC (bumpCallCount): checkpoint エントリは 60 分 TTL、ask エントリは従来 24h TTL", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-ckpt-gc-"));
+  try {
+    const now = Date.now();
+    const kOld = checkpointStateKey("/proj/old");
+    const kFresh = checkpointStateKey("/proj/fresh");
+    saveAskState(dir, {
+      [kOld]: ckptEntry(now - 2 * 60 * 60 * 1000),          // 2h 前 → 60 分 TTL 超過で消える
+      [kFresh]: ckptEntry(now - 30 * 60 * 1000),             // 30 分前 → fresh なので残る
+      [CHECKPOINT_STATE_KEY]: ckptEntry(now - 2 * 60 * 60 * 1000), // 旧単一キーも checkpoint TTL
+      askold00: { count: 1, last_at: now - 25 * 60 * 60 * 1000 },  // 25h → 24h GC で消える
+      askfresh: { count: 1, last_at: now - 2 * 60 * 60 * 1000 }    // 2h → ask TTL 内で残る
+    });
+    bumpCallCount("gc q", dir, now);
+    const st = loadAskState(dir);
+    assert.equal(st[kOld], undefined, "失効 checkpoint entry は掃除される");
+    assert.ok(st[kFresh], "fresh checkpoint entry は消えない");
+    assert.equal(st[CHECKPOINT_STATE_KEY], undefined, "旧単一キーも 60 分 TTL で掃除される");
+    assert.equal(st.askold00, undefined, "24h 超の ask entry は従来どおり消える");
+    assert.ok(st.askfresh, "24h 内の ask entry は checkpoint TTL に巻き込まれない");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#29 inline GC (recordAskHits / gcAskState) も checkpoint 60 分 TTL を適用する", () => {
+  const now = Date.now();
+  for (const run of ["record", "gc"] as const) {
+    const dir = mkdtempSync(path.join(tmpdir(), "askstate-ckpt-gc2-"));
+    try {
+      const kOld = checkpointStateKey("/proj/old");
+      const kFresh = checkpointStateKey("/proj/fresh");
+      saveAskState(dir, {
+        [kOld]: ckptEntry(now - 61 * 60 * 1000),
+        [kFresh]: ckptEntry(now - 59 * 60 * 1000),
+        askfresh: { count: 1, last_at: now - 2 * 60 * 60 * 1000 }
+      });
+      if (run === "record") recordAskHits("gc q", ["a"], dir, now);
+      else gcAskState(dir, now);
+      const st = loadAskState(dir);
+      assert.equal(st[kOld], undefined, `${run}: 失効 checkpoint entry は掃除される`);
+      assert.ok(st[kFresh], `${run}: fresh checkpoint entry は残る`);
+      assert.ok(st.askfresh, `${run}: ask entry は 24h TTL のまま`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+// ── #29: 実並行 lost update (mkdir ベース lock) ───────────────────────────
+
+const SRC_URL = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), "cli-ask-state.ts")).href;
+const CHILD_FLAGS = ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--input-type=module"];
+
+// 子プロセス: 同一 state dir へ bumpCallCount を n 回。
+const bumpChild = (dir: string, n: number) =>
+  execFileP(process.execPath, [
+    ...CHILD_FLAGS,
+    "-e",
+    `const { bumpCallCount } = await import(process.argv[1]);\n` +
+    `for (let i = 0; i < ${n}; i++) bumpCallCount("parallel question", process.argv[2]);\n`,
+    SRC_URL,
+    dir
+  ]);
+
+// 子プロセス: withAskStateLock で checkpoint entry の RMW を n 回 (checkpoint-mark 相当)。
+const ckptChild = (dir: string, key: string, n: number) =>
+  execFileP(process.execPath, [
+    ...CHILD_FLAGS,
+    "-e",
+    `const m = await import(process.argv[1]);\n` +
+    `const dir = process.argv[2], key = process.argv[3];\n` +
+    `for (let i = 0; i < ${n}; i++) {\n` +
+    `  m.withAskStateLock(dir, () => {\n` +
+    `    const s = m.loadAskState(dir);\n` +
+    `    s[key] = { count: 0, last_at: Date.now(), marked_at: new Date().toISOString(), cwd: "/x", investigation_id: "investigation:s:i", first_action: "f", work_state: "w" };\n` +
+    `    m.saveAskState(dir, s);\n` +
+    `  });\n` +
+    `}\n`,
+    SRC_URL,
+    dir,
+    key
+  ]);
+
+test("#29 実並行: 8 プロセス × 50 bump の最終 count がちょうど 400 (lock が lost update を防ぐ)", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-parallel-"));
+  try {
+    await Promise.all(Array.from({ length: 8 }, () => bumpChild(dir, 50)));
+    const st = loadAskState(dir);
+    assert.equal(st[fingerprintQuestion("parallel question")]?.count, 400);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#29 実並行: bump と checkpoint 書き込みが競合しても双方の更新が残る", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-parallel-mix-"));
+  try {
+    const kA = checkpointStateKey("/proj/a");
+    const kB = checkpointStateKey("/proj/b");
+    await Promise.all([
+      ...Array.from({ length: 4 }, () => bumpChild(dir, 50)),
+      ckptChild(dir, kA, 20),
+      ckptChild(dir, kB, 20)
+    ]);
+    const st = loadAskState(dir);
+    assert.equal(st[fingerprintQuestion("parallel question")]?.count, 200, "bump が checkpoint 書き込みに消されない");
+    assert.ok(st[kA], "checkpoint entry A が bump に消されない");
+    assert.ok(st[kB], "checkpoint entry B が bump に消されない");
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
