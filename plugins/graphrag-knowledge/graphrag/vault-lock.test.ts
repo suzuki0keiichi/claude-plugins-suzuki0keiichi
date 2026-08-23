@@ -35,11 +35,12 @@ test("stale ロック（死んだ PID）は奪える", async () => {
 test("生きた PID のロックは年齢だけでは奪わない (旧 30s 閾値相当でも待って timeout)", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
   const { writeFileSync } = await import("node:fs");
+  const os = await import("node:os");
   // 生きた保持者 (このプロセス自身) が 60s 前に取得したロック。旧実装は 30s 超で
   // 奪ってしまい、git commit が遅いだけの生きた writer と二重書きになった。
   writeFileSync(
     path.join(stateDir, "vault.lock"),
-    JSON.stringify({ pid: process.pid, ts: Date.now() - 60_000 })
+    JSON.stringify({ pid: process.pid, ts: Date.now() - 60_000, hostname: os.hostname(), nonce: "some-nonce" })
   );
   await assert.rejects(
     () => withVaultLock(stateDir, () => {}, { timeoutMs: 150, pollMs: 20 }),
@@ -50,9 +51,10 @@ test("生きた PID のロックは年齢だけでは奪わない (旧 30s 閾�
 test("生きた PID でも絶対上限 (staleMs) 超過なら奪える (PID 再利用への保険)", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
   const { writeFileSync } = await import("node:fs");
+  const os = await import("node:os");
   writeFileSync(
     path.join(stateDir, "vault.lock"),
-    JSON.stringify({ pid: process.pid, ts: Date.now() - 5_000 })
+    JSON.stringify({ pid: process.pid, ts: Date.now() - 5_000, hostname: os.hostname(), nonce: "old-nonce" })
   );
   let ran = false;
   await withVaultLock(stateDir, () => { ran = true; }, { staleMs: 1_000 });
@@ -136,6 +138,35 @@ test("readVaultConsistent は crash した writer (seq 奇数 + 死んだ PID �
   const got = await readVaultConsistent(stateDir, () => "DATA", { timeoutMs: 5000, pollMs: 5 });
   assert.equal(got, "DATA", "放棄された静的状態を読んで返す");
   assert.ok(Date.now() - start < 1000, "timeout を待たず速やかに回復する (永久に詰まらない)");
+});
+
+test("withVaultLock は hostname を lock ファイルに書き込む (P2-C)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-host-"));
+  const { readFileSync } = await import("node:fs");
+  const os = await import("node:os");
+  const lockPath = path.join(stateDir, "vault.lock");
+  let lockContent: string | undefined;
+  await withVaultLock(stateDir, () => {
+    lockContent = readFileSync(lockPath, "utf8");
+  });
+  assert.ok(lockContent, "lock ファイルが書かれている");
+  const info = JSON.parse(lockContent!);
+  assert.equal(info.hostname, os.hostname(), "hostname が lock に含まれる");
+});
+
+test("finally は PID が同じでも nonce が異なるロックを消さない (P3-I: ABA 対策)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-nonce-"));
+  const { writeFileSync, readFileSync, existsSync } = await import("node:fs");
+  const lockPath = path.join(stateDir, "vault.lock");
+  await withVaultLock(stateDir, () => {
+    // 実行中に (stale 超過等で) 別プロセスがロックを奪った想定。
+    // 同一 PID だが異なる nonce のロックに差し替える (PID 再利用シナリオ)。
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now(), nonce: "other-holder-nonce", hostname: "other-host" }));
+  });
+  // 現行の実装は PID のみで判定するので、PID が一致して unlink してしまう。
+  // 修正後は nonce 不一致で unlink しない。
+  assert.ok(existsSync(lockPath), "nonce が異なるロックを finally で unlink しない");
+  assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).nonce, "other-holder-nonce");
 });
 
 test("readVaultConsistent は生きた writer がロック保持中なら bypass せず待つ (torn read 回避)", async () => {

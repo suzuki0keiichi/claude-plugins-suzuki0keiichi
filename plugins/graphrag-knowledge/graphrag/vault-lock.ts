@@ -1,7 +1,8 @@
 import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, statSync, renameSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-type LockInfo = { pid: number; ts: number };
+type LockInfo = { pid: number; ts: number; hostname?: string; nonce?: string };
 
 /**
  * pid が生きているか (kill 0 プローブ。EPERM = 存在するが権限なし → 生存扱い)。
@@ -22,13 +23,21 @@ function isStale(lockPath: string, staleMs: number, graceMs: number): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // metadata が正常に読めた場合: PID 死亡なら stale。生きた PID のロックは
-    // 年齢だけでは奪わない (git commit や FS が遅いだけの生きた writer から
-    // ロックを横取りすると二重書きになる)。staleMs は PID 再利用への保険としての
-    // 大きな絶対上限 (既定 10 分) にのみ使う。
+    // metadata が正常に読めた場合: cli-ask-state.ts の lockOwnerConsideredDead と同じ流儀。
+    // PID 死亡なら即座に stale。
     if (!pidAlive(info.pid)) return true;
-    if (Date.now() - info.ts > staleMs) return true;
-    return false;
+    // PID alive + hostname が既知かつ同一ホスト → 生きた保持者。奪取しない。
+    // ただし staleMs 超過は PID 再利用の保険としての大きな絶対上限 (既定 10 分) にのみ使う。
+    if (info.hostname && info.hostname === os.hostname()) {
+      return Date.now() - info.ts > staleMs;
+    }
+    // hostname 不明 (旧フォーマット) / 不一致 → 従来の mtime + staleMs 判定にフォールバック。
+    try {
+      const mtimeMs = statSync(lockPath).mtimeMs;
+      return Date.now() - mtimeMs > staleMs;
+    } catch {
+      return true; // stat 失敗 (消えた) → 取得可能
+    }
   } catch {
     // 空/部分/壊れた lock: 別プロセスが openSync 直後・metadata 書き込み前かもしれない。
     // mtime が grace 内なら「生成途中」とみなして待つ（奪わない）。grace 超過なら壊れた残骸として奪う。
@@ -170,16 +179,18 @@ export async function withVaultLock<T>(
       await new Promise((r) => setTimeout(r, pollMs));
     }
   }
+  const nonce = `${process.pid}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
   try {
-    writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() } satisfies LockInfo));
+    writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now(), hostname: os.hostname(), nonce } satisfies LockInfo));
     return await fn();
   } finally {
     try { closeSync(fd); } catch { /* noop */ }
-    // 自分の PID が入ったロックだけを消す。絶対上限超過等で誰かに奪われていた場合、
+    // 自分の PID + nonce が入ったロックだけを消す。絶対上限超過等で誰かに奪われていた場合、
     // 無条件 unlink は「奪った側のロック」を消してしまい三重目の writer を招く。
+    // PID のみの比較では PID 再利用で他者の lock を消す (ABA) ため、nonce も検証する。
     try {
       const cur = JSON.parse(readFileSync(lockPath, "utf8")) as LockInfo;
-      if (cur.pid === process.pid) unlinkSync(lockPath);
+      if (cur.pid === process.pid && cur.nonce === nonce) unlinkSync(lockPath);
     } catch { /* 消えている/壊れている → 触らない (残骸は stale 判定が回収する) */ }
   }
 }
