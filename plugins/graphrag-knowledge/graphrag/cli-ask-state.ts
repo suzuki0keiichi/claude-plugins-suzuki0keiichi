@@ -252,7 +252,7 @@ function acquireAskStateLock(baseDir: string): AskStateLockHandle {
         // 取得の証明を即座に書く。失敗しても保持は続行 — owner 不明 lock として振る舞う
         // (stale 化したら他者に無条件奪取され、release も nonce 不一致で触らない)。
         writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, nonce, hostname: os.hostname(), acquired_at: Date.now() }));
-      } catch { /* best-effort */ }
+      } catch (e: any) { console.error(`[graphrag] ask-state lock: owner write failed (${e?.code ?? e}) — lock held without identity`); }
     } catch (e: any) {
       if (e?.code !== "EEXIST") {
         // 権限等の想定外 — lock なしで続行 (best-effort)
@@ -303,7 +303,7 @@ function acquireAskStateLock(baseDir: string): AskStateLockHandle {
           rmSync(ownerPath, { force: true });
           rmdirSync(lockDir);
         }
-      } catch { /* 奪取済み等 — 触らない */ }
+      } catch (e: any) { if (e?.code !== "ENOENT" && e?.code !== "ENOTEMPTY") console.error(`[graphrag] ask-state lock: release failed (${e?.code ?? e})`); }
     }
   };
 }
