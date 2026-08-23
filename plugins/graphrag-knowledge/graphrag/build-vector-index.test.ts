@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { embedNodes, embedNodesIncremental, vectorTextHash, buildVectorIndex, parseArgs, writeFileAtomic, main } from "./build-vector-index.ts";
+import { embedNodes, embedNodesIncremental, vectorTextHash, buildVectorIndex, parseArgs, writeFileAtomic, main, indexWriteWouldRegress } from "./build-vector-index.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -802,4 +802,50 @@ test("embedNodesIncremental: documentPrefix はバッチの各 miss テキスト
   assert.equal(batches.length, 1);
   assert.deepEqual(batches[0], [`search_document: ${nodeVectorText(a)}`, `search_document: ${nodeVectorText(b)}`]);
   assert.equal(rows[0].text_hash, vectorTextHash(a, "search_document: "), "text_hash は prefix 込み (従来どおり)");
+});
+
+// ── P3-G: indexWriteWouldRegress の seqVerdict リファクタリング ─────────────
+
+test("P3-G: indexWriteWouldRegress no-vaultDir path (防御コード) — existing.seq > payload.seq は退行とみなす", async () => {
+  const existing = { snapshot_seq: 5, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 2, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), true,
+    "vaultDir 無しでも seq 比較で退行を検出する (防御パス)");
+});
+
+test("P3-G: indexWriteWouldRegress no-vaultDir path — existing.seq <= payload.seq は後勝ち", async () => {
+  const existing = { snapshot_seq: 2, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 5, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false,
+    "seq が自分の方が新しければ退行ではない");
+});
+
+test("P3-G: indexWriteWouldRegress no-vaultDir path — seq が片方欠落なら後勝ち", async () => {
+  const existing = { graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 5, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false,
+    "existing.seq 無し → 比較不能 → 後勝ち");
+  const payload2 = { graph_fingerprint: "b".repeat(64), rows: [] };
+  const existing2 = { snapshot_seq: 5, graph_fingerprint: "a".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload2, existing2), false,
+    "payload.seq 無し → 比較不能 → 後勝ち");
+});
+
+test("P3-G: indexWriteWouldRegress catch fallback — 正常な seq 比較 (両方非 0) で退行検出", async () => {
+  // 存在しない vaultDir → importVault が throw → catch path 発火
+  const existing = { snapshot_seq: 8, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 3, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-p3g-seq"),
+    true, "catch fallback でも seq 8 > 3 は退行とみなす");
+});
+
+test("P3-G: indexWriteWouldRegress catch fallback — cache 再初期化後 (payload.seq = 0) は誤ブロックしない", async () => {
+  // cache 再初期化後: payload は新 seq 空間 (seq = 0)、existing は旧 seq 空間 (seq = 10)。
+  // 存在しない vaultDir → catch path 発火。
+  // 現行コード: seqVerdict = (10 > 0) = true → 書き込みをブロック (誤判定)。
+  // 修正後: payload.seq が 0 なら seq は信頼できない → false (後勝ちに倒す)。
+  const existing = { snapshot_seq: 10, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 0, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-p3g-reinit"),
+    false, "cache 再初期化後 (payload.seq = 0) は seq を信頼せず後勝ちに倒す");
 });

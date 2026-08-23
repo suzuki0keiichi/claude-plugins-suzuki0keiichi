@@ -330,11 +330,20 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
     typeof existing.graph_fingerprint === "string" &&
     existing.graph_fingerprint === payload.graph_fingerprint
   ) return false;
-  const seqVerdict =
-    typeof existing.snapshot_seq === "number" &&
-    typeof payload.snapshot_seq === "number" &&
-    existing.snapshot_seq > payload.snapshot_seq;
-  if (!vaultDir) return seqVerdict; // graph が渡らない経路は現状維持 (seq 比較 or 後勝ち)
+  // seq による退行判定 (最終 fallback)。主裁定 (graph 内容一致) が使えないときのみ呼ぶ。
+  // seq は同一 cache 世代内でしか単調でないため、payload.seq が 0 (cache 再初期化直後の
+  // 初期値) の場合は別 epoch の既存 seq との比較が無意味 → 後勝ちに倒す (= false)。
+  const seqFallback = (): boolean => {
+    if (
+      typeof existing.snapshot_seq !== "number" ||
+      typeof payload.snapshot_seq !== "number"
+    ) return false; // 比較不能 → 後勝ち
+    if (payload.snapshot_seq === 0) return false; // cache 再初期化後 → seq 信頼不可 → 後勝ち
+    return existing.snapshot_seq > payload.snapshot_seq;
+  };
+  // 防御コード: caller (buildAndWriteVectorIndex) は常に vaultDir を渡すが、
+  // 直接呼び出しや将来の経路に備えた安全弁。
+  if (!vaultDir) return seqFallback();
   try {
     const { data } = await readVaultConsistentWithSeq(
       cacheDirForVault(vaultDir),
@@ -342,7 +351,7 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
     );
     return vectorIndexMatchesGraph(data, existing);
   } catch {
-    return seqVerdict; // 現 graph を読めない → 判定不能 → 現状維持 (seq 比較 or 後勝ち)
+    return seqFallback(); // 現 graph を読めない → seq fallback → seq 信頼不可なら後勝ち
   }
 }
 
