@@ -101,11 +101,13 @@ function writerCrashed(stateDir: string): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // isStale と同じ流儀: hostname 一致時だけ PID 検査。不一致/不明は生存扱い (保守的)。
-    if (info.hostname && info.hostname === os.hostname()) {
-      return !pidAlive(info.pid);
-    }
-    return false;
+    // hostname が明示的に異なる場合だけ PID 検査を skip (別ホストの PID テーブルは見えない)。
+    // hostname 欠落 (v1.40.2 以前の旧フォーマット) は常にローカル lock なので pidAlive が有効。
+    // ※ isStale は hostname 欠落時に mtime フォールバックがあるため一律 skip で安全だが、
+    //   writerCrashed にはフォールバックが無く、skip すると旧形式 lock の crash recovery が
+    //   永久に進まない — 両関数の hostname 欠落時の挙動が異なるのはこの構造差による。
+    if (info.hostname && info.hostname !== os.hostname()) return false;
+    return !pidAlive(info.pid);
   } catch {
     return false; // 生成途中の空/壊れロック → 別 writer が取得中かもしれない → 待つ
   }
