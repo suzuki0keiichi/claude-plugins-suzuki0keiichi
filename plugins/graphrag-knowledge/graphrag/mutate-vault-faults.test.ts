@@ -434,7 +434,9 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   // のライフサイクルテストが固定) ので、writeDelta 後 (= この kill 地点) のプロセスは必ず
   // 触接パスの journal を残している。回復側の吸収 stage はこの journal 記載パスに限定される
   // (再レビュー指摘3: 生成集合全体を吸収すると crash 以前からの利用者 WIP まで巻き込む)。
-  writeVaultWriteJournal(cacheDir, delta.written);
+  // 3回目レビュー指摘1: journal には書込窓の奇数 seq (began) が打刻され、回復側は
+  // 「打刻 seq === 観測した奇数 seq」の一致で今回の crash に属する journal と識別する。
+  writeVaultWriteJournal(cacheDir, delta.written, began);
   assert.ok(existsSync(vaultWriteJournalPath(cacheDir)), "前提: crash 時点で write journal が在る");
 
   // (a) fsck は torn write を ERROR + 復旧ヒントで検知する。

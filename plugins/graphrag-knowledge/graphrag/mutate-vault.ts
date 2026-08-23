@@ -54,7 +54,7 @@ export function writeFileAtomic(abs: string, content: string): void {
   }
 }
 
-// ── write journal (PR #41 指摘3) ─────────────────────────────────────────────
+// ── write journal (PR #41 指摘3 / 3回目レビュー指摘1) ────────────────────────
 // 「これから書く/消す予定の vault 相対パス」を writeDelta の前に cache へ永続化する。
 // writer が writeDelta〜commit の間で hard crash した場合、次の writer は crash 痕跡
 // (seqlock 奇数) とこの journal から「前回 writer が実際に触った可能性のあるパスだけ」を
@@ -62,30 +62,41 @@ export function writeFileAtomic(abs: string, content: string): void {
 // 吸収してしまう)。cache/ 配下 (cli-env.ts cacheDirUnder 参照) なので消えても安全性は
 // 劣化のみ: journal の無い crash 痕跡 (旧版 crash・cache 部分消去) は吸収なし (delta のみ
 // stage) となり、torn 残骸は fsck の git-uncommitted (ERROR) が人手復旧を案内する。
+//
+// seq 打刻 (3回目レビュー指摘1): journal は「自分が属する書込窓の奇数 seq」を持つ。
+// 回復側は「journal の seq === 観測している奇数 seq」の一致で今回の crash に属する
+// journal だけを認め、前世代の残骸 (完了済み writer が消し損ねた journal) を次 writer の
+// begin 直後 crash と誤認して無関係な記載パスを吸収することを防ぐ。seq は begin ごとに
+// 単調増加 (完了 writer の奇数 O → end で O+1 → 次 begin で O+2) なので前世代の打刻と
+// 偶然一致しない。seq を持たない旧形式 (v1) journal は読めない扱い (= 吸収なしの安全劣化)。
 export const VAULT_WRITE_JOURNAL = "vault.write-journal.json";
 
 export function vaultWriteJournalPath(cacheDir: string): string {
   return path.join(cacheDir, VAULT_WRITE_JOURNAL);
 }
 
-export function readVaultWriteJournal(cacheDir: string): { paths: string[] } | null {
+export function readVaultWriteJournal(cacheDir: string): { paths: string[]; seq: number } | null {
   try {
     const parsed = JSON.parse(readFileSync(vaultWriteJournalPath(cacheDir), "utf8"));
-    if (!Array.isArray(parsed?.paths)) return null;
-    return { paths: parsed.paths.filter((p: unknown): p is string => typeof p === "string") };
+    if (!Array.isArray(parsed?.paths) || typeof parsed?.seq !== "number") return null;
+    return {
+      paths: parsed.paths.filter((p: unknown): p is string => typeof p === "string"),
+      seq: parsed.seq,
+    };
   } catch {
-    return null; // 不在/破損 = journal 無し (吸収は delta のみに劣化)
+    return null; // 不在/破損/旧形式 (seq 無し) = journal 無し (吸収は delta のみに劣化)
   }
 }
 
 // export はテスト用 (crash した writer が残した journal 状態の再現)。atomic (tmp+rename):
 // 書き込み途中の crash で壊れた journal が残っても read 側が null に落ちて吸収が劣化する
-// だけで、誤ったパス集合を吸収することは無い。
-export function writeVaultWriteJournal(cacheDir: string, paths: string[]): void {
+// だけで、誤ったパス集合を吸収することは無い。seq は呼び出し元の書込窓の奇数 seq
+// (beginVaultWrite の返り値)。
+export function writeVaultWriteJournal(cacheDir: string, paths: string[], seq: number): void {
   mkdirSync(cacheDir, { recursive: true });
   const p = vaultWriteJournalPath(cacheDir);
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ version: 1, pid: process.pid, ts: Date.now(), paths }));
+  writeFileSync(tmp, JSON.stringify({ version: 2, pid: process.pid, ts: Date.now(), seq, paths }));
   renameSync(tmp, p);
 }
 
@@ -470,25 +481,51 @@ function mutationStagePaths(
 }
 
 /**
- * merge/cherry-pick/revert が進行中か。進行中の index は「merge の解決状態」そのもので、
- * commit はその確定を意味する — pathspec 付き commit は git が一律拒否するため、staged が
- * vault 配下だけと検証できた場合に pathspec 無し commit で merge ごと確定するのが既定挙動
- * (下の gitCommitVault 本文と mid-merge テスト参照)。この例外があるため、事前 staged WIP
- * の拒否 (PRESTAGED_WIP_BLOCKED) は進行中でない通常時にのみ適用する。
+ * merge/cherry-pick/revert が進行中ならその operation 名を返す (無ければ null)。
+ * 進行中の index は「その operation の解決状態」そのもので、commit は operation 全体の
+ * 確定を意味する — しかも operation の結果と、開始後に利用者が stage した WIP は index
+ * から区別できない。mutation がそれを暗黙確定するのは操作境界を越える (PR #41 3回目
+ * レビュー指摘2) ため、applyMutationToVault は何も書く前の最上流でこの検出を引いて
+ * OPERATION_IN_PROGRESS_BLOCKED として拒否する (assertNoGitOperationInProgress)。
  */
-function mergeInProgress(vaultDir: string): boolean {
-  for (const marker of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+function operationInProgress(vaultDir: string): "merge" | "cherry-pick" | "revert" | null {
+  const markers = [
+    ["MERGE_HEAD", "merge"],
+    ["CHERRY_PICK_HEAD", "cherry-pick"],
+    ["REVERT_HEAD", "revert"],
+  ] as const;
+  for (const [marker, op] of markers) {
     try {
       const p = execFileSync("git", ["rev-parse", "--git-path", marker], {
         cwd: vaultDir,
         encoding: "utf8",
       }).trim();
-      if (existsSync(path.isAbsolute(p) ? p : path.join(vaultDir, p))) return true;
+      if (existsSync(path.isAbsolute(p) ? p : path.join(vaultDir, p))) return op;
     } catch {
       /* repo で無い等 → 進行中扱いしない */
     }
   }
-  return false;
+  return null;
+}
+
+/**
+ * mutation の最上流ゲート (PR #41 3回目レビュー指摘2): merge/cherry-pick/revert 進行中は
+ * 何も書く前に明示エラーで拒否する。何も書いていないので rollback は不要。利用者には
+ * 進行中 operation の完了 (--continue) か中止 (--abort) を案内する。
+ */
+function assertNoGitOperationInProgress(vaultDir: string): void {
+  const op = operationInProgress(vaultDir);
+  if (!op) return;
+  const err: any = new Error(
+    `refusing to mutate: a git ${op} is in progress in the repository containing the vault. ` +
+      `Committing the mutation now would implicitly conclude the entire ${op} — its staged result ` +
+      `is indistinguishable from anything you staged since it began. Nothing was written. ` +
+      `Finish or abort it first (\`git -C ${vaultDir} ${op} --continue\` after resolving, or ` +
+      `\`git -C ${vaultDir} ${op} --abort\`), then retry.`
+  );
+  err.code = "OPERATION_IN_PROGRESS_BLOCKED";
+  err.operation = op;
+  throw err;
 }
 
 /**
@@ -504,24 +541,22 @@ function mergeInProgress(vaultDir: string): boolean {
  * していた WIP を pathspec 無し commit が mutation の reason で丸ごと確定していた
  * (stagePaths が空でも同様)。git add の前に vault 配下の staged 集合をスナップショットし、
  * stagePaths に含まれないものが居れば明示エラーで拒否する (呼び出し元が vault 側 delta を
- * rollback する。利用者の staged WIP には手を付けない)。例外は merge 等の進行中のみ
- * (mergeInProgress 参照)。
- *
- * pathspec (限定した commit) は merge/cherry-pick/revert 進行中は git 側の制約で一律
- * 拒否される ("cannot do a partial commit during a merge" 等。pathspec が staged 全体と
- * 一致していても中身は見ずに拒否される)。vault は通常プロジェクト repo 内に同居するので、
- * 利用者が mid-merge のときに typed-add/commit-mutation を叩くと毎回ここで死んでいた。
+ * rollback する。利用者の staged WIP には手を付けない)。例外は無い — かつて存在した
+ * mid-merge 免除 (merge の staged 結果は stagePaths 外に見えるため) は、mid-merge 中の
+ * mutation 自体を applyMutationToVault が最上流で拒否する形 (3回目レビュー指摘2:
+ * OPERATION_IN_PROGRESS_BLOCKED) に置き換えて廃止した。
  *
  * 判定: repo 全体の staged 一覧 (pathspec 無し) と vault 配下限定の staged 一覧
  * (pathspec "." だが cwd=vaultDir で git 自身が解決するので、macOS の /var →
  * /private/var のような symlink 起因の toplevel ズレを自前の path 計算で踏まない) を
  * 比較するだけで「vault 外に staged 済みの変更が無い」ことを検証できる。
- *   - 一致 (vault-only) → pathspec 無しで commit (mid-merge でも通る。安全性は
- *     「staged 全体が vault 配下だけ」と検証済みであることが担保する)。
+ *   - 一致 (vault-only) → pathspec 無しで commit (staged 全体が vault 配下だけ、かつ
+ *     事前 staged 検査で stagePaths 外が居ないと検証済みなので安全)。
  *   - 不一致 (foreign 混在) → stagePaths 限定の pathspec 付きで commit (`--only` 相当、
- *     利用者が別所で事前 stage していた変更を巻き込まない)。mid-merge 等で git に
- *     拒否されたら、この mutation の vault 側 delta は呼び出し元が開始前の状態へ巻き戻す
- *     (all-or-nothing) ので、原因と取るべき行動を明示したエラーに変換して投げる。
+ *     利用者が別所で事前 stage していた変更を巻き込まない)。git が pathspec 付き commit
+ *     を拒否する唯一の状況 (merge/cherry-pick/revert 進行中の partial commit) は最上流の
+ *     OPERATION_IN_PROGRESS_BLOCKED が先に塞いでいるため、ここでの失敗は hook 失敗等の
+ *     素の異常 — そのまま伝播させ、呼び出し元が vault 側 delta を巻き戻す (all-or-nothing)。
  */
 export function gitCommitVault(vaultDir: string, message: string, stagePaths: string[]): string {
   // PR #41 再レビュー指摘1: git add の「前」に vault 配下の事前 staged 集合を取る。
@@ -536,7 +571,7 @@ export function gitCommitVault(vaultDir: string, message: string, stagePaths: st
     .filter(Boolean);
   const stageSet = new Set(stagePaths.map(toPosixRel));
   const preStagedForeign = preStaged.filter((p) => !stageSet.has(p));
-  if (preStagedForeign.length > 0 && !mergeInProgress(vaultDir)) {
+  if (preStagedForeign.length > 0) {
     const err: any = new Error(
       `refusing to commit: the vault has pre-staged uncommitted changes that are not part of this ` +
         `mutation [${preStagedForeign.join(", ")}]. Committing now would absorb them under this ` +
@@ -571,31 +606,20 @@ export function gitCommitVault(vaultDir: string, message: string, stagePaths: st
   }).trim();
 
   if (allStaged === vaultStaged) {
-    // staged 全体が vault 配下だけと検証済みなので pathspec を外して commit する
-    // (mid-merge でも動く形にする)。
+    // staged 全体が vault 配下だけ (かつ事前 staged 検査で stagePaths 外が居ない) と
+    // 検証済みなので pathspec を外して commit する。
     execFileSync("git", ["commit", "-q", "-m", message], { cwd: vaultDir });
   } else {
-    try {
-      // 注意: pathspec 付き commit は「listed files の現在内容」を記録するので、pathspec
-      // を "." にすると利用者の unstaged な vault 内編集まで記録してしまう。この mutation
-      // の stagePaths に限定する (それらの worktree 内容 = この mutation が書いた内容)。
-      execFileSync("git", ["commit", "-q", "-m", message, "--pathspec-from-file=-", "--pathspec-file-nul"], {
-        cwd: vaultDir,
-        input: stagePaths.join("\0"),
-      });
-    } catch (e: any) {
-      const err: any = new Error(
-        `git commit failed because unrelated (non-vault) files are also staged in this repo, which ` +
-          `requires a pathspec-limited commit — but git refuses pathspec-limited commits during an ` +
-          `in-progress merge/cherry-pick/revert. The vault change was rolled back (all-or-nothing). ` +
-          `Finish or abort the in-progress operation (e.g. \`git merge --continue\` / \`git merge --abort\`), ` +
-          `or unstage/commit the unrelated files outside the vault, then retry. ` +
-          `Underlying error: ${String(e?.message ?? e)}`
-      );
-      err.code = "PATHSPEC_COMMIT_BLOCKED";
-      err.cause = e;
-      throw err;
-    }
+    // 注意: pathspec 付き commit は「listed files の現在内容」を記録するので、pathspec
+    // を "." にすると利用者の unstaged な vault 内編集まで記録してしまう。この mutation
+    // の stagePaths に限定する (それらの worktree 内容 = この mutation が書いた内容)。
+    // git が pathspec 付き commit を拒否する merge/cherry-pick/revert 進行中は最上流の
+    // OPERATION_IN_PROGRESS_BLOCKED (assertNoGitOperationInProgress) が先に塞いでいる。
+    // ここでの失敗 (hook 失敗等) はそのまま伝播し、呼び出し元が delta を巻き戻す。
+    execFileSync("git", ["commit", "-q", "-m", message, "--pathspec-from-file=-", "--pathspec-file-nul"], {
+      cwd: vaultDir,
+      input: stagePaths.join("\0"),
+    });
   }
   return vaultHead(vaultDir);
 }
@@ -915,6 +939,12 @@ export async function applyMutationToVault(args: {
   }
 
   const result = await withVaultLock(cacheDir, async () => {
+    // PR #41 3回目レビュー指摘2: merge/cherry-pick/revert 進行中は mutation 全体を
+    // 何も書く前の最上流で拒否する。進行中の index は operation の解決状態そのもので、
+    // この mutation の commit が operation 全体を暗黙確定してしまう (operation の結果と
+    // 開始後に利用者が stage した WIP は index から区別できない)。何も書いていないので
+    // rollback は不要。
+    if (args.git !== false) assertNoGitOperationInProgress(vaultDir);
     const current = importVault(vaultDir);
     // issue #27: 索引 staleness の主判定 — 手元に graph (current) があるので、head 比較では
     // なく内容突合 (vectorIndexMatchesGraph: node 集合 + text_hash) で判定する。索引の
@@ -1036,8 +1066,18 @@ export async function applyMutationToVault(args: {
     // journal を持たない crash 痕跡 (journal 導入前の旧版 crash・cache 部分消去) は
     // 自己回復しない (後者は delta のみ stage) — どちらも fsck の git-uncommitted
     // (ERROR) が検知して人手復旧を案内する。
-    const crashResidue = readSeq(cacheDir) % 2 === 1;
-    const priorJournal = crashResidue ? readVaultWriteJournal(cacheDir) : null;
+    //
+    // seq 打刻の突合 (3回目レビュー指摘1): journal は自分が属する書込窓の奇数 seq を
+    // 打刻している。「journal の seq === いま観測している奇数 seq」の場合のみ今回の
+    // crash に属する journal と認める。seq は begin ごとに単調増加 (完了 writer の奇数
+    // O → end で O+1 → 次 begin で O+2) なので、前世代の残骸 journal (完了済み writer
+    // が消し損ねたもの) と偶然一致することは無い。二重 crash の再入 (beginVaultWrite は
+    // 既奇数なら据え置き) では同じ奇数のまま merge されるので一致し続ける。不一致は
+    // journal 無しと同じ安全劣化 (吸収なし、fsck の git-uncommitted が人手復旧を案内)。
+    const observedSeq = readSeq(cacheDir);
+    const crashResidue = observedSeq % 2 === 1;
+    const journalOnDisk = crashResidue ? readVaultWriteJournal(cacheDir) : null;
+    const priorJournal = journalOnDisk && journalOnDisk.seq === observedSeq ? journalOnDisk : null;
     // issue #26 / PR #41: 生成集合 (nextGraph の全 relPath) は preimage backup の基礎。
     // backup は writeVaultDelta の直前に取り、失敗時の rollback は「この mutation が
     // 触ったパスだけ」を mutation 開始前の worktree 内容へ戻す (利用者の未コミット変更に
@@ -1088,9 +1128,11 @@ export async function applyMutationToVault(args: {
     // crash しても「触った可能性のあるパス」が残り、次の writer が吸収範囲を限定できる)。
     // crash 痕跡がある場合は前回 journal と merge する — beginVaultWrite は既奇数なら
     // 据え置く再入設計のため、二重 crash では両 writer のパスを合算した journal が次の
-    // 回復に渡る。削除は endVaultWrite と同じ finally 位置 (書込窓が閉じる時に消える)。
+    // 回復に渡る。このとき began は前回と同じ奇数のままなので、打刻 seq (指摘1) も
+    // 一致し続け、merge された journal は引き続き有効な回復材料になる。削除は finally
+    // (書込窓が閉じる時、endVaultWrite より前) で行う。
     const journalPaths = [...new Set([...(priorJournal?.paths ?? []), ...predictedTouch])];
-    writeVaultWriteJournal(cacheDir, journalPaths);
+    writeVaultWriteJournal(cacheDir, journalPaths, began);
     // 適用中に書いた partial をここに積む。writeVaultDelta が途中で throw しても
     // created が残るので、巻き戻しで untracked な新規ファイルを確実に消せる。
     const delta = { written: [] as string[], removed: [] as string[], created: [] as string[] };
@@ -1153,11 +1195,19 @@ export async function applyMutationToVault(args: {
       rollbackVaultWorktree(vaultDir, delta, backup, args.git !== false ? stagedPaths : null);
       throw applyErr;
     } finally {
-      endVaultWrite(cacheDir, began);
       // journal の寿命は seq 書込窓と同じ: 窓が閉じる (成功 = commit 済み / 失敗 =
       // rollback 済みで torn 無し) 時に消す。hard crash ではこの finally 自体が走らない
       // ので journal は seq 奇数と一緒に残り、次の writer の回復材料になる。
+      //
+      // 削除順は journal → seq (3回目レビュー指摘1): 逆順 (endVaultWrite → clear) だと
+      // この 2 操作間の hard crash が「偶数 seq + 完了済み writer の journal」を残し、
+      // 次 writer が begin 直後 (自 journal 書込前) に crash した場合に、さらに次の
+      // mutation が前世代 journal を今回の crash に属すると誤認して無関係な利用者 WIP
+      // を吸収し得た。journal を先に消せば、この境界での crash は「奇数 seq + journal
+      // 無し」= 既存の安全劣化 (吸収なし、fsck の git-uncommitted が人手復旧を案内) に
+      // 落ちる。journal の seq 打刻突合が第二の防壁として同じ誤認を独立に塞ぐ。
       clearVaultWriteJournal(cacheDir);
+      endVaultWrite(cacheDir, began);
     }
   });
 
