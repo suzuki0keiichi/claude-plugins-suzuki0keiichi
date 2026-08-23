@@ -330,20 +330,13 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
     typeof existing.graph_fingerprint === "string" &&
     existing.graph_fingerprint === payload.graph_fingerprint
   ) return false;
-  // seq による退行判定 (最終 fallback)。主裁定 (graph 内容一致) が使えないときのみ呼ぶ。
-  // seq は同一 cache 世代内でしか単調でないため、payload.seq が 0 (cache 再初期化直後の
-  // 初期値) の場合は別 epoch の既存 seq との比較が無意味 → 後勝ちに倒す (= false)。
-  const seqFallback = (): boolean => {
-    if (
-      typeof existing.snapshot_seq !== "number" ||
-      typeof payload.snapshot_seq !== "number"
-    ) return false; // 比較不能 → 後勝ち
-    if (payload.snapshot_seq === 0) return false; // cache 再初期化後 → seq 信頼不可 → 後勝ち
-    return existing.snapshot_seq > payload.snapshot_seq;
-  };
-  // 防御コード: caller (buildAndWriteVectorIndex) は常に vaultDir を渡すが、
-  // 直接呼び出しや将来の経路に備えた安全弁。
-  if (!vaultDir) return seqFallback();
+  // graph を読めない場合は後勝ちに倒す。seq は同一 cache 世代内でしか単調でなく、
+  // cache 再初期化 (seq 0→2→4…) や別 state dir が同じ out を共有した場合、世代の
+  // 同一性を証明できないまま数値比較すると新 epoch の正当な builder を旧世代の高 seq
+  // が恒久にブロックする (payload.seq===0 だけの特別扱いでは 2 回目以降を捕まえない)。
+  // 索引は二次生成物なので後勝ちが安全側: 仮に古い builder が上書きしても、次の
+  // vectorIndexMatchesGraph (読み側) が不一致を検出して再 build する。
+  if (!vaultDir) return false;
   try {
     const { data } = await readVaultConsistentWithSeq(
       cacheDirForVault(vaultDir),
@@ -351,8 +344,8 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
     );
     return vectorIndexMatchesGraph(data, existing);
   } catch (e) {
-    console.error(`[warn] indexWriteWouldRegress: vault read failed, falling back to seq comparison: ${e instanceof Error ? e.message : e}`);
-    return seqFallback();
+    console.error(`[warn] indexWriteWouldRegress: vault read failed, allowing write (後勝ち): ${e instanceof Error ? e.message : e}`);
+    return false;
   }
 }
 
