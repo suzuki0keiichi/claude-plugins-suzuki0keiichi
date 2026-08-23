@@ -33,6 +33,16 @@ test("stale ロック（同一ホスト・死んだ PID）は奪える", async (
   assert.equal(ran, true);
 });
 
+test("旧形式 lock（hostname なし・死んだ PID）は fresh でも即座に奪える", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-legacy-"));
+  const { writeFileSync } = await import("node:fs");
+  // v1.40.2 以前が残した機械ローカル lock。mtime/ts が新しくても dead PID を優先する。
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: Date.now() }));
+  let ran = false;
+  await withVaultLock(stateDir, () => { ran = true; }, { staleMs: 600_000, timeoutMs: 150, pollMs: 5 });
+  assert.equal(ran, true, "旧形式の crash lock を10分待たず回収する");
+});
+
 test("別ホストの新鮮なロックはローカル PID 不在でも即奪取しない (mtime + staleMs で裁定)", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-remote-"));
   const { writeFileSync } = await import("node:fs");
