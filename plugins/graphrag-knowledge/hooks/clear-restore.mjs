@@ -33,6 +33,7 @@
 // どんな失敗でもセッション開始をブロックしない (何も出さず正常終了)。
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // 予約キーの stem。graphrag/cli-ask-state.ts の CHECKPOINT_STATE_KEY と揃える
@@ -53,33 +54,73 @@ const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
 //   - lock は <baseDir>/ask-state.lock という「ディレクトリ」。mkdir は既存時に EEXIST で
 //     失敗するため、素の node だけで原子的な取得になる (恒久ファイル種は増えない — owner ファイル
 //     も一時 dir 内のみ)。
-//   - 取得直後に lock dir 内へ owner ファイル (pid + ランダム nonce + 取得時刻) を書く (#41)。
-//     mkdir 直後の dir mtime は新しいので、owner を書くまでの間に stale 判定されることはない。
-//   - 取得失敗時は 25ms 間隔でリトライ。lock の mtime (owner ファイル、無ければ dir) が 5 秒より
-//     古ければ残骸 (クラッシュした保持者) とみなして奪取する。正常な保持区間は ms オーダーなので
-//     誤奪取しない。奪取前に「最初に読んだ nonce と現在の nonce が同一のままであること」を再確認する
+//   - 取得直後に lock dir 内へ owner ファイル (pid + hostname + ランダム nonce + 取得時刻) を
+//     書く (#41)。mkdir 直後の dir mtime は新しいので、owner を書くまでの間に stale 判定される
+//     ことはない。
+//   - 取得失敗時は 25ms 間隔でリトライ。stale 判定 (#41 再レビュー — vault-lock.ts と同じ流儀):
+//     主軸は「owner pid の死亡」。owner の hostname が自ホストと一致する時だけ pid 生存を見る。
+//       * mtime (owner ファイル、無ければ dir) が 5 秒以内 → fresh、待つ。
+//       * 5 秒超 + owner pid 死亡 → 残骸 (クラッシュした保持者)、奪取。
+//       * 5 秒超 + owner pid 生存 → 奪取しない (fn 内で停止しているだけの生きた保持者から
+//         横取りすると双方が RMW を完走して lost update になる)。例外は
+//         LOCK_PID_REUSE_MAX_MS (10 分) 超: pid 再利用の保険としての絶対上限。
+//       * owner が無い/読めない/hostname 不一致 (ネットワーク共有 state dir 等) → 従来の
+//         mtime 判定 (5 秒超で奪取可) に落とす。
+//     奪取前に「最初に読んだ nonce と現在の nonce が同一のままであること」を再確認する
 //     (read→rm 間に別プロセスが奪取済みなら nonce が変わる — 二重奪取の大半を検出。残る窓は
-//     mkdir の原子性が受け止める: 同時奪取しても mkdir に勝つのは一方だけ)。owner ファイルが
-//     無い/読めない lock は owner 不明 — stale なら削除可とする (owner 書き込み失敗や旧実装の残骸)。
+//     mkdir の原子性が受け止める: 同時奪取しても mkdir に勝つのは一方だけ)。
 //     削除は owner ファイル → dir の順。dir が空でなければ rmdir が ENOTEMPTY で失敗し retry に戻る。
 //   - release (finally) は owner ファイルの nonce が自分と一致する場合のみ削除する (#41 ABA:
 //     停止中に stale 奪取されていたら lock はもう他者のもの — 不一致/読めない場合は触らない。
 //     従来は無条件 rmdir だったため、奪取者の lock を消して第三者を進入させ lost update が再発した)。
-//   - 10 秒でタイムアウトし「lock なしで続行」する (best-effort)。セッション開始をブロックしない。
+//   - fencing (#41 再レビュー): RMW の save 直前に owner の nonce が自分のままかを再確認し、
+//     失われていたら書かずに RMW 全体を再試行する (再 acquire → fn 再実行、最大 3 回)。
+//     上限到達時は従来同等の best-effort で書く (console.error = stderr で可視化)。
+//   - 10 秒でタイムアウトし「lock なしで続行」する (best-effort、console.error で可視化)。
+//     セッション開始をブロックしない。
 const LOCK_DIRNAME = "ask-state.lock";
 const LOCK_OWNER_FILENAME = "owner.json";
 const LOCK_STALE_MS = 5_000;
 const LOCK_TIMEOUT_MS = 10_000;
 const LOCK_POLL_MS = 25;
+// 生存 pid の lock でも奪取を許す絶対上限 (pid 再利用の保険)。vault-lock.ts の staleMs と同じ流儀。
+const LOCK_PID_REUSE_MAX_MS = 600_000;
+// fencing 喪失時の RMW 再試行上限 (初回込み)。
+const RMW_MAX_ATTEMPTS = 3;
 
-// owner ファイルの nonce を読む。無い/読めない/形式不正は null (= owner 不明)。
-function readLockOwnerNonce(ownerPath) {
+// pid が生きているか (kill 0 プローブ。EPERM = 存在するが権限なし → 生存扱い)。
+// graphrag/vault-lock.ts の pidAlive の依存ゼロ複製。
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; }
+}
+
+// owner ファイルを読む。無い/読めない/形式不正は null (= owner 不明)。欠け/型不正の
+// フィールドは null (旧フォーマットの owner は hostname を持たない → mtime 判定に落ちる)。
+function readLockOwner(ownerPath) {
   try {
     const parsed = JSON.parse(readFileSync(ownerPath, "utf8"));
-    return typeof parsed?.nonce === "string" ? parsed.nonce : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      pid: typeof parsed.pid === "number" ? parsed.pid : null,
+      nonce: typeof parsed.nonce === "string" ? parsed.nonce : null,
+      hostname: typeof parsed.hostname === "string" ? parsed.hostname : null
+    };
   } catch {
     return null;
   }
+}
+
+function readLockOwnerNonce(ownerPath) {
+  return readLockOwner(ownerPath)?.nonce ?? null;
+}
+
+// stale 経過後 (age > LOCK_STALE_MS) の lock を奪取してよいか。プロトコルコメント参照。
+function lockOwnerConsideredDead(owner, ageMs) {
+  if (!owner || owner.pid === null || owner.hostname === null || owner.hostname !== os.hostname()) {
+    return true; // owner 不明 / 旧フォーマット / 別ホスト → 従来の mtime 判定 (呼び手が stale 済み)
+  }
+  if (!pidAlive(owner.pid)) return true; // 保持者は死んでいる → 残骸
+  return ageMs > LOCK_PID_REUSE_MAX_MS; // 生存 pid は原則奪わない。絶対上限だけは例外
 }
 
 // 同期 sleep。Atomics.wait はメインスレッドの素 node で使える (timer も child_process も不要)。
@@ -91,7 +132,15 @@ function sleepSync(ms) {
   }
 }
 
-function withAskStateLock(baseDir, fn) {
+// save 直前の fencing 再検証で lock 喪失を検出した時の内部シグナル (withAskStateLock が捕捉して
+// RMW 全体を再試行する)。fn 側の best-effort catch はこれだけ rethrow すること。
+class AskStateFencingLostError extends Error {
+  constructor() {
+    super("ask-state lock lost before save");
+  }
+}
+
+function acquireAskStateLock(baseDir) {
   if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
   const lockDir = path.join(baseDir, LOCK_DIRNAME);
   const ownerPath = path.join(lockDir, LOCK_OWNER_FILENAME);
@@ -105,25 +154,34 @@ function withAskStateLock(baseDir, fn) {
       try {
         // 取得の証明を即座に書く。失敗しても保持は続行 — owner 不明 lock として振る舞う
         // (stale 化したら他者に無条件奪取され、release も nonce 不一致で触らない)。
-        writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, nonce, acquired_at: Date.now() }));
+        writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, nonce, hostname: os.hostname(), acquired_at: Date.now() }));
       } catch { /* best-effort */ }
     } catch (e) {
-      if (e?.code !== "EEXIST") break; // 権限等の想定外 — lock なしで続行 (best-effort)
+      if (e?.code !== "EEXIST") {
+        // 権限等の想定外 — lock なしで続行 (best-effort)
+        console.error(`[graphrag] ask-state lock: unexpected acquire failure (${e?.code ?? e}) — continuing without lock (best-effort)`);
+        break;
+      }
       // タイムアウトは全 retry 経路 (stale 奪取の continue 含む) が通る位置で判定する。
       // 旧実装は stale 分岐の continue が判定を素通りし、消せない残骸で無限 busy loop になった。
-      if (Date.now() > deadline) break; // タイムアウト — lock なしで続行
+      if (Date.now() > deadline) {
+        // タイムアウト — lock なしで続行 (best-effort)。無音だと lost update の可能性が見えない。
+        console.error(`[graphrag] ask-state lock: timeout after ${LOCK_TIMEOUT_MS}ms (${lockDir}) — continuing without lock (best-effort, lost update possible)`);
+        break;
+      }
       try {
-        const seenNonce = readLockOwnerNonce(ownerPath); // null = owner 不明
+        const seenOwner = readLockOwner(ownerPath); // null = owner 不明
         let mtimeMs;
         try {
           mtimeMs = statSync(ownerPath).mtimeMs; // 保持者の証明の鮮度で判定
         } catch {
           mtimeMs = statSync(lockDir).mtimeMs; // owner 無し lock は dir の鮮度で判定
         }
-        if (Date.now() - mtimeMs > LOCK_STALE_MS) {
+        const age = Date.now() - mtimeMs;
+        if (age > LOCK_STALE_MS && lockOwnerConsideredDead(seenOwner, age)) {
           // 奪取直前に nonce が変わっていないか再確認 (#41: 別プロセスが先に奪取して保持中の
           // lock を消さない)。owner 不明 (null) かつ stale はそのまま削除可。
-          if (readLockOwnerNonce(ownerPath) === seenNonce) {
+          if (readLockOwnerNonce(ownerPath) === (seenOwner?.nonce ?? null)) {
             rmSync(ownerPath, { force: true });
             rmdirSync(lockDir); // 残骸を奪取 (rmdir の競合は片方が ENOENT/ENOTEMPTY → 次ループで再判定)
           }
@@ -135,10 +193,12 @@ function withAskStateLock(baseDir, fn) {
       sleepSync(LOCK_POLL_MS);
     }
   }
-  try {
-    return fn();
-  } finally {
-    if (held) {
+  return {
+    held,
+    nonce,
+    ownerPath,
+    release() {
+      if (!held) return;
       try {
         // 自分の nonce のままの時だけ解放する (#41 ABA)。不一致/読めない場合は停止中に
         // stale 奪取済み — その lock はもう他者のものなので触らない。
@@ -147,6 +207,37 @@ function withAskStateLock(baseDir, fn) {
           rmdirSync(lockDir);
         }
       } catch { /* 奪取済み等 — 触らない */ }
+    }
+  };
+}
+
+// 契約 (#41 再レビュー): fn は再実行され得る (最大 RMW_MAX_ATTEMPTS 回)。読みは必ず fn の
+// 中で行い、書き込みは渡される save(state) を通すこと。save は書き込み直前に owner の nonce が
+// 自分のままかを再検証し (fencing)、失われていたら書かずに fn ごと再試行する。上限到達時は
+// 従来同等の best-effort で書く。lock なし (タイムアウト等) の時は fencing 検証をスキップして書く。
+function withAskStateLock(baseDir, fn) {
+  for (let attempt = 1; ; attempt += 1) {
+    const lock = acquireAskStateLock(baseDir);
+    const lastAttempt = attempt >= RMW_MAX_ATTEMPTS;
+    try {
+      const save = (state) => {
+        if (lock.held && readLockOwnerNonce(lock.ownerPath) !== lock.nonce) {
+          if (!lastAttempt) throw new AskStateFencingLostError();
+          console.error("[graphrag] ask-state lock: lost before save and retries exhausted — writing best-effort (lost update possible)");
+        }
+        // tmp+rename で「壊れた JSON を読ませない」ところまで保証する
+        // (graphrag/cli-ask-state.ts の saveAskState と同じ規約)。
+        const fp = path.join(baseDir, "ask-state.json");
+        const tmp = `${fp}.tmp.${process.pid}`;
+        writeFileSync(tmp, JSON.stringify(state, null, 2));
+        renameSync(tmp, fp);
+      };
+      return fn(save);
+    } catch (e) {
+      if (e instanceof AskStateFencingLostError) continue; // 再 acquire → fn 再実行
+      throw e;
+    } finally {
+      lock.release();
     }
   }
 }
@@ -322,7 +413,8 @@ async function main() {
   // 読み → 自分の entry の選別 → 消費 (書き戻し) を lock で囲む。CLI 側の ask 書き込み
   // (bumpCallCount / recordAskHits / checkpoint-mark) と同一ファイルの RMW なので、
   // lock なしだと相互に lost update する (#29)。判定と注入は lock の外で行う (保持は短く)。
-  const consumed = withAskStateLock(path.dirname(fp), () => {
+  // fn は fencing 喪失時に再実行され得る — 読みも fn の中で毎回やり直す (#41 再レビュー)。
+  const consumed = withAskStateLock(path.dirname(fp), (save) => {
     let state;
     try {
       state = JSON.parse(readFileSync(fp, "utf8"));
@@ -355,11 +447,10 @@ async function main() {
     // 保証する (ask-state.json の saveAskState と同じ規約)。他キーは保つ。
     for (const key of keys) delete state[key];
     try {
-      const tmp = `${fp}.tmp.${process.pid}`;
-      writeFileSync(tmp, JSON.stringify(state, null, 2));
-      renameSync(tmp, fp);
-    } catch {
-      // 書き戻せなくても復元判定自体は続行する (best-effort な消費)。
+      save(state); // save 直前 fencing 込み (lock 喪失なら throw → fn ごと再試行)
+    } catch (e) {
+      if (e instanceof AskStateFencingLostError) throw e; // RMW 再試行のシグナルは握り潰さない
+      // それ以外の IO 失敗: 書き戻せなくても復元判定自体は続行する (best-effort な消費)。
     }
     return { matched, legacyEntry };
   });
