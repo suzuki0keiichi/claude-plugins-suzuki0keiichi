@@ -806,11 +806,11 @@ test("embedNodesIncremental: documentPrefix はバッチの各 miss テキスト
 
 // ── P3-G: indexWriteWouldRegress の seqVerdict リファクタリング ─────────────
 
-test("P3-G: indexWriteWouldRegress no-vaultDir path (防御コード) — existing.seq > payload.seq は退行とみなす", async () => {
+test("R4: indexWriteWouldRegress no-vaultDir path — graph 読み不可なので seq に関係なく後勝ち", async () => {
   const existing = { snapshot_seq: 5, graph_fingerprint: "a".repeat(64), rows: [] };
   const payload = { snapshot_seq: 2, graph_fingerprint: "b".repeat(64), rows: [] };
-  assert.equal(await indexWriteWouldRegress(payload, existing), true,
-    "vaultDir 無しでも seq 比較で退行を検出する (防御パス)");
+  assert.equal(await indexWriteWouldRegress(payload, existing), false,
+    "vaultDir 無し → graph で世代を証明できない → 後勝ち");
 });
 
 test("P3-G: indexWriteWouldRegress no-vaultDir path — existing.seq <= payload.seq は後勝ち", async () => {
@@ -831,21 +831,25 @@ test("P3-G: indexWriteWouldRegress no-vaultDir path — seq が片方欠落な�
     "payload.seq 無し → 比較不能 → 後勝ち");
 });
 
-test("P3-G: indexWriteWouldRegress catch fallback — 正常な seq 比較 (両方非 0) で退行検出", async () => {
-  // 存在しない vaultDir → importVault が throw → catch path 発火
+test("R4: indexWriteWouldRegress catch fallback — graph 読み失敗時は seq に関係なく後勝ち", async () => {
   const existing = { snapshot_seq: 8, graph_fingerprint: "a".repeat(64), rows: [] };
   const payload = { snapshot_seq: 3, graph_fingerprint: "b".repeat(64), rows: [] };
-  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-p3g-seq"),
-    true, "catch fallback でも seq 8 > 3 は退行とみなす");
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-r4-seq"),
+    false, "graph 読み失敗 → 世代同一性を証明できない → 後勝ち");
 });
 
-test("P3-G: indexWriteWouldRegress catch fallback — cache 再初期化後 (payload.seq = 0) は誤ブロックしない", async () => {
-  // cache 再初期化後: payload は新 seq 空間 (seq = 0)、existing は旧 seq 空間 (seq = 10)。
-  // 存在しない vaultDir → catch path 発火。
-  // 現行コード: seqVerdict = (10 > 0) = true → 書き込みをブロック (誤判定)。
-  // 修正後: payload.seq が 0 なら seq は信頼できない → false (後勝ちに倒す)。
+test("R4: indexWriteWouldRegress catch fallback — cache 再初期化後 (payload.seq = 0) は後勝ち", async () => {
   const existing = { snapshot_seq: 10, graph_fingerprint: "a".repeat(64), rows: [] };
   const payload = { snapshot_seq: 0, graph_fingerprint: "b".repeat(64), rows: [] };
-  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-p3g-reinit"),
-    false, "cache 再初期化後 (payload.seq = 0) は seq を信頼せず後勝ちに倒す");
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-r4-reinit"),
+    false, "graph 読み失敗 → 後勝ち");
+});
+
+test("R4: indexWriteWouldRegress catch fallback — cache 再初期化後 seq > 0 (payload.seq = 2) でも後勝ち", async () => {
+  // R3 指摘: payload.seq === 0 の特別扱いだけでは 2 回目以降 (seq=2,4,...) を捕まえない。
+  // graph 読み不可 → seq 比較自体が安全でない → 一律後勝ち。
+  const existing = { snapshot_seq: 10, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 2, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-r4-seq2"),
+    false, "graph 読み失敗 + 新 epoch seq=2 vs 旧 epoch seq=10 → 後勝ち (恒久 skip しない)");
 });

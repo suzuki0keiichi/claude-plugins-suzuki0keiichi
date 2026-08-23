@@ -20,7 +20,8 @@ import {
   chmodSync,
   unlinkSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import os from "node:os";
+const { tmpdir } = os;
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
 import {
@@ -409,7 +410,7 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   assert.equal(began % 2, 1);
   writeFileSync(
     path.join(cacheDir, "vault.lock"),
-    JSON.stringify({ pid: deadPid(), ts: Date.now() }) // 死んだ writer のロック残骸
+    JSON.stringify({ pid: deadPid(), ts: Date.now(), hostname: os.hostname() }) // 死んだ writer のロック残骸
   );
   const torn = {
     generated_at: FIXED_TS,

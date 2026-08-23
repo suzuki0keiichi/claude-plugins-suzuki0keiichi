@@ -23,15 +23,14 @@ function isStale(lockPath: string, staleMs: number, graceMs: number): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // metadata が正常に読めた場合: cli-ask-state.ts の lockOwnerConsideredDead と同じ流儀。
-    // PID 死亡なら即座に stale。
-    if (!pidAlive(info.pid)) return true;
-    // PID alive + hostname が既知かつ同一ホスト → 生きた保持者。奪取しない。
-    // ただし staleMs 超過は PID 再利用の保険としての大きな絶対上限 (既定 10 分) にのみ使う。
+    // hostname 一致時だけ PID 生存確認を使う — pidAlive はローカルの PID テーブルを
+    // 見るため、別ホストの PID には使えない (存在しない → 即 stale と誤判定する)。
     if (info.hostname && info.hostname === os.hostname()) {
+      if (!pidAlive(info.pid)) return true;
+      // PID alive + 同一ホスト → staleMs は PID 再利用への保険の絶対上限 (既定 10 分)。
       return Date.now() - info.ts > staleMs;
     }
-    // hostname 不明 (旧フォーマット) / 不一致 → 従来の mtime + staleMs 判定にフォールバック。
+    // hostname 不一致 / 不明 (旧フォーマット) → mtime + staleMs 判定にフォールバック。
     try {
       const mtimeMs = statSync(lockPath).mtimeMs;
       return Date.now() - mtimeMs > staleMs;

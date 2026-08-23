@@ -23,13 +23,25 @@ test("withVaultLock は同一 stateDir の書きを直列化する", async () =>
   assert.ok(serial, `not serialized: ${order.join(",")}`);
 });
 
-test("stale ロック（死んだ PID）は奪える", async () => {
+test("stale ロック（同一ホスト・死んだ PID）は奪える", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-"));
   const { writeFileSync } = await import("node:fs");
-  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: 0 }));
+  const os = await import("node:os");
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: 0, hostname: os.hostname() }));
   let ran = false;
   await withVaultLock(stateDir, () => { ran = true; }, { staleMs: 1000 });
   assert.equal(ran, true);
+});
+
+test("別ホストの新鮮なロックはローカル PID 不在でも即奪取しない (mtime + staleMs で裁定)", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-remote-"));
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: Date.now(), hostname: "other-host.example.com" }));
+  await assert.rejects(
+    () => withVaultLock(stateDir, () => {}, { staleMs: 600_000, timeoutMs: 150, pollMs: 20 }),
+    /timeout/i,
+    "別ホストの PID がローカルに無くても mtime が新鮮なら奪わず待つ"
+  );
 });
 
 test("生きた PID のロックは年齢だけでは奪わない (旧 30s 閾値相当でも待って timeout)", async () => {
