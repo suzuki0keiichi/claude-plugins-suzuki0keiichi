@@ -155,7 +155,7 @@ function acquireAskStateLock(baseDir) {
         // 取得の証明を即座に書く。失敗しても保持は続行 — owner 不明 lock として振る舞う
         // (stale 化したら他者に無条件奪取され、release も nonce 不一致で触らない)。
         writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, nonce, hostname: os.hostname(), acquired_at: Date.now() }));
-      } catch { /* best-effort */ }
+      } catch (e) { console.error(`[graphrag] ask-state lock: owner write failed (${e?.code ?? e}) — lock held without identity`); }
     } catch (e) {
       if (e?.code !== "EEXIST") {
         // 権限等の想定外 — lock なしで続行 (best-effort)
@@ -206,7 +206,7 @@ function acquireAskStateLock(baseDir) {
           rmSync(ownerPath, { force: true });
           rmdirSync(lockDir);
         }
-      } catch { /* 奪取済み等 — 触らない */ }
+      } catch (e) { if (e?.code !== "ENOENT" && e?.code !== "ENOTEMPTY") console.error(`[graphrag] ask-state lock: release failed (${e?.code ?? e})`); }
     }
   };
 }
@@ -503,8 +503,8 @@ async function main() {
   );
 }
 
-main().catch(() => {
-  // 入力不正 / IO 失敗等 — セッション開始をブロックせず黙って終了。
+main().catch((e) => {
+  console.error(`[graphrag] clear-restore: ${e?.message ?? e}`);
 }).finally(() => {
   // process.exit() は使わない: macOS では pipe への stdout 書き込みが非同期なので、
   // exit が emit の flush に先行すると注入 JSON が途中で切れる (予約キーは消費済みのため

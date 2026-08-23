@@ -350,8 +350,9 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
       () => importVault(vaultDir)
     );
     return vectorIndexMatchesGraph(data, existing);
-  } catch {
-    return seqFallback(); // 現 graph を読めない → seq fallback → seq 信頼不可なら後勝ち
+  } catch (e) {
+    console.error(`[warn] indexWriteWouldRegress: vault read failed, falling back to seq comparison: ${e instanceof Error ? e.message : e}`);
+    return seqFallback();
   }
 }
 
