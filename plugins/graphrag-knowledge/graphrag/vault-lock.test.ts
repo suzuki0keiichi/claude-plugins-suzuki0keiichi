@@ -192,3 +192,15 @@ test("readVaultConsistent は生きた writer がロック保持中なら bypass
     /timeout/i
   );
 });
+
+test("readVaultConsistent は別ホストの writer (seq 奇数 + ローカルに存在しない PID) を crash と誤認しない", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vseq-remote-"));
+  const { writeFileSync } = await import("node:fs");
+  beginVaultWrite(stateDir); // seq 奇数
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: Date.now(), hostname: "other-host.example.com" }));
+  await assert.rejects(
+    () => readVaultConsistent(stateDir, () => "DATA", { timeoutMs: 150, pollMs: 10 }),
+    /timeout/i,
+    "別ホストの PID がローカルに無くても crash bypass せず待つ"
+  );
+});
