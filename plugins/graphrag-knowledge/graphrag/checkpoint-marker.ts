@@ -20,7 +20,6 @@ import {
   CHECKPOINT_TTL_MS,
   checkpointStateKey,
   loadAskState,
-  saveAskState,
   withAskStateLock,
   type CheckpointStateEntry
 } from "./cli-ask-state.ts";
@@ -178,10 +177,11 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
   const stateKey = checkpointStateKey(identity);
   // 他キー (ask 連打カウント / 他 session の checkpoint) を保ったまま自分のキーだけ差し替える。
   // load→save の RMW は ask 書き込みやフックの consume と競合し得るので lock で囲む (#29)。
-  withAskStateLock(stateDir, () => {
+  // 書き込みは渡される save 経由 (save 直前 fencing — lock を失っていたら fn ごと再試行される)。
+  withAskStateLock(stateDir, (save) => {
     const state = loadAskState(stateDir);
     state[stateKey] = entry;
-    saveAskState(stateDir, state);
+    save(state);
   });
 
   const statePath = path.join(stateDir, "ask-state.json");

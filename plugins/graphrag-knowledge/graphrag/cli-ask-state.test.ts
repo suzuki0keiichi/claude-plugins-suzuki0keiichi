@@ -3,7 +3,7 @@ import test from "node:test";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, utimesSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fingerprintQuestion, bumpCallCount, loadAskState, saveAskState, gcAskState, recordAskHits, readRecentHitIds, resolveAskStateDir, checkpointStateKey, withAskStateLock, CHECKPOINT_STATE_KEY } from "./cli-ask-state.ts";
@@ -383,7 +383,12 @@ test("#41 ABA: 停止中に stale 奪取された自分の lock の release が�
   const lockDir = path.join(dir, LOCK_DIRNAME);
   try {
     withAskStateLock(dir, () => {
-      // A (このプロセス) が取得後 5 秒超停止したことにする: lock の mtime を過去へ偽装。
+      // A (このプロセス) が取得後 5 秒超停止し、そのままプロセスごと死んだことにする:
+      // owner の pid を確実に死んでいる値へ差し替え (nonce は A のまま保つ)、mtime を過去へ偽装。
+      // 生存 owner からは奪取しない (#41 再レビュー) ため、pid を殺さないと B は奪取できない。
+      const ownerFp = path.join(lockDir, LOCK_OWNER_FILENAME);
+      const owner = JSON.parse(readFileSync(ownerFp, "utf8"));
+      writeFileSync(ownerFp, JSON.stringify({ ...owner, pid: 99999999 }));
       backdateLock(lockDir, 10_000);
       // B (子プロセス) が stale 判定で A の lock を奪取し、保持したまま作業中。
       acquireAndHoldChild(dir);
@@ -437,6 +442,140 @@ test("#41 stale 奪取: owner ファイル無し (owner 不明) の残骸 lock �
     mkdirSync(lockDir, { recursive: true });
     backdateLock(lockDir, 60_000);
     assert.equal(bumpCallCount("q-stale-bare", dir), 1, "owner 不明でも stale なら奪取できる");
+    assert.ok(!existsSync(lockDir), "奪取後に自分の lock として解放される");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #41 再レビュー: 生存 owner 不奪取 (pid 生存確認) + save 直前 fencing ──────
+
+// 子プロセス: lock を取得したまま「生存したまま」holdMs 停止し (レビュアー実機再現:
+// fn 内の長時間停止)、その後 "slow question" を +1 して save し、正常に解放する。
+// 取得直後に marker ファイルを書いて親へ「保持開始」を知らせる。
+// (save ?? saveAskState) は red 段階 (save 引数が無い旧実装) でも走らせるための互換。
+const holdThenBumpChild = (dir: string, holdMs: number) =>
+  execFileP(process.execPath, [
+    ...CHILD_FLAGS,
+    "-e",
+    `const m = await import(process.argv[1]);\n` +
+    `const { writeFileSync } = await import("node:fs");\n` +
+    `const path = (await import("node:path")).default;\n` +
+    `const dir = process.argv[2], holdMs = Number(process.argv[3]);\n` +
+    `m.withAskStateLock(dir, (save) => {\n` +
+    `  const s = m.loadAskState(dir);\n` +
+    `  writeFileSync(path.join(dir, "holder-acquired"), "1");\n` +
+    `  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, holdMs);\n` +
+    `  const k = m.fingerprintQuestion("slow question");\n` +
+    `  s[k] = { count: (s[k]?.count ?? 0) + 1, last_at: Date.now() };\n` +
+    `  (save ?? ((st) => m.saveAskState(dir, st)))(s);\n` +
+    `});\n`,
+    SRC_URL,
+    dir,
+    String(holdMs)
+  ]);
+
+test("#41 生存 owner: 保持プロセスが生きている間は stale 閾値超過でも奪取せず、増分が失われない", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-alive-owner-"));
+  try {
+    // A (子プロセス): lock 内で 6.5 秒停止 (LOCK_STALE_MS=5s 超) してから +1 して解放。
+    const child = holdThenBumpChild(dir, 6_500);
+    const marker = path.join(dir, "holder-acquired");
+    const t0 = Date.now();
+    while (!existsSync(marker)) {
+      if (Date.now() - t0 > 10_000) throw new Error("holder が lock を取得しない");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // B (このプロセス): stale 閾値を超えても A が生きている限り奪取せず、解放を待って積む。
+    // 旧実装は 5 秒で奪取し、A の save が B の増分を打ち消して +1 が 1 回分消えた
+    // (レビュアー実機再現: 双方が load→modify→save を完走する)。
+    const n = bumpCallCount("slow question", dir);
+    await child;
+    assert.equal(n, 2, "B は生存 owner A から奪取せず、A の増分の上に積む");
+    assert.equal(loadAskState(dir)[fingerprintQuestion("slow question")]?.count, 2, "増分が失われない");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 fencing: save 直前に lock を失っていたら書かずに RMW 全体を再試行する", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-fencing-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    let calls = 0;
+    withAskStateLock(dir, (save) => {
+      calls += 1;
+      const s = loadAskState(dir);
+      if (calls === 1) {
+        // 奪取者が stale 奪取 → 自分の RMW → 解放まで済ませた状況を模擬 (lock は丸ごと消えている)。
+        rmSync(lockDir, { recursive: true, force: true });
+        s["fence001"] = { count: 999, last_at: Date.now() }; // 書かれてはいけない毒値
+      } else {
+        assert.equal(loadAskState(dir)["fence001"], undefined, "attempt 1 の save は抑止されている");
+        s["fence001"] = { count: 1, last_at: Date.now() };
+      }
+      save(s);
+    });
+    assert.equal(calls, 2, "fn が再実行される (再 acquire → fn 再実行)");
+    assert.equal((loadAskState(dir)["fence001"] as { count: number } | undefined)?.count, 1, "再試行の値へ収束する");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 fencing: 再試行上限 (3 回) 到達時は従来どおり best-effort で書く", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-fencing-cap-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    let calls = 0;
+    withAskStateLock(dir, (save) => {
+      calls += 1;
+      const s = loadAskState(dir);
+      rmSync(lockDir, { recursive: true, force: true }); // 毎回 lock を失わせる
+      s["fence002"] = { count: calls, last_at: Date.now() };
+      save(s);
+    });
+    assert.equal(calls, 3, "有限回 (3 回) で打ち切る");
+    assert.equal(
+      (loadAskState(dir)["fence002"] as { count: number } | undefined)?.count,
+      3,
+      "上限到達時は書く (従来同等の best-effort 続行)"
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 pid 再利用の保険: 生存 pid の lock でも絶対上限 (10 分) 超過なら奪取できる", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-pid-reuse-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      path.join(lockDir, LOCK_OWNER_FILENAME),
+      // pid はこのプロセス自身 = 確実に生存。それでも 10 分超の lock は奪取できる (pid 再利用の保険)。
+      JSON.stringify({ pid: process.pid, nonce: "ancient-alive", hostname: hostname(), acquired_at: Date.now() - 11 * 60_000 })
+    );
+    backdateLock(lockDir, 11 * 60_000);
+    assert.equal(bumpCallCount("q-ancient-alive", dir), 1, "絶対上限超過は生存 pid でも奪取して RMW が完了する");
+    assert.ok(!existsSync(lockDir), "奪取後に自分の lock として解放される");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#41 hostname 不一致 (ネットワーク共有 state dir 等) は従来の mtime 判定に落ちて奪取できる", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "askstate-other-host-"));
+  const lockDir = path.join(dir, LOCK_DIRNAME);
+  try {
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      path.join(lockDir, LOCK_OWNER_FILENAME),
+      // pid はこのマシンでは生存しているが、別ホストの owner なので pid 判定は使えない。
+      JSON.stringify({ pid: process.pid, nonce: "other-host", hostname: "other-host.invalid", acquired_at: Date.now() - 60_000 })
+    );
+    backdateLock(lockDir, 60_000);
+    assert.equal(bumpCallCount("q-other-host", dir), 1, "mtime 判定 (5 秒超) で奪取できる");
     assert.ok(!existsSync(lockDir), "奪取後に自分の lock として解放される");
   } finally {
     rmSync(dir, { recursive: true, force: true });

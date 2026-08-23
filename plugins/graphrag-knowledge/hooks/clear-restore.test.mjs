@@ -665,3 +665,63 @@ test("#41 stale lock (owner ファイル無し・owner 不明の残骸) もフ�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --- #41 再レビュー: 生存 owner の lock は奪取しない (pid 生存確認) ---
+
+// 子プロセス: フックと同一プロトコルで lock を取得し、「生存したまま」holdMs 停止してから
+// state に増分を書いて正常に解放する (レビュアー実機再現の holder 側)。依存ゼロ方針に合わせ
+// graphrag/*.ts は import せず、素の fs でプロトコルを直接実装する。
+const aliveHolderChild = (cacheDir, fp, holdMs) =>
+  execFileP(process.execPath, [
+    "--input-type=module",
+    "-e",
+    `const { mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, rmdirSync } = await import("node:fs");\n` +
+    `const { hostname } = await import("node:os");\n` +
+    `const path = (await import("node:path")).default;\n` +
+    `const cacheDir = process.argv[1], fp = process.argv[2], holdMs = Number(process.argv[3]);\n` +
+    `const lockDir = path.join(cacheDir, "ask-state.lock");\n` +
+    `mkdirSync(lockDir, { recursive: true });\n` +
+    `writeFileSync(path.join(lockDir, "owner.json"), JSON.stringify({ pid: process.pid, nonce: "holder-nonce", hostname: hostname(), acquired_at: Date.now() }));\n` +
+    `const state = JSON.parse(readFileSync(fp, "utf8"));\n` +
+    `writeFileSync(path.join(cacheDir, "holder-acquired"), "1");\n` +
+    `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, holdMs);\n` +
+    `state["holderbump"] = { count: 1, last_at: Date.now() };\n` +
+    `const tmp = fp + ".tmp.holder";\n` +
+    `writeFileSync(tmp, JSON.stringify(state, null, 2));\n` +
+    `renameSync(tmp, fp);\n` +
+    `rmSync(path.join(lockDir, "owner.json"), { force: true });\n` +
+    `rmdirSync(lockDir);\n`,
+    cacheDir,
+    fp,
+    String(holdMs)
+  ]);
+
+test("#41 生存 owner の lock は stale 閾値超過でも奪取せず、解放を待ってから consume する", async () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const cacheDir = path.join(root, ".graphrag", "cache");
+    const fp = writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "生存保持後の一手" })
+    });
+    // holder (子プロセス) が lock 内で 6.5 秒停止 (stale 閾値 5 秒超) してから増分を書いて解放する。
+    const child = aliveHolderChild(cacheDir, fp, 6_500);
+    const marker = path.join(cacheDir, "holder-acquired");
+    const t0 = Date.now();
+    while (!existsSync(marker)) {
+      if (Date.now() - t0 > 10_000) throw new Error("holder が lock を取得しない");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // 旧実装はここで 5 秒後に奪取して先に consume し、holder の書き戻し (checkpoint 入りの
+    // 古い state) が checkpoint を復活させて one-shot を壊した (lost update)。
+    const out = runHook({ source: "clear", cwd: root });
+    await child;
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /生存保持後の一手/, "holder 解放後に復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "checkpoint は一度だけ消費され、holder の書き戻しで復活しない");
+    assert.equal(onDisk["holderbump"]?.count, 1, "holder の増分も失われない");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

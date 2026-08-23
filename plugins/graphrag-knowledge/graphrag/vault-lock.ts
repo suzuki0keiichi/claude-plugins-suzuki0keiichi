@@ -3,7 +3,12 @@ import path from "node:path";
 
 type LockInfo = { pid: number; ts: number };
 
-function pidAlive(pid: number): boolean {
+/**
+ * pid が生きているか (kill 0 プローブ。EPERM = 存在するが権限なし → 生存扱い)。
+ * cli-ask-state.ts の lock の stale 判定も共有する (state dir は機械ローカル前提 —
+ * cli-env.ts 参照 — なので pid ベース判定が成立する)。
+ */
+export function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
 }
 
