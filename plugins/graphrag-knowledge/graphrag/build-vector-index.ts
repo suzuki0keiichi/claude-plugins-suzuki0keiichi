@@ -336,7 +336,10 @@ export async function indexWriteWouldRegress(payload: any, existing: any, vaultD
   // が恒久にブロックする (payload.seq===0 だけの特別扱いでは 2 回目以降を捕まえない)。
   // 索引は二次生成物なので後勝ちが安全側: 仮に古い builder が上書きしても、次の
   // vectorIndexMatchesGraph (読み側) が不一致を検出して再 build する。
-  if (!vaultDir) return false;
+  if (!vaultDir) {
+    console.error("[debug] indexWriteWouldRegress: no vaultDir, allowing write (後勝ち)");
+    return false;
+  }
   try {
     const { data } = await readVaultConsistentWithSeq(
       cacheDirForVault(vaultDir),
