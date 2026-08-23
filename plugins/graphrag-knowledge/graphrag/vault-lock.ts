@@ -101,9 +101,11 @@ function writerCrashed(stateDir: string): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // isStale と同じ流儀: hostname 不一致/不明なら pidAlive は使えない → 生存扱い (保守的)。
-    if (info.hostname && info.hostname !== os.hostname()) return false;
-    return !pidAlive(info.pid);
+    // isStale と同じ流儀: hostname 一致時だけ PID 検査。不一致/不明は生存扱い (保守的)。
+    if (info.hostname && info.hostname === os.hostname()) {
+      return !pidAlive(info.pid);
+    }
+    return false;
   } catch {
     return false; // 生成途中の空/壊れロック → 別 writer が取得中かもしれない → 待つ
   }
