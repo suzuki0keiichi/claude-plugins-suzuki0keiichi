@@ -154,6 +154,17 @@ test("readVaultConsistent は crash した writer (seq 奇数 + 同一ホスト�
   assert.ok(Date.now() - start < 1000, "timeout を待たず速やかに回復する (永久に詰まらない)");
 });
 
+test("readVaultConsistent は旧形式 lock (hostname なし) + 死んだ PID でも crash recovery する", async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), "vseq-oldlock-"));
+  const { writeFileSync } = await import("node:fs");
+  beginVaultWrite(stateDir);
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: Date.now() }));
+  const start = Date.now();
+  const got = await readVaultConsistent(stateDir, () => "DATA", { timeoutMs: 5000, pollMs: 5 });
+  assert.equal(got, "DATA", "旧形式 lock でも crash 回復する");
+  assert.ok(Date.now() - start < 1000, "timeout を待たず速やかに回復する");
+});
+
 test("withVaultLock は hostname を lock ファイルに書き込む (P2-C)", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vlock-host-"));
   const { readFileSync } = await import("node:fs");
