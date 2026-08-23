@@ -105,12 +105,20 @@ test("版印は書込前後で偶数→奇数→偶数に進む", () => {
 
 test("readVaultConsistent は書込中スナップショットを返さず最終値を返す", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vseq-"));
+  const { writeFileSync, unlinkSync } = await import("node:fs");
   let store = "v0";
+  const lockPath = path.join(stateDir, "vault.lock");
   const writer = (async () => {
+    // 実 writer と同じく lock 保持下で書込窓を開く (applyMutationToVault は withVaultLock
+    // 内で beginVaultWrite する)。lock 不在の奇数 seq は「静的な crash residue」として
+    // 読んで良い、が現在の判定 (writerCrashed) — lock を持たない生きた writer は実運用に
+    // 存在しないので、生き writer の再現には lock が必須。
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
     const b = beginVaultWrite(stateDir);
     await new Promise((r) => setTimeout(r, 20));
     store = "v1";
     endVaultWrite(stateDir, b);
+    unlinkSync(lockPath);
   })();
   const got = await readVaultConsistent(stateDir, () => store, { pollMs: 5 });
   await writer;

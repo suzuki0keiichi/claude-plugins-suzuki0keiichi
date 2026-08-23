@@ -12,6 +12,8 @@ import {
   readVaultWriteJournal,
   writeVaultWriteJournal,
   vaultWriteJournalPath,
+  sha256Hex,
+  type VaultWriteJournalEntry,
 } from "./mutate-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
@@ -1194,6 +1196,18 @@ test("precheck/premise_candidates: GRAPHRAG_STATE_DIR 設定時、共有解決�
 
 /** gitInitVaultWithDecision の graph で decision:s:a の summary だけ差し替えた canonical
  *  serialization を返す。round-trip する編集 (= writeVaultDelta が触らない編集) を作るため。 */
+/** crash 再現用: いま worktree に書いてある内容をそのまま intended として打刻した
+ * journal エントリ (敵対レビュー指摘B の {path, sha256} 形式)。 */
+function journalEntriesFromWorktree(vault: string, rels: string[]): VaultWriteJournalEntry[] {
+  return rels.map((rel) => {
+    const abs = path.join(vault, rel);
+    return {
+      path: rel.split(path.sep).join("/"),
+      sha256: existsSync(abs) ? sha256Hex(readFileSync(abs, "utf8")) : null,
+    };
+  });
+}
+
 function editedDecisionAContent(summary: string): string {
   const g = {
     generated_at: FIXED_TS,
@@ -1412,7 +1426,8 @@ test("PR#41: crash 痕跡 (seq 奇数) + write journal 検出時は journal 記�
   assert.equal(began % 2, 1, "前提: 書込窓が開いたまま (seq 奇数)");
   // 指摘1: journal には自分の書込窓の奇数 seq が打刻されている (実 writer は begin が
   // 返した値を打刻する)。回復側は「journal の seq === 観測した奇数 seq」の時だけ使う。
-  writeVaultWriteJournal(cacheDir, [path.join("Decision", "A.md")], began);
+  // 敵対レビュー指摘B: エントリは {path, sha256(intended)} — torn 内容のハッシュを打刻。
+  writeVaultWriteJournal(cacheDir, [{ path: "Decision/A.md", sha256: sha256Hex(tornA) }], began);
 
   const res = await applyMutationToVault({
     plan: decisionPlan("rec41", "recovery mutation absorbs torn file"),
@@ -1642,7 +1657,7 @@ test("再レビュー指摘3: crash 回復は journal 記載の torn path だけ
     !tornDelta.written.includes(path.join("Decision", "A.md")),
     "前提: A は crash した writer に触られていない (利用者 WIP のみで dirty)"
   );
-  writeVaultWriteJournal(cacheDir, tornDelta.written, began);
+  writeVaultWriteJournal(cacheDir, journalEntriesFromWorktree(vault, tornDelta.written), began);
 
   const res = await applyMutationToVault({
     plan: decisionPlan("rec3", "recovery mutation absorbs only journaled paths"),
@@ -1675,7 +1690,7 @@ test("再レビュー指摘3: crash 回復は journal 記載の torn path だけ
 test("再レビュー指摘3: write journal は writeDelta の前に永続化され (触接予定パス + 書込窓の seq 打刻)、commit 成功後に消える", async () => {
   const { vault, stateDir } = gitInitVaultWithDecision();
   const cacheDir = path.join(stateDir, "cache");
-  let journalAtWrite: { paths: string[]; seq: number } | null = null;
+  let journalAtWrite: { entries: VaultWriteJournalEntry[]; seq: number } | null = null;
   let seqAtWrite: number | null = null;
   // writeDelta 実行時点 (= ここで kill されると torn になる瞬間) に journal が既に
   // ディスクへ永続化されていることを観測する。
@@ -1698,9 +1713,14 @@ test("再レビュー指摘3: write journal は writeDelta の前に永続化さ
   });
   assert.equal(res.applied, true);
   assert.ok(journalAtWrite, "journal は writeDelta の前にディスクへ永続化されている");
-  assert.ok(
-    journalAtWrite!.paths.includes(path.join("Decision", "J41.md")),
-    "これから書く予定のパスが journal に載っている"
+  const j41 = journalAtWrite!.entries.find((e) => e.path === "Decision/J41.md");
+  assert.ok(j41, "これから書く予定のパスが journal に載っている");
+  // 敵対レビュー指摘B: エントリは書く予定の内容の sha256 を intended として打刻している
+  // (回復側は現 worktree 内容との一致でだけ吸収を認める)。
+  assert.equal(
+    j41!.sha256,
+    sha256Hex(readFileSync(path.join(vault, "Decision", "J41.md"), "utf8")),
+    "intended sha256 は実際に書かれた内容と一致する"
   );
   // 指摘1: journal は自分の書込窓の奇数 seq を打刻している。crash 後の回復側は
   // この打刻と観測 seq の一致で「今回の crash に属する journal」だけを識別する。
@@ -1729,11 +1749,19 @@ test("指摘1: 完了済み writer の残留 journal は次 writer の begin 直
   // 完了済み writer W1: 奇数窓 o1 で journal (Decision/A.md 記載) を書き、endVaultWrite
   // (seq 偶数化) の後・journal 削除の前に hard crash した (旧 finally 順の境界 crash)。
   // journal は raw で書く: W1 の窓 o1 が打刻された journal がディスクに残る状況の再現。
+  // 内容ハッシュ (指摘B) は現 worktree の userWip と一致させておく — この誤認を塞ぐのが
+  // 内容検証ではなく seq 打刻突合であることをこのテストで固定する。
   const o1 = beginVaultWrite(cacheDir);
   assert.equal(o1 % 2, 1);
   writeFileSync(
     vaultWriteJournalPath(cacheDir),
-    JSON.stringify({ version: 2, pid: 999999, ts: Date.now(), seq: o1, paths: ["Decision/A.md"] })
+    JSON.stringify({
+      version: 3,
+      pid: 999999,
+      ts: Date.now(),
+      seq: o1,
+      entries: [{ path: "Decision/A.md", sha256: sha256Hex(userWip) }],
+    })
   );
   endVaultWrite(cacheDir, o1); // seq 偶数 + journal 残留 (境界 crash)
 

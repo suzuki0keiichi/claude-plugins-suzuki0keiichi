@@ -521,8 +521,12 @@ test("issue #27: build は writer 進行中 (seq 奇数) に torn snapshot を�
     const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeOld], edges: [] });
     const cacheDir = cacheDirForVault(vaultDir);
     mkdirSync(cacheDir, { recursive: true });
-    // writer 進行中を模擬 (vault-lock.test.ts の手法): seq を奇数にしてから、
-    // 少し遅れて vault を NEW に書き換えて seq を閉じる。
+    // writer 進行中を模擬 (vault-lock.test.ts の手法): 実 writer と同じく lock 保持下で
+    // seq を奇数にしてから、少し遅れて vault を NEW に書き換えて seq を閉じる。lock 不在の
+    // 奇数 seq は「静的な crash residue」として読まれる (vault-lock writerCrashed —
+    // 敵対レビュー指摘A) ため、生き writer の再現には生きた PID の lock が必須。
+    const lockPath = path.join(cacheDir, "vault.lock");
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
     const began = beginVaultWrite(cacheDir);
     const writer = (async () => {
       await new Promise((r) => setTimeout(r, 30));
@@ -532,6 +536,7 @@ test("issue #27: build は writer 進行中 (seq 奇数) に torn snapshot を�
         writeFileSync(abs, f.content);
       }
       endVaultWrite(cacheDir, began);
+      rmSync(lockPath, { force: true });
     })();
     const payload = await buildVectorIndex({ vault: vaultDir }, { provider: fakeProvider(3) });
     await writer;
