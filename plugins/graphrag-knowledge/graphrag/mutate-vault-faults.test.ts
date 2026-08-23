@@ -13,6 +13,7 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
   readdirSync,
   statSync,
   existsSync,
@@ -29,6 +30,7 @@ import {
   vaultHead,
   writeVaultWriteJournal,
   vaultWriteJournalPath,
+  sha256Hex,
 } from "./mutate-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { validateGraph } from "./schema.ts";
@@ -436,7 +438,15 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   // (再レビュー指摘3: 生成集合全体を吸収すると crash 以前からの利用者 WIP まで巻き込む)。
   // 3回目レビュー指摘1: journal には書込窓の奇数 seq (began) が打刻され、回復側は
   // 「打刻 seq === 観測した奇数 seq」の一致で今回の crash に属する journal と識別する。
-  writeVaultWriteJournal(cacheDir, delta.written, began);
+  // 敵対レビュー指摘B: エントリは {path, sha256(intended)} — 書いた内容のハッシュを打刻。
+  writeVaultWriteJournal(
+    cacheDir,
+    delta.written.map((rel) => ({
+      path: rel.split(path.sep).join("/"),
+      sha256: sha256Hex(readFileSync(path.join(vault, rel), "utf8")),
+    })),
+    began
+  );
   assert.ok(existsSync(vaultWriteJournalPath(cacheDir)), "前提: crash 時点で write journal が在る");
 
   // (a) fsck は torn write を ERROR + 復旧ヒントで検知する。

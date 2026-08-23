@@ -218,7 +218,11 @@ test("loadGraph honors the seqlock stamp (odd→consistent read times out, even�
     writeFileSync(abs, f.content);
   }
   try {
-    // 書込中に固定 (begin のみ、対応する end 無し → seq は奇数のまま)。
+    // 書込中に固定: 実 writer と同じく lock 保持下で begin (対応する end 無し → seq は
+    // 奇数のまま)。lock 不在の奇数 seq は「静的な crash residue」として読まれる
+    // (vault-lock writerCrashed — 敵対レビュー指摘A) ため、生き writer の再現には
+    // 生きた PID の lock が必須。
+    writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: process.pid, ts: Date.now() }));
     const odd = beginVaultWrite(stateDir);
     // 奇数なら loadGraph 自身が短いタイムアウトで諦める (torn を返さない)。
     // 打刻を尊重していなければここで 2 ノードを返してしまい reject されない。
@@ -227,8 +231,9 @@ test("loadGraph honors the seqlock stamp (odd→consistent read times out, even�
       /readVaultConsistent timeout/
     );
 
-    // 完了させる (seq を偶数へ): begin が返した奇数値 +1 = 偶数 = 完了。
+    // 完了させる (seq を偶数へ): begin が返した奇数値 +1 = 偶数 = 完了。lock も解放。
     endVaultWrite(stateDir, odd);
+    rmSync(path.join(stateDir, "vault.lock"), { force: true });
     // 偶数なら loadGraph は通常どおりノードを返す。
     const graph = await loadGraph(vaultDir);
     assert.equal(graph.nodes.length, 2);

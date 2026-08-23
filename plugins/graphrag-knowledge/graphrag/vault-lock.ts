@@ -70,13 +70,18 @@ export function endVaultWrite(stateDir: string, beganAt: number): void {
 }
 
 /**
- * writer が書込途中(seq 奇数)で hard crash したかを判定する。
- * 実運用では seq 奇数窓は常に vault.lock 保持と同時 (applyMutationToVault は withVaultLock
- * 内で beginVaultWrite する)。endVaultWrite は withVaultLock の finally より前に走るので、
- * 正常完了/例外では「seq 偶数 → ロック解放」の順になる。よって「ロックが在り、その PID が
- * 死んでいる」= writer が beginVaultWrite と endVaultWrite の間で hard crash し、seq が
- * 奇数のまま取り残された、と判定できる。この時もう誰も vault を書いていないので読んで良い。
- * ロックが無い/生成途中(空・壊れ)の場合は live 扱い(= bypass せず待つ)で保守的にする。
+ * writer が書込途中(seq 奇数)で hard crash したか (= 奇数 seq が「静的な残骸」か) を
+ * 判定する。実運用では seq 奇数窓は常に vault.lock 保持と同時 (applyMutationToVault は
+ * withVaultLock 内で beginVaultWrite する)。endVaultWrite は withVaultLock の finally より
+ * 前に走るので、生きた writer の奇数窓では必ず lock が存在し PID も生きている。よって:
+ *  - ロックが在り PID が死んでいる = writer が begin と end の間で hard crash。
+ *  - ロックが無い = 生きた writer は居ない (writer は lock 取得後にしか begin しない)。
+ *    crash 残骸が後続 writer に stale 回収された後の奇数 seq、または失敗した回復 run が
+ *    意図的に残した crash residue (mutate-vault 敵対レビュー指摘A: 前世代の torn 回復
+ *    材料を焼かないため endVaultWrite を呼ばず lock だけ解放する) — どちらも静的状態
+ *    なので読んで良い。読み後の再検査 (seq 不変 + 本判定の再実行) が、直後に開始した
+ *    writer との競合を弾く。
+ * 生成途中 (空・壊れ) のロックだけは live 扱い (= bypass せず待つ) で保守的にする。
  */
 function writerCrashed(stateDir: string): boolean {
   const lockPath = path.join(stateDir, "vault.lock");
@@ -84,7 +89,7 @@ function writerCrashed(stateDir: string): boolean {
   try {
     raw = readFileSync(lockPath, "utf8");
   } catch {
-    return false; // ロック無し(実運用では seq 偶数のはず) → bypass しない
+    return true; // ロック無し + seq 奇数 (呼び出し文脈) = 静的な residue → 読んで良い
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
