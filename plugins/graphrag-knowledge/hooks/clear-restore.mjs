@@ -451,6 +451,8 @@ async function main() {
     } catch (e) {
       if (e instanceof AskStateFencingLostError) throw e; // RMW 再試行のシグナルは握り潰さない
       // それ以外の IO 失敗: 書き戻せなくても復元判定自体は続行する (best-effort な消費)。
+      // ただし完全に無音だと消費失敗 (= checkpoint キーが消えなかった) を知る手段がない。
+      console.error(`[graphrag] checkpoint save failed (best-effort consume): ${e?.code ?? e}`);
     }
     return { matched, legacyEntry };
   });

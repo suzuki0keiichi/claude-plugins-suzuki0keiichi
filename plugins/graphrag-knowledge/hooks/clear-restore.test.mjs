@@ -3,11 +3,11 @@
 // 予約キー方式: ask-state.json の __checkpoint__ キーを clear で one-shot 消費して注入する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -24,6 +24,16 @@ const runHook = (input, env = {}) =>
     encoding: "utf8",
     env: { ...process.env, GRAPHRAG_VAULT_DIR: "", ...env }
   });
+
+// stderr も返す variant (同期)。spawnSync は stdout/stderr を分離して返す。
+const runHookWithStderr = (input, env = {}) => {
+  const result = spawnSync(process.execPath, [SCRIPT], {
+    input: JSON.stringify(input),
+    encoding: "utf8",
+    env: { ...process.env, GRAPHRAG_VAULT_DIR: "", ...env }
+  });
+  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+};
 
 // 既定レイアウト <root>/.graphrag/vault の一時 fixture。
 const makeAnchor = () => {
@@ -602,6 +612,34 @@ test("#29 実並行: /clear の consume と並列 bump 群が競合しても cou
     const total = Object.values(onDisk).reduce((s, e) => s + (e?.count ?? 0), 0);
     assert.equal(total, 200, "フックの書き戻しが bump を巻き戻さない (lost update 無し)");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- P3-H: save 失敗時に stderr へ出力する (無音ではない) ---
+
+test("clear + save の IO 失敗は stderr に出力される (P3-H: 無音解消)", () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const cacheDir = path.join(root, ".graphrag", "cache");
+    writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "IO失敗の一手" })
+    });
+    // cache ディレクトリの書き込みを禁止して save (tmp ファイルの書き込み) を失敗させる。
+    // 0o555: 読み+実行は許可 (readFileSync が通る)、書き込みのみ禁止。
+    // lock 取得 (mkdir) も同じディレクトリ内で失敗するが、lock 失敗は best-effort 続行。
+    chmodSync(cacheDir, 0o555);
+    const { stdout, stderr } = runHookWithStderr({ source: "clear", cwd: root });
+    // save が IO 失敗しても復元自体は続行する (best-effort)。
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /IO失敗の一手/, "save 失敗でも復元判定は続行される");
+    // lock 取得失敗の stderr (ask-state lock) とは別に、save 固有のエラーが出ることを確認。
+    // 修正後: IO 失敗は stderr に出力される (現行は無音 — lock 失敗の stderr だけが出る)。
+    assert.match(stderr, /save|consume|checkpoint.*fail/i, "save の IO 失敗が stderr に出力される");
+  } finally {
+    // 権限を戻してから掃除。
+    try { chmodSync(path.join(root, ".graphrag", "cache"), 0o755); } catch { /* noop */ }
     rmSync(root, { recursive: true, force: true });
   }
 });
