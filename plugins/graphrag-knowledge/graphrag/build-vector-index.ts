@@ -320,10 +320,10 @@ export async function writeFileAtomic(outPath: string, content: string): Promise
 //    (a) stale builder (低 seq) → 既存 (新) が現 graph と一致 → skip。
 //    (b) cache 初期化後、現 graph と乖離した旧世代 index (高 seq) → 不一致 → 書く。
 //    (c) 旧世代の高 seq builder → 既存 (新、低 seq) が現 graph と一致 → skip。
-// 3. seq 比較は「現 graph を読めない時の最終 fallback」に格下げ: vault が渡らない
-//    経路や graph 読み失敗時のみ、既存 > 自分 なら退行とみなす。それも比較不能なら
-//    従来どおり後勝ち。書き込み時の graph 読みコストは v1.39.4 の fallback 経路で
-//    既に払っていたものと同等 (読みは cache 済み)。
+// 3. graph を読めない場合 (vaultDir 無し / vault 読み失敗) は一律後勝ちに倒す。
+//    seq は cache 世代内でしか単調でなく、世代同一性を証明できないまま数値比較すると
+//    新 epoch の正当な builder を旧世代の高 seq が恒久にブロックする。索引は二次生成物
+//    なので後勝ちが安全側 — 読み側の vectorIndexMatchesGraph が不一致を検出して再 build。
 export async function indexWriteWouldRegress(payload: any, existing: any, vaultDir?: string): Promise<boolean> {
   if (!existing || typeof existing !== "object") return false;
   if (

@@ -120,6 +120,7 @@ test("版印は書込前後で偶数→奇数→偶数に進む", () => {
 test("readVaultConsistent は書込中スナップショットを返さず最終値を返す", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vseq-"));
   const { writeFileSync, unlinkSync } = await import("node:fs");
+  const os = await import("node:os");
   let store = "v0";
   const lockPath = path.join(stateDir, "vault.lock");
   const writer = (async () => {
@@ -127,7 +128,7 @@ test("readVaultConsistent は書込中スナップショットを返さず最終
     // 内で beginVaultWrite する)。lock 不在の奇数 seq は「静的な crash residue」として
     // 読んで良い、が現在の判定 (writerCrashed) — lock を持たない生きた writer は実運用に
     // 存在しないので、生き writer の再現には lock が必須。
-    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now(), hostname: os.hostname() }));
     const b = beginVaultWrite(stateDir);
     await new Promise((r) => setTimeout(r, 20));
     store = "v1";
@@ -139,13 +140,14 @@ test("readVaultConsistent は書込中スナップショットを返さず最終
   assert.equal(got, "v1");
 });
 
-test("readVaultConsistent は crash した writer (seq 奇数 + 死んだ PID のロック) から回復して読みを返す", async () => {
+test("readVaultConsistent は crash した writer (seq 奇数 + 同一ホスト・死んだ PID のロック) から回復して読みを返す", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vseq-crash-"));
   const { writeFileSync } = await import("node:fs");
+  const os = await import("node:os");
   // writer が書込開始 (seq 奇数) 後に hard crash: endVaultWrite が走らず seq は奇数のまま、
   // 死んだ PID のロックが残骸として残る。旧実装はここで読みが timeout し続け回復しなかった。
   beginVaultWrite(stateDir);
-  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: Date.now() }));
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: 999999999, ts: Date.now(), hostname: os.hostname() }));
   const start = Date.now();
   const got = await readVaultConsistent(stateDir, () => "DATA", { timeoutMs: 5000, pollMs: 5 });
   assert.equal(got, "DATA", "放棄された静的状態を読んで返す");
@@ -184,9 +186,10 @@ test("finally は PID が同じでも nonce が異なるロックを消さない
 test("readVaultConsistent は生きた writer がロック保持中なら bypass せず待つ (torn read 回避)", async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), "vseq-live-"));
   const { writeFileSync } = await import("node:fs");
+  const os = await import("node:os");
   beginVaultWrite(stateDir); // seq 奇数
   // 生きた保持者 = このテストプロセス自身の pid。crash ではないので bypass してはいけない。
-  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: process.pid, ts: Date.now() }));
+  writeFileSync(path.join(stateDir, "vault.lock"), JSON.stringify({ pid: process.pid, ts: Date.now(), hostname: os.hostname() }));
   await assert.rejects(
     () => readVaultConsistent(stateDir, () => "DATA", { timeoutMs: 150, pollMs: 10 }),
     /timeout/i
