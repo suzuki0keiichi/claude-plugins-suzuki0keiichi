@@ -23,14 +23,15 @@ function isStale(lockPath: string, staleMs: number, graceMs: number): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // hostname 一致時だけ PID 生存確認を使う — pidAlive はローカルの PID テーブルを
-    // 見るため、別ホストの PID には使えない (存在しない → 即 stale と誤判定する)。
-    if (info.hostname && info.hostname === os.hostname()) {
+    // hostname が明示的に異なる場合だけ PID 生存確認を避ける — 別ホストの PID は
+    // ローカルの PID テーブルでは判定できない。hostname 欠落は v1.40.2 以前の
+    // 機械ローカルな旧形式 lock なので、同一ホストと同じく pidAlive が有効。
+    if (!info.hostname || info.hostname === os.hostname()) {
       if (!pidAlive(info.pid)) return true;
-      // PID alive + 同一ホスト → staleMs は PID 再利用への保険の絶対上限 (既定 10 分)。
+      // PID alive + ローカル lock → staleMs は PID 再利用への保険の絶対上限 (既定 10 分)。
       return Date.now() - info.ts > staleMs;
     }
-    // hostname 不一致 / 不明 (旧フォーマット) → mtime + staleMs 判定にフォールバック。
+    // hostname が明示的に不一致 → mtime + staleMs 判定にフォールバック。
     try {
       const mtimeMs = statSync(lockPath).mtimeMs;
       return Date.now() - mtimeMs > staleMs;
