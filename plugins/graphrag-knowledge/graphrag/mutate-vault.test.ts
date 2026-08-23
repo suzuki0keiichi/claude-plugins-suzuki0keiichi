@@ -15,7 +15,7 @@ import {
 } from "./mutate-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
-import { readSeq, beginVaultWrite } from "./vault-lock.ts";
+import { readSeq, beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
 import { recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
 
@@ -282,11 +282,12 @@ test("unborn branch (初回コミット前) でも pathspec 付き commit が通
   assert.match(stillStaged, /foreign\.txt/);
 });
 
-// ── #4: mid-merge (MERGE_HEAD 存在) での commit ─────────────────────────────
-// pathspec 付き commit ("git commit -- <path>") は merge/cherry-pick/revert 進行中は
-// git 側の制約で一律拒否される ("cannot do a partial commit during a merge")。
-// vault は通常プロジェクト repo 内に同居するので、利用者が mid-merge で
-// typed-add/commit-mutation を叩くと従来は毎回ここで死んでいた。
+// ── #4: mid-merge (MERGE_HEAD 存在) での mutation ────────────────────────────
+// PR #41 3回目レビュー指摘2: merge/cherry-pick/revert 進行中の index は「その operation
+// の解決状態」そのもので、merge 結果と operation 開始後に利用者が stage した WIP は
+// index から区別できない。mutation の commit が operation 全体を暗黙確定するのは操作
+// 境界を越えるため、最上流 (何も書く前) で明示エラーで拒否する。旧仕様の「vault-only
+// staged なら pathspec 無し commit で merge ごと確定」は廃止。
 
 /** repo の現在の branch 名 (init.defaultBranch 依存を避けるため動的に取る)。 */
 function currentBranch(repo: string): string {
@@ -295,13 +296,14 @@ function currentBranch(repo: string): string {
   }).trim();
 }
 
-test("mid-merge + vault だけ staged → mutation は成功する (pathspec 無し commit)", async () => {
+test("指摘2: mid-merge (vault だけ staged) でも mutation は何も書かずに OPERATION_IN_PROGRESS_BLOCKED で拒否される", async () => {
   const { repo, vault, stateDir } = gitInitVault();
   const base = currentBranch(repo);
 
   // feature/main の両方が vault 配下だけを (非重複に) 変更して分岐する。foreign な
   // ファイルには一切触れないので、merge 自体の staged 差分も vault 配下だけになる。
   // 両側とも進んでいる (non-fast-forward) ので --no-commit で MERGE_HEAD を残せる。
+  // 旧仕様ではこのケースだけ pathspec 無し commit で merge ごと暗黙確定していた。
   execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "feature"]);
   writeFileSync(path.join(vault, "side-feature.txt"), "feature\n");
   execFileSync("git", ["-C", repo, "add", "-A"]);
@@ -314,6 +316,7 @@ test("mid-merge + vault だけ staged → mutation は成功する (pathspec 無
 
   execFileSync("git", ["-C", repo, "merge", "--no-commit", "-q", "feature"]);
   assert.ok(existsSync(path.join(repo, ".git", "MERGE_HEAD")), "前提: MERGE_HEAD が存在");
+  const head0 = vaultHead(vault);
   const stagedBeforeMutation = execFileSync("git", ["-C", repo, "diff", "--cached", "--name-only"], {
     encoding: "utf8",
   }).trim();
@@ -322,11 +325,32 @@ test("mid-merge + vault だけ staged → mutation は成功する (pathspec 無
     "前提: merge 自体の staged 差分は vault 配下だけ"
   );
 
-  const plan = decisionPlan("mm1", "vault change during merge");
-  const res = await applyMutationToVault({ plan, vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
-  assert.equal(res.applied, true, "vault だけの staged なら mid-merge でも commit できる");
-  assert.ok(res.head, "commit が成立し HEAD が返る");
-  assert.ok(!existsSync(path.join(repo, ".git", "MERGE_HEAD")), "commit で merge も確定し MERGE_HEAD は消える");
+  await assert.rejects(
+    () =>
+      applyMutationToVault({
+        plan: decisionPlan("mm1", "vault change during merge"),
+        vaultDir: vault,
+        stateDir,
+        git: true,
+        buildIndex: noopIndex,
+      }),
+    (err: any) => {
+      assert.equal(err.code, "OPERATION_IN_PROGRESS_BLOCKED");
+      assert.equal(err.operation, "merge");
+      assert.match(err.message, /merge --continue/, "merge の完了を案内する");
+      assert.match(err.message, /--abort/, "abort の選択肢も案内する");
+      return true;
+    }
+  );
+
+  // 何も書かれず、merge 状態は無傷 (暗黙確定されない)。
+  assert.equal(vaultHead(vault), head0, "HEAD 不変");
+  assert.ok(!existsSync(path.join(vault, "Decision", "MM1.md")), "vault には何も書かれない");
+  assert.ok(existsSync(path.join(repo, ".git", "MERGE_HEAD")), "MERGE_HEAD は残る (merge は確定されない)");
+  const stagedAfter = execFileSync("git", ["-C", repo, "diff", "--cached", "--name-only"], {
+    encoding: "utf8",
+  }).trim();
+  assert.equal(stagedAfter, stagedBeforeMutation, "merge の staged 状態も無傷");
 });
 
 /**
@@ -355,38 +379,136 @@ function createConflictedMerge(repo: string): void {
   }
 }
 
-test("mid-merge + vault 外の staged あり → 明確なエラーで拒否 (vault 側は rollback)", async () => {
+test("指摘2: mid-merge + vault 外の staged ありも最上流で OPERATION_IN_PROGRESS_BLOCKED (merge 状態は無傷)", async () => {
   const { repo, vault, stateDir } = gitInitVault();
   createConflictedMerge(repo);
   assert.ok(existsSync(path.join(repo, ".git", "MERGE_HEAD")), "前提: MERGE_HEAD が存在");
   // 競合を解決して stage する (index に unmerged entry を残さない)。これで
-  // 「vault 外の foreign.txt が staged、かつ mid-merge」という Case 2 の状況になる。
+  // 「vault 外の foreign.txt が staged、かつ mid-merge」の状況になる。旧仕様では
+  // gitCommitVault の pathspec 付き commit が git に拒否されてから rollback していたが、
+  // 新仕様では何も書く前の最上流で拒否される。
   writeFileSync(path.join(repo, "foreign.txt"), "resolved\n");
   execFileSync("git", ["-C", repo, "add", "foreign.txt"]);
-  // head0 は「mutation を試みる直前」の HEAD (createConflictedMerge 自体の commit群
-  // より後) を基準にする。rollback が保証するのはそこからの不変性。
   const head0 = vaultHead(vault);
 
   const plan = decisionPlan("mm2", "vault change during merge with foreign staged");
   await assert.rejects(
     () => applyMutationToVault({ plan, vaultDir: vault, stateDir, git: true, buildIndex: noopIndex }),
-    /merge/i
+    (err: any) => {
+      assert.equal(err.code, "OPERATION_IN_PROGRESS_BLOCKED");
+      assert.equal(err.operation, "merge");
+      return true;
+    }
   );
 
-  // vault 側は rollback されている (HEAD 不変・working tree クリーン)。
+  // 何も書かれない (rollback ではなく、そもそも書き込みに到達しない)。
   assert.equal(vaultHead(vault), head0, "HEAD must not advance");
+  assert.ok(!existsSync(path.join(vault, "Decision", "MM2.md")), "vault には何も書かれない");
   const porcelain = execFileSync("git", ["status", "--porcelain", "--", "."], {
     cwd: vault,
     encoding: "utf8",
   }).trim();
-  assert.equal(porcelain, "", "vault working tree must be clean after rollback");
-  // foreign.txt の解決 (merge 継続に必要な状態) は維持される (vault の rollback で
-  // 巻き込まれて消えていない)。
+  assert.equal(porcelain, "", "vault working tree must stay clean");
+  // foreign.txt の解決 (merge 継続に必要な状態) は維持される。
   assert.ok(existsSync(path.join(repo, ".git", "MERGE_HEAD")), "MERGE_HEAD はまだ残っている");
   const stillStaged = execFileSync("git", ["-C", repo, "diff", "--cached", "--name-only"], {
     encoding: "utf8",
   });
   assert.match(stillStaged, /foreign\.txt/, "foreign.txt の解決 stage は維持される");
+});
+
+/** repo に実際の CHERRY_PICK_HEAD を作る (foreign.txt の競合で cherry-pick を止める)。 */
+function createConflictedCherryPick(repo: string): void {
+  const base = currentBranch(repo);
+  writeFileSync(path.join(repo, "foreign.txt"), "base\n");
+  execFileSync("git", ["-C", repo, "add", "foreign.txt"]);
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "add foreign"]);
+
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "feature"]);
+  writeFileSync(path.join(repo, "foreign.txt"), "feature\n");
+  execFileSync("git", ["-C", repo, "commit", "-aq", "-m", "feature change"]);
+
+  execFileSync("git", ["-C", repo, "checkout", "-q", base]);
+  writeFileSync(path.join(repo, "foreign.txt"), "main\n");
+  execFileSync("git", ["-C", repo, "commit", "-aq", "-m", "main change"]);
+
+  try {
+    execFileSync("git", ["-C", repo, "cherry-pick", "feature"]);
+  } catch {
+    /* conflict expected: CHERRY_PICK_HEAD が残る */
+  }
+}
+
+/** repo に実際の REVERT_HEAD を作る (後続 commit が同じ行を触った状態で古い commit を revert)。 */
+function createConflictedRevert(repo: string): void {
+  writeFileSync(path.join(repo, "foreign.txt"), "one\n");
+  execFileSync("git", ["-C", repo, "add", "foreign.txt"]);
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "r1"]);
+  writeFileSync(path.join(repo, "foreign.txt"), "two\n");
+  execFileSync("git", ["-C", repo, "commit", "-aq", "-m", "r2"]);
+  writeFileSync(path.join(repo, "foreign.txt"), "three\n");
+  execFileSync("git", ["-C", repo, "commit", "-aq", "-m", "r3"]);
+
+  try {
+    // r2 (one→two) の revert は two→one を当てたいが、現内容は three → conflict。
+    execFileSync("git", ["-C", repo, "revert", "--no-edit", "HEAD~1"]);
+  } catch {
+    /* conflict expected: REVERT_HEAD が残る */
+  }
+}
+
+test("指摘2: cherry-pick 進行中の mutation も OPERATION_IN_PROGRESS_BLOCKED で拒否される (状態無傷)", async () => {
+  const { repo, vault, stateDir } = gitInitVault();
+  createConflictedCherryPick(repo);
+  assert.ok(existsSync(path.join(repo, ".git", "CHERRY_PICK_HEAD")), "前提: CHERRY_PICK_HEAD が存在");
+  const head0 = vaultHead(vault);
+
+  await assert.rejects(
+    () =>
+      applyMutationToVault({
+        plan: decisionPlan("cp1", "vault change during cherry-pick"),
+        vaultDir: vault,
+        stateDir,
+        git: true,
+        buildIndex: noopIndex,
+      }),
+    (err: any) => {
+      assert.equal(err.code, "OPERATION_IN_PROGRESS_BLOCKED");
+      assert.equal(err.operation, "cherry-pick");
+      assert.match(err.message, /cherry-pick --continue/, "cherry-pick の完了を案内する");
+      return true;
+    }
+  );
+  assert.equal(vaultHead(vault), head0, "HEAD 不変");
+  assert.ok(!existsSync(path.join(vault, "Decision", "CP1.md")), "vault には何も書かれない");
+  assert.ok(existsSync(path.join(repo, ".git", "CHERRY_PICK_HEAD")), "CHERRY_PICK_HEAD は残る");
+});
+
+test("指摘2: revert 進行中の mutation も OPERATION_IN_PROGRESS_BLOCKED で拒否される (状態無傷)", async () => {
+  const { repo, vault, stateDir } = gitInitVault();
+  createConflictedRevert(repo);
+  assert.ok(existsSync(path.join(repo, ".git", "REVERT_HEAD")), "前提: REVERT_HEAD が存在");
+  const head0 = vaultHead(vault);
+
+  await assert.rejects(
+    () =>
+      applyMutationToVault({
+        plan: decisionPlan("rv1", "vault change during revert"),
+        vaultDir: vault,
+        stateDir,
+        git: true,
+        buildIndex: noopIndex,
+      }),
+    (err: any) => {
+      assert.equal(err.code, "OPERATION_IN_PROGRESS_BLOCKED");
+      assert.equal(err.operation, "revert");
+      assert.match(err.message, /revert --continue/, "revert の完了を案内する");
+      return true;
+    }
+  );
+  assert.equal(vaultHead(vault), head0, "HEAD 不変");
+  assert.ok(!existsSync(path.join(vault, "Decision", "RV1.md")), "vault には何も書かれない");
+  assert.ok(existsSync(path.join(repo, ".git", "REVERT_HEAD")), "REVERT_HEAD は残る");
 });
 
 test("OCC: base_sha が現 HEAD と違えば拒否（適用しない）", async () => {
@@ -1288,7 +1410,9 @@ test("PR#41: crash 痕跡 (seq 奇数) + write journal 検出時は journal 記�
   mkdirSync(cacheDir, { recursive: true });
   const began = beginVaultWrite(cacheDir);
   assert.equal(began % 2, 1, "前提: 書込窓が開いたまま (seq 奇数)");
-  writeVaultWriteJournal(cacheDir, [path.join("Decision", "A.md")]);
+  // 指摘1: journal には自分の書込窓の奇数 seq が打刻されている (実 writer は begin が
+  // 返した値を打刻する)。回復側は「journal の seq === 観測した奇数 seq」の時だけ使う。
+  writeVaultWriteJournal(cacheDir, [path.join("Decision", "A.md")], began);
 
   const res = await applyMutationToVault({
     plan: decisionPlan("rec41", "recovery mutation absorbs torn file"),
@@ -1518,7 +1642,7 @@ test("再レビュー指摘3: crash 回復は journal 記載の torn path だけ
     !tornDelta.written.includes(path.join("Decision", "A.md")),
     "前提: A は crash した writer に触られていない (利用者 WIP のみで dirty)"
   );
-  writeVaultWriteJournal(cacheDir, tornDelta.written);
+  writeVaultWriteJournal(cacheDir, tornDelta.written, began);
 
   const res = await applyMutationToVault({
     plan: decisionPlan("rec3", "recovery mutation absorbs only journaled paths"),
@@ -1548,10 +1672,11 @@ test("再レビュー指摘3: crash 回復は journal 記載の torn path だけ
   assert.ok(!existsSync(vaultWriteJournalPath(cacheDir)), "journal は commit 成功後に削除される");
 });
 
-test("再レビュー指摘3: write journal は writeDelta の前に永続化され (触接予定パスを含む)、commit 成功後に消える", async () => {
+test("再レビュー指摘3: write journal は writeDelta の前に永続化され (触接予定パス + 書込窓の seq 打刻)、commit 成功後に消える", async () => {
   const { vault, stateDir } = gitInitVaultWithDecision();
   const cacheDir = path.join(stateDir, "cache");
-  let journalAtWrite: { paths: string[] } | null = null;
+  let journalAtWrite: { paths: string[]; seq: number } | null = null;
+  let seqAtWrite: number | null = null;
   // writeDelta 実行時点 (= ここで kill されると torn になる瞬間) に journal が既に
   // ディスクへ永続化されていることを観測する。
   const observingWriteDelta = (
@@ -1560,6 +1685,7 @@ test("再レビュー指摘3: write journal は writeDelta の前に永続化さ
     sink: { written: string[]; removed: string[]; created: string[] }
   ) => {
     journalAtWrite = readVaultWriteJournal(cacheDir);
+    seqAtWrite = readSeq(cacheDir);
     return writeVaultDelta(dir, g, sink);
   };
   const res = await applyMutationToVault({
@@ -1576,7 +1702,78 @@ test("再レビュー指摘3: write journal は writeDelta の前に永続化さ
     journalAtWrite!.paths.includes(path.join("Decision", "J41.md")),
     "これから書く予定のパスが journal に載っている"
   );
+  // 指摘1: journal は自分の書込窓の奇数 seq を打刻している。crash 後の回復側は
+  // この打刻と観測 seq の一致で「今回の crash に属する journal」だけを識別する。
+  assert.equal(seqAtWrite! % 2, 1, "前提: writeDelta 時点で書込窓は開いている (seq 奇数)");
+  assert.equal(journalAtWrite!.seq, seqAtWrite, "journal には書込窓の奇数 seq が打刻されている");
   assert.ok(!existsSync(vaultWriteJournalPath(cacheDir)), "commit 成功後に journal は消える");
+});
+
+// ── PR #41 3回目レビュー指摘1: 完了済み writer の残留 journal を次 writer の crash
+// journal と誤認しない ────────────────────────────────────────────────────────
+// 旧実装の finally は endVaultWrite (seq 偶数化) → clearVaultWriteJournal の順で、この
+// 2 操作間の hard crash が「偶数 seq + 前 writer の journal」を残した。その後、次 writer
+// が beginVaultWrite 直後・自分の journal 書き込み前に crash すると、さらに次の mutation
+// が前世代の journal を今回の crash に属すると誤認し、記載パス (無関係な利用者 WIP を
+// 含み得る) を吸収 stage していた。
+
+test("指摘1: 完了済み writer の残留 journal は次 writer の begin 直後 crash と誤認されず、記載 WIP を吸収しない", async () => {
+  const { repo, vault, stateDir } = gitInitVaultWithDecision();
+  const cacheDir = path.join(stateDir, "cache");
+  mkdirSync(cacheDir, { recursive: true });
+
+  // 利用者 WIP: Decision/A.md への canonical 編集 (round-trip するので delta に載らない)。
+  const userWip = editedDecisionAContent("user wip unrelated to any crash");
+  writeFileSync(path.join(vault, "Decision", "A.md"), userWip);
+
+  // 完了済み writer W1: 奇数窓 o1 で journal (Decision/A.md 記載) を書き、endVaultWrite
+  // (seq 偶数化) の後・journal 削除の前に hard crash した (旧 finally 順の境界 crash)。
+  // journal は raw で書く: W1 の窓 o1 が打刻された journal がディスクに残る状況の再現。
+  const o1 = beginVaultWrite(cacheDir);
+  assert.equal(o1 % 2, 1);
+  writeFileSync(
+    vaultWriteJournalPath(cacheDir),
+    JSON.stringify({ version: 2, pid: 999999, ts: Date.now(), seq: o1, paths: ["Decision/A.md"] })
+  );
+  endVaultWrite(cacheDir, o1); // seq 偶数 + journal 残留 (境界 crash)
+
+  // 次 writer W2: beginVaultWrite 直後・自分の journal 書き込み前に crash。
+  // seq は W1 と別の奇数へ進み、journal はディスク上の W1 のもののまま。
+  const o2 = beginVaultWrite(cacheDir);
+  assert.equal(o2 % 2, 1);
+  assert.notEqual(o2, o1, "前提: W2 の書込窓は W1 と別の奇数 (seq は単調増加)");
+
+  // 無関係な mutation: crash 痕跡 (seq 奇数) はあるが、残留 journal は W2 のものではない
+  // (seq 打刻不一致)。journal 無しと同じ安全劣化 = 吸収なしで成功すること。
+  const res = await applyMutationToVault({
+    plan: decisionPlan("bj41", "unrelated mutation after boundary crash"),
+    vaultDir: vault,
+    stateDir,
+    git: true,
+    buildIndex: noopIndex,
+  });
+  assert.equal(res.applied, true);
+
+  const committed = execFileSync("git", ["-C", repo, "show", "--name-only", "--format=", "HEAD"], {
+    encoding: "utf8",
+  });
+  assert.ok(committed.includes("Decision/BJ41.md"), "mutation 自身の差分は commit される");
+  assert.ok(
+    !committed.includes("Decision/A.md"),
+    "前世代 journal 記載の無関係な利用者 WIP は吸収 commit されない"
+  );
+  assert.equal(
+    readFileSync(path.join(vault, "Decision", "A.md"), "utf8"),
+    userWip,
+    "WIP は worktree に残る"
+  );
+  const porcelain = execFileSync("git", ["status", "--porcelain", "--", "."], {
+    cwd: vault,
+    encoding: "utf8",
+  });
+  assert.match(porcelain, /Decision\/A\.md/, "WIP は dirty のまま可視 (fsck git-uncommitted が拾う)");
+  assert.equal(readSeq(cacheDir) % 2, 0, "書込窓は閉じて回復");
+  assert.ok(!existsSync(vaultWriteJournalPath(cacheDir)), "前世代 journal も掃除される");
 });
 
 // ── issue #18: node delete の tombstone 台帳 ────────────────────────────────
