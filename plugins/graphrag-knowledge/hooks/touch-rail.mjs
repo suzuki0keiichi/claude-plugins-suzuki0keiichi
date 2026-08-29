@@ -17,12 +17,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { railEnabled } from "./prompt-rail.mjs";
 
-// 実装拡張子の近似 (frame-map と同じ写し)。
+// 実装拡張子の近似 (frame-map と同じ写し)。read-rail からも import される。
 const IMPL_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py|go|rs|java|kt|kts|rb|php|cs|c|cc|cpp|h|hpp|m|mm|swift|scala|sh|bash|zsh|pl|lua|sql)$/i;
-const isImplPath = (p) => typeof p === "string" && IMPL_EXT_RE.test(p) && !p.endsWith(".d.ts");
+export const isImplPath = (p) => typeof p === "string" && IMPL_EXT_RE.test(p) && !p.endsWith(".d.ts");
 
 // file の祖先方向に .graphrag を探す (frame-map と同じ: git 境界を越えない)。
-const findRepoRoot = (fileDir) => {
+export const findRepoRoot = (fileDir) => {
   let dir = fileDir;
   for (;;) {
     const anchor = path.join(dir, ".graphrag");
@@ -37,7 +37,7 @@ const findRepoRoot = (fileDir) => {
 // 書き手 (rail-touch verb の cacheDirForVault) と同じ規則で seen ファイルの置き場所を解決する
 // (clear-restore と同じ依存ゼロ複製): シェル env → anchor の .graphrag/.env の GRAPHRAG_VAULT_DIR
 // → ローカル既定。vault 親を .graphrag に正規化し、その下の cache/。
-const resolveVaultDir = (anchorDir) => {
+export const resolveVaultDir = (anchorDir) => {
   const fromEnv = process.env.GRAPHRAG_VAULT_DIR;
   if (typeof fromEnv === "string" && fromEnv !== "") return path.resolve(anchorDir, fromEnv);
   try {
@@ -71,7 +71,7 @@ const seenPath = (vaultDir, sessionId) => {
   return path.join(stateDir, "cache", `rail-seen-${sessionId}.json`);
 };
 
-const sanitizeSessionId = (raw) => {
+export const sanitizeSessionId = (raw) => {
   if (typeof raw !== "string") return null;
   const s = raw.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48);
   return s.length > 0 ? s : null;
@@ -79,16 +79,20 @@ const sanitizeSessionId = (raw) => {
 
 // fast-path: seen を直接読んで既読なら spawn しない。読めない/壊れているは「未読」扱い
 // (CLI 側の seen 判定が最終防衛 — ここは節約であって正しさの根拠ではない)。
-export const alreadyTouched = (vaultDir, sessionId, relPath) => {
+// listKey: touch レールは touched_files、read レールは read_files を見る。
+export const seenListIncludes = (vaultDir, sessionId, listKey, relPath) => {
   try {
     const fp = seenPath(vaultDir, sessionId);
     if (!existsSync(fp)) return false;
     const parsed = JSON.parse(readFileSync(fp, "utf8"));
-    return Array.isArray(parsed?.touched_files) && parsed.touched_files.includes(relPath);
+    return Array.isArray(parsed?.[listKey]) && parsed[listKey].includes(relPath);
   } catch {
     return false;
   }
 };
+
+export const alreadyTouched = (vaultDir, sessionId, relPath) =>
+  seenListIncludes(vaultDir, sessionId, "touched_files", relPath);
 
 // ── rail-touch 実行 (テスト DI: GRAPHRAG_TOUCH_RAIL_CLI にスタブ .mjs を指せる) ──
 
