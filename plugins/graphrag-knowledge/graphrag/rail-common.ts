@@ -38,6 +38,7 @@ export interface RailSeen {
   updated_at: number;
   injected_node_ids: string[];
   touched_files: string[];
+  read_files: string[];
 }
 
 export function resolveRailCacheDir(): string | null {
@@ -67,14 +68,15 @@ export function loadRailSeen(cacheDir: string, sessionId: string): RailSeen {
           session_id: sessionId,
           updated_at: Number(parsed.updated_at) || 0,
           injected_node_ids: Array.isArray(parsed.injected_node_ids) ? parsed.injected_node_ids.filter((x: unknown) => typeof x === "string") : [],
-          touched_files: Array.isArray(parsed.touched_files) ? parsed.touched_files.filter((x: unknown) => typeof x === "string") : []
+          touched_files: Array.isArray(parsed.touched_files) ? parsed.touched_files.filter((x: unknown) => typeof x === "string") : [],
+          read_files: Array.isArray(parsed.read_files) ? parsed.read_files.filter((x: unknown) => typeof x === "string") : []
         };
       }
     }
   } catch {
     // 壊れていれば空から (fail-open)
   }
-  return { session_id: sessionId, updated_at: 0, injected_node_ids: [], touched_files: [] };
+  return { session_id: sessionId, updated_at: 0, injected_node_ids: [], touched_files: [], read_files: [] };
 }
 
 /**

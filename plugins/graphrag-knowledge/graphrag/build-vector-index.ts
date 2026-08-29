@@ -3,37 +3,56 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { resolveVectorProvider, nodeVectorText, prefixPolicyForModel } from "./vector.ts";
-import { graphDiff } from "./diff.ts";
+import { resolveVectorProvider, nodeVectorText, prefixPolicyForModel, embedTextsWithProvider } from "./vector.ts";
 import { importVault } from "./import-vault.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
+import { readVaultConsistentWithSeq } from "./vault-lock.ts";
+import { cacheDirForVault } from "./cli-env.ts";
 
 // v3: vault が単一正本。索引は vault からのみ構築する (FalkorDB / graph.json
 // fallback は撤廃 ── 両方から読めると完全移行が終わらないため一本化)。
-async function resolveGraphForIndex(args) {
+//
+// issue #27: 読みは検索経路 (retrieval.loadGraph) と同じ seqlock 一貫読み
+// (readVaultConsistentWithSeq)。writer 進行中 (seq 奇数) の torn snapshot
+// (一部新・一部旧) から索引を作らない。vault_head も同じ安定窓の中で取る —
+// seq が読みの前後で不変 = graph / head / seq の三点が同一 snapshot 由来。
+// (embed 完了後に head を取ると、embed 中の commit で rows は snapshot A・
+//  head は B という嘘の打刻になる。)
+async function resolveGraphForIndex(args): Promise<{ graph: any; vaultHead: string | null; snapshotSeq: number }> {
   if (!args.vault) {
     throw new Error(
       "vault directory required to build the index. Pass --vault or set GRAPHRAG_VAULT_DIR. " +
       "(v3: vault is the single source of truth.)"
     );
   }
-  return importVault(args.vault);
+  const { data, seq } = await readVaultConsistentWithSeq(
+    cacheDirForVault(args.vault),
+    () => ({ graph: importVault(args.vault), vaultHead: tryVaultHead(args.vault) })
+  );
+  return { graph: data.graph, vaultHead: data.vaultHead, snapshotSeq: seq };
 }
 
 export async function buildVectorIndex(args, deps: any = {}) {
-  // vault からの差分 (base delta) ビルドは未対応 (v3.x)。vault current と
-  // graph.json/FalkorDB base はノード表現が異なり graphDiff が誤検出するため、
-  // 黙って壊れた delta を出さず明示エラーにする (no-silent-failure)。
-  if (args.vault && args.base) {
-    throw new Error(
-      "vault + base combination not supported: base-delta build from a vault is v3.x. Do not specify --vault and --base together."
-    );
-  }
   // deps.graphObject はテスト/DI がグラフを直渡しするためのフック (loadGraph を迂回)。
   // CLI 由来の args は汚さない (parseArgs は graphObject を生成しない)。
-  const graph = deps.graphObject ?? await resolveGraphForIndex(args);
-  // base delta (差分ビルド) は v3 では未対応。vault+base は上で明示エラー済み。
-  const baseGraph = null;
+  // base/delta (差分ビルド) は撤去済み: v3 は vault 単一正本の全量ビルドのみ
+  // (issue #30 — 書けない delta の読み口だけが残る半端を許さない)。
+  //
+  // issue #27: snapshot 打刻 (vault_head / snapshot_seq) は build 開始時 = graph と
+  // 同じ snapshot から取る。graphObject 直渡し (DI) 経路でも head は embed の前に取る
+  // (embed 後だと embed 中の commit で rows と head が別 snapshot になる)。
+  let graph: any;
+  let snapshotSeq: number | null = typeof deps.snapshotSeq === "number" ? deps.snapshotSeq : null;
+  let vaultHeadStamp: string | null;
+  if (deps.graphObject !== undefined) {
+    graph = deps.graphObject;
+    vaultHeadStamp = args.vault ? tryVaultHead(args.vault) : null;
+  } else {
+    const snap = await resolveGraphForIndex(args);
+    graph = snap.graph;
+    snapshotSeq = snap.snapshotSeq;
+    vaultHeadStamp = snap.vaultHead;
+  }
   // provider 注入: deps.provider があれば外部 endpoint 解決を迂回 (semantic 非交渉は不変)。
   const provider = deps.provider ?? await resolveVectorProvider({
     provider: args.provider,
@@ -53,7 +72,7 @@ export async function buildVectorIndex(args, deps: any = {}) {
   const previousRows = samePrefixPolicy(deps.previousIndex, prefixPolicy)
     ? reusablePreviousRows(deps.previousIndex, provider)
     : [];
-  const nodes = selectNodesForVectorIndex(graph, baseGraph);
+  const nodes = selectNodesForVectorIndex(graph);
   // provisional 要約 (機械テンプレ = 構成要素サマリ) のノードは nodeVectorText が embedding
   // から除外するが、残っていること自体が「意味への書き換え未完」のサインなので警告する。
   const provisionalCount = nodes.filter((n: any) => n.summary_provisional === true).length;
@@ -71,12 +90,15 @@ export async function buildVectorIndex(args, deps: any = {}) {
   // 基準。決定論 (seeded PRNG + node_id ソート) なので同じ索引からは同じ値が出る。
   const noiseBaseline = computeNoiseBaseline(rows);
 
-  // 索引がどの vault HEAD から構築されたかを打刻する (best-effort)。書き込み時重複
-  // ゲートが「索引再構築の失敗後に stale な索引で ok を報告する」のを検出できるように
-  // する (mutate-vault の duplicate_check.index_stale)。vault が git でない/HEAD 無し
-  // (unborn) は打刻無しで従来どおり (staleness 判定は不能として skip される)。
-  const vaultHeadStamp = args.vault ? tryVaultHead(args.vault) : null;
-
+  // 打刻 (issue #27):
+  // - vault_head: どの vault HEAD から構築されたか (best-effort、build 開始時 snapshot の値)。
+  //   git 外/unborn は打刻無し。書き込み時重複ゲートの fallback 判定が使う。
+  // - graph_fingerprint: 索引対象ノードの内容指紋。dirty vault / 非 git vault でも
+  //   「rows がどの graph 内容から作られたか」について真を語る (head は working tree と
+  //   ずれ得るが、fingerprint は build に使った graph そのもの)。
+  // - snapshot_seq: seqlock の確定世代。同じ vault (同じ cache dir) の builder 同士の
+  //   新旧比較 (踏み潰し防止) の高速パスに使う (同一 cache 世代内でのみ単調 — PR #41、
+  //   世代を跨ぐ判定は fingerprint fallback が担う)。
   return {
     version: 1,
     provider: provider.id,
@@ -94,9 +116,21 @@ export async function buildVectorIndex(args, deps: any = {}) {
     generated_at: new Date().toISOString(),
     ...(noiseBaseline ? { noise_baseline: noiseBaseline } : {}),
     ...(vaultHeadStamp ? { vault_head: vaultHeadStamp } : {}),
-    branch_delta: baseGraph ? describeBranchDelta(baseGraph, graph, args.base) : undefined,
+    graph_fingerprint: computeGraphFingerprint(graph),
+    ...(snapshotSeq != null ? { snapshot_seq: snapshotSeq } : {}),
     rows
   };
+}
+
+// issue #27: content fingerprint — 索引対象ノードの `node_id + vectorTextHash` を id 順
+// ソートして sha256。git HEAD と違い dirty vault / 非 git vault でも「この索引がどの
+// graph 内容から作られたか」を正確に指す。接頭辞ポリシーには依存させない (fingerprint は
+// snapshot の同一性のための打刻で、埋め込み空間の同一性は provider/prefix メタが担う)。
+export function computeGraphFingerprint(graph): string {
+  const parts = selectNodesForVectorIndex(graph)
+    .map((node: any) => `${node.id}\0${vectorTextHash(node)}`)
+    .sort();
+  return createHash("sha256").update(parts.join("\n")).digest("hex");
 }
 
 // ── noise baseline: コーパス相対 confidence の基準値 ─────────────────────────
@@ -201,18 +235,28 @@ export async function embedNodesIncremental(nodes, provider, previousRows: any[]
   for (const r of previousRows ?? []) {
     if (r && typeof r.node_id === "string") prevById.set(r.node_id, r);
   }
-  const rows = [];
-  for (const node of nodes) {
+  // issue #31: miss (新規/変更ノード) は 1 件ずつ embed せず、node 順のままバッチで
+  // まとめて送る (embedTextsWithProvider — embedMany 非対応 provider へは直列 fallback)。
+  // rows の順序は従来どおり nodes の順 (決定論)。dedup は導入しない (順序維持を優先)。
+  const rows = new Array(nodes.length);
+  const missSlots: { at: number; node: any; text_hash: string }[] = [];
+  const missTexts: string[] = [];
+  nodes.forEach((node, at) => {
     const text_hash = vectorTextHash(node, documentPrefix);
     const prev = prevById.get(node.id);
     if (prev && prev.text_hash === text_hash && Array.isArray(prev.vector) && prev.vector.length > 0) {
-      rows.push({ node_id: node.id, dimensions: prev.dimensions ?? prev.vector.length, vector: prev.vector, text_hash });
+      rows[at] = { node_id: node.id, dimensions: prev.dimensions ?? prev.vector.length, vector: prev.vector, text_hash };
     } else {
       // R1: 登録モデルなら document 接頭辞付きで埋め込む (未登録/off は空接頭辞=従来)。
-      const vector = await provider.embed(`${documentPrefix}${nodeVectorText(node)}`);
-      rows.push({ node_id: node.id, dimensions: vector.length, vector, text_hash });
+      missSlots.push({ at, node, text_hash });
+      missTexts.push(`${documentPrefix}${nodeVectorText(node)}`);
     }
-  }
+  });
+  const vectors = await embedTextsWithProvider(provider, missTexts);
+  missSlots.forEach((slot, i) => {
+    const vector = vectors[i];
+    rows[slot.at] = { node_id: slot.node.id, dimensions: vector.length, vector, text_hash: slot.text_hash };
+  });
   return rows;
 }
 
@@ -221,23 +265,32 @@ export async function embedNodes(nodes, provider) {
   return embedNodesIncremental(nodes, provider, []);
 }
 
-export function selectNodesForVectorIndex(graph, baseGraph = null) {
-  if (!baseGraph) return graph.nodes ?? [];
-  const delta = graphDiff(baseGraph, graph);
-  return [
-    ...delta.nodes.added,
-    ...delta.nodes.modified.map((item) => item.after)
-  ];
+export function selectNodesForVectorIndex(graph) {
+  return graph.nodes ?? [];
 }
 
-function describeBranchDelta(baseGraph, graph, basePath) {
-  const delta = graphDiff(baseGraph, graph);
-  return {
-    base: basePath,
-    nodes_added: delta.nodes.added.length,
-    nodes_modified: delta.nodes.modified.length,
-    rows: delta.nodes.added.length + delta.nodes.modified.length
-  };
+// issue #34: 索引の鮮度判定 = 読み込み済み graph と index の内容突合。
+// selectNodesForVectorIndex(graph) の node_id 集合が rows と一致し、かつ各ノードの
+// vectorTextHash (index に記録された prefix_policy の document 接頭辞で計算) が
+// rows の text_hash と一致すれば fresh。追加/削除/変更のどれでも false になる —
+// mtime 判定と違いファイル削除も検出できる。prefix は index 自身の記録値を使う
+// (索引が自分の内容と整合しているかを問う。provider/model の互換は従来どおり
+// 再 build 時の reusablePreviousRows / query 時の assertEmbeddingModelAvailable が見る)。
+export function vectorIndexMatchesGraph(graph, index): boolean {
+  if (!index || !Array.isArray(index.rows)) return false;
+  const prefix = typeof index.prefix_policy?.document === "string" ? index.prefix_policy.document : "";
+  const nodes = selectNodesForVectorIndex(graph);
+  if (nodes.length !== index.rows.length) return false;
+  const rowHashById = new Map<string, string>();
+  for (const row of index.rows) {
+    if (!row || typeof row.node_id !== "string" || typeof row.text_hash !== "string") return false;
+    rowHashById.set(row.node_id, row.text_hash);
+  }
+  if (rowHashById.size !== nodes.length) return false; // 重複 node_id = 不整合
+  for (const node of nodes) {
+    if (rowHashById.get(node.id) !== vectorTextHash(node, prefix)) return false;
+  }
+  return true;
 }
 
 // 書き込み途中の半端なファイルを残さない: 同一フォルダの一時ファイルに全部
@@ -251,12 +304,70 @@ export async function writeFileAtomic(outPath: string, content: string): Promise
   await rename(tmp, outPath);
 }
 
+// issue #27: 「自分の書き込みが索引を古い世代へ退行させるか」の rename 直前判定。
+// 1. fingerprint 一致 → 既存と同一 snapshot 内容 → 書いても退行しない (無害な早期判定)。
+// 2. 主裁定 (PR #41 再指摘): vault の現 graph を読めるなら、seq に関係なく常に
+//    「既存 index が現 graph と内容一致するか」で裁定する。一致するなら既存が真に
+//    fresh なので自分は破棄 (skip)、一致しないなら seq がどうであれ現実と乖離した
+//    index を守る意味はない (索引は二次生成物で、真実は graph 側) ので書く。
+//    seq を先に見ない理由: seq は同じ vault の cache dir を共有する builder 同士で
+//    しか単調でなく、cache 初期化 (seq は 0 に戻る — cli-env.ts が設計上許容と明文化)
+//    や別 GRAPHRAG_STATE_DIR が同じ out を共有した場合は seq 空間が別物になる。
+//    v1.39.4 は「既存が高 seq → 即 skip」の向きだけ塞いだが、逆向き —
+//    「現 graph と一致する既存 (新 seq 空間で低 seq) を、旧 seq 空間の高 seq stale
+//    builder が existing.seq <= payload.seq の高速パスで上書きできる」— が残っていた。
+//    内容一致を常に主裁定にすることで両方向とも塞がる:
+//    (a) stale builder (低 seq) → 既存 (新) が現 graph と一致 → skip。
+//    (b) cache 初期化後、現 graph と乖離した旧世代 index (高 seq) → 不一致 → 書く。
+//    (c) 旧世代の高 seq builder → 既存 (新、低 seq) が現 graph と一致 → skip。
+// 3. graph を読めない場合 (vaultDir 無し / vault 読み失敗) は一律後勝ちに倒す。
+//    seq は cache 世代内でしか単調でなく、世代同一性を証明できないまま数値比較すると
+//    新 epoch の正当な builder を旧世代の高 seq が恒久にブロックする。索引は二次生成物
+//    なので後勝ちが安全側 — 読み側の vectorIndexMatchesGraph が不一致を検出して再 build。
+export async function indexWriteWouldRegress(payload: any, existing: any, vaultDir?: string): Promise<boolean> {
+  if (!existing || typeof existing !== "object") return false;
+  if (
+    typeof existing.graph_fingerprint === "string" &&
+    existing.graph_fingerprint === payload.graph_fingerprint
+  ) return false;
+  // graph を読めない場合は後勝ちに倒す。seq は同一 cache 世代内でしか単調でなく、
+  // cache 再初期化 (seq 0→2→4…) や別 state dir が同じ out を共有した場合、世代の
+  // 同一性を証明できないまま数値比較すると新 epoch の正当な builder を旧世代の高 seq
+  // が恒久にブロックする (payload.seq===0 だけの特別扱いでは 2 回目以降を捕まえない)。
+  // 索引は二次生成物なので後勝ちが安全側: 仮に古い builder が上書きしても、次の
+  // vectorIndexMatchesGraph (読み側) が不一致を検出して再 build する。
+  if (!vaultDir) {
+    console.error("[debug] indexWriteWouldRegress: no vaultDir, allowing write (後勝ち)");
+    return false;
+  }
+  try {
+    const { data } = await readVaultConsistentWithSeq(
+      cacheDirForVault(vaultDir),
+      () => importVault(vaultDir)
+    );
+    return vectorIndexMatchesGraph(data, existing);
+  } catch (e) {
+    console.error(`[warn] indexWriteWouldRegress: vault read failed, allowing write (後勝ち): ${e instanceof Error ? e.message : e}`);
+    return false;
+  }
+}
+
 // 索引を構築し、原子的に out へ書き出して書き込んだ絶対パスを返す。
 // buildVectorIndex は payload を「計算して返すだけ」(ディスクには触れない) なので、
 // 実際の書き出しはこの helper と main だけが行う。mutation 経路の既定 index ビルドも
 // これを呼ぶ ── buildVectorIndex を直に呼ぶと計算した索引を捨てて vector.json が
 // 更新されない事故になる (commit-mutation が index_status:ok でも索引据え置き、の原因)。
-export async function buildAndWriteVectorIndex(args, deps: any = {}): Promise<string> {
+//
+// issue #27: rename 直前に既存 index の snapshot 打刻 (seq / fingerprint) を読み、自分の
+// snapshot の方が古ければ書き込みを破棄する ({ skipped: true }、エラーにはしない)。
+// ロックは導入しない — 索引は二次生成物・後勝ちの無ロック方針は維持する。read→rename の
+// 小さな TOCTOU 窓 (この比較の直後に新しい index を踏み潰す) は許容: 負けても一世代古い
+// 索引が残るだけで、#34 の内容突合 (vectorIndexMatchesGraph) が次の読みで stale を検出し
+// 再 build する (自己修復)。
+export async function buildAndWriteVectorIndex(
+  args,
+  deps: any = {}
+): Promise<{ path: string; skipped: boolean }> {
   if (!args.out) {
     throw new Error(
       "Refusing to build vector index: output path is not specified. " +
@@ -272,8 +383,12 @@ export async function buildAndWriteVectorIndex(args, deps: any = {}): Promise<st
     if (previousIndex) effectiveDeps = { ...deps, previousIndex };
   }
   const payload = await buildVectorIndex(args, effectiveDeps);
+  const existingNow = await readExistingIndex(outPath);
+  if (await indexWriteWouldRegress(payload, existingNow, args.vault)) {
+    return { path: outPath, skipped: true };
+  }
   await writeFileAtomic(outPath, `${JSON.stringify(payload, null, 2)}\n`);
-  return outPath;
+  return { path: outPath, skipped: false };
 }
 
 async function readExistingIndex(outPath: string): Promise<any> {
@@ -292,8 +407,13 @@ export async function main(argv, deps: any = {}) {
     console.error("(No default under the skill directory is provided — the vector index belongs to the consuming project.)");
     process.exit(1);
   }
-  const outPath = await buildAndWriteVectorIndex(args, deps);
-  console.log(outPath);
+  const result = await buildAndWriteVectorIndex(args, deps);
+  if (result.skipped) {
+    console.error(
+      "[skip] an index built from a newer vault snapshot is already on disk — this build was discarded (issue #27)"
+    );
+  }
+  console.log(result.path);
 }
 
 export function parseArgs(argv) {
@@ -318,10 +438,8 @@ export function parseArgs(argv) {
   if ((typeof out !== "string" || out.length === 0) && vaultResolved) {
     out = defaultVectorIndexPath(vaultResolved);
   }
-  const base = typeof parsed.base === "string" ? parsed.base : process.env.GRAPHRAG_VECTOR_INDEX_BASE;
   return {
     vault: vaultResolved,
-    base: typeof base === "string" && base.length > 0 ? base : undefined,
     out: typeof out === "string" && out.length > 0 ? out : undefined,
     provider: typeof parsed.provider === "string" ? parsed.provider : undefined,
     endpoint: typeof parsed.endpoint === "string" ? parsed.endpoint : undefined,

@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
@@ -42,13 +42,27 @@ export async function loadGraph(
   return readVaultConsistent(seqDir, () => importVault(vaultDir), seqOpts);
 }
 
-export async function loadVectorIndex(vectorPath: string, deltaPath?: string) {
+// 索引ファイルの読み込み。不存在 (ENOENT/ENOTDIR) は従来どおり「索引なし」= null。
+// JSON parse 失敗は無音で null にしない — どのファイルが壊れているかをパス付きの
+// 明示 Error で伝える (issue #30: 広い catch が parse 失敗まで飲んで無音縮退していた)。
+// 旧 deltaPath 引数 (base/delta merge) は撤去: v3 の builder は delta を書けないので
+// 読み側だけの死経路だった (書けないものは読めなくてよい)。
+export async function loadVectorIndex(vectorPath: string) {
+  let raw: string;
   try {
-    const index = JSON.parse(await readFile(vectorPath, "utf8"));
-    if (!deltaPath) return index;
-    return mergeVectorIndexes(index, await loadVectorIndex(deltaPath));
-  } catch {
-    return deltaPath ? mergeVectorIndexes(null, await loadVectorIndex(deltaPath)) : null;
+    raw = await readFile(vectorPath, "utf8");
+  } catch (error: any) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return null;
+    throw error;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `vector index is corrupt (JSON parse failed): ${vectorPath} — ${msg}. ` +
+      "The index is a secondary artifact: delete it or rebuild with build-vector-index --vault <dir>."
+    );
   }
 }
 
@@ -75,41 +89,24 @@ export function vaultVectorIndexReadPath(vaultDir: string): string {
   return next;
 }
 
-// vault 内のファイルが vector index より新しいかを mtime で判定する。
-// git pull 直後は取得ファイルの mtime が更新されるため、これだけで「索引が古い」を検知できる。
-// 全サブディレクトリを走査するが stat 呼び出しのみなので数 ms で終わる。
-async function hasNewerVaultFiles(vaultDir: string, indexMtimeMs: number): Promise<boolean> {
-  let entries: string[];
-  try {
-    entries = await readdir(vaultDir, { recursive: true }) as string[];
-  } catch { return false; }
-  for (const rel of entries) {
-    if (!rel.endsWith(".md")) continue;
-    try {
-      const s = await stat(path.join(vaultDir, rel));
-      if (s.mtimeMs > indexMtimeMs) return true;
-    } catch { /* skip unreadable */ }
-  }
-  return false;
-}
-
-// 索引が存在しない or vault より古い場合に true を返す。ファイルシステム操作のみ。
-export async function shouldRebuildVectorIndex(vaultDir: string, indexPath: string): Promise<boolean> {
-  try {
-    const indexStat = await stat(indexPath);
-    return hasNewerVaultFiles(vaultDir, indexStat.mtimeMs);
-  } catch {
-    return true; // 索引ファイルが無い
-  }
-}
-
 // 検索系は semantic 非交渉。索引が無ければ lexical で代替せず明示エラーで促す。
 // 索引パスは明示指定 > vault 隣の既定 の順に解決する。
 // vault が指定されていて索引が無い/古い場合は自動構築を試みる (embedding はローカルなので無料)。
+// deps.vectorDeps は自動 (再) 構築時に buildAndWriteVectorIndex へ渡す DI
+// (テストで provider を差し込み endpoint 非依存にする)。
+//
+// issue #34: 鮮度判定は「deps.graph (呼び出し側が loadGraph 済みの graph) と index の
+// 内容突合」(vectorIndexMatchesGraph) の一本。旧 mtime walk (recursive readdir + 全 .md
+// stat) は廃止した — 変更なしの通常ケースこそ毎 query 全走査になり、しかも mtime しか
+// 見ないためファイル削除を検出できず、readdir 失敗時は「新鮮扱い」にフェイルオープン
+// していた。ask/search/brief/evidence の全経路は graph を渡す。deps.graph が無い呼び出し
+// は鮮度判定なし (索引の不在/破損の復旧のみ) — vault を勝手に再走査しない。
+// stale 時の再 build は手元の graph を graphObject として渡し、importVault の重複実行を
+// 避ける (build-vector-index の deps.graphObject)。
 export async function loadRequiredVectorIndex(
   vaultDir: string | undefined,
   explicitPath?: string,
-  deltaPath?: string
+  deps: { vectorDeps?: any; graph?: any } = {}
 ) {
   // writePath = 自動再構築の書き出し先 / readPath = 実際に読む場所 (legacy fallback あり)。
   let writePath = explicitPath ?? (vaultDir ? defaultVectorIndexPath(vaultDir) : undefined);
@@ -147,20 +144,64 @@ export async function loadRequiredVectorIndex(
     }
   }
 
-  if (vaultDir && await shouldRebuildVectorIndex(vaultDir, readPath)) {
-    try {
-      const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
-      process.stderr.write(`[auto] vector index missing or stale → auto-building: ${writePath}\n`);
-      await buildAndWriteVectorIndex({ out: writePath, vault: vaultDir });
-      process.stderr.write(`[auto]   → build complete\n`);
-      readPath = writePath;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      process.stderr.write(`[auto]   → auto-build failed (embedding endpoint unreachable, etc.): ${msg}\n`);
+  // 再 build の共通口。deps.graph があれば graphObject として渡し、build 側の
+  // importVault (vault の 3 本目のフル walk) を省く。
+  const rebuild = async () => {
+    const { buildAndWriteVectorIndex } = await import("./build-vector-index.ts");
+    await buildAndWriteVectorIndex(
+      { out: writePath, vault: vaultDir },
+      { ...(deps.vectorDeps ?? {}), ...(deps.graph !== undefined ? { graphObject: deps.graph } : {}) }
+    );
+    readPath = writePath;
+  };
+
+  let index;
+  try {
+    index = await loadVectorIndex(readPath);
+  } catch (e: unknown) {
+    // 破損索引 (parse 失敗)。索引は二次生成物なので、vault があれば壊れたものを
+    // 破棄して再 build で復旧する。vault が無ければ再構築できないので明示 Error の
+    // まま伝播させる (無音で「索引なし」に縮退しない)。
+    if (!vaultDir) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    process.stderr.write(`[auto] corrupt vector index → discarding and rebuilding: ${msg}\n`);
+    await rebuild();
+    process.stderr.write(`[auto]   → rebuild complete\n`);
+    index = await loadVectorIndex(readPath);
+  }
+
+  if (!index) {
+    // 索引が無い: vault があれば自動構築を試みる (失敗は警告に留め、下の明示 Error へ)。
+    if (vaultDir) {
+      try {
+        process.stderr.write(`[auto] vector index missing → auto-building: ${writePath}\n`);
+        await rebuild();
+        process.stderr.write(`[auto]   → build complete\n`);
+        index = await loadVectorIndex(readPath);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[auto]   → auto-build failed (embedding endpoint unreachable, etc.): ${msg}\n`);
+      }
+    }
+  } else if (vaultDir && deps.graph !== undefined) {
+    // 鮮度判定: graph と index の内容突合 (ファイルシステムには一切触れない)。
+    // 不一致 (ノードの追加/削除/内容変更/prefix policy 不整合) なら stale → 再 build。
+    // 再 build に失敗した場合は警告して手元の (stale な) 索引で続行する — 従来の
+    // stale 時 auto-build 失敗と同じ縮退 (semantic 自体は生きている)。
+    const { vectorIndexMatchesGraph } = await import("./build-vector-index.ts");
+    if (!vectorIndexMatchesGraph(deps.graph, index)) {
+      try {
+        process.stderr.write(`[auto] vector index stale (graph/index content mismatch) → rebuilding: ${writePath}\n`);
+        await rebuild();
+        process.stderr.write(`[auto]   → rebuild complete\n`);
+        index = await loadVectorIndex(readPath) ?? index;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[auto]   → rebuild failed (embedding endpoint unreachable, etc.): ${msg}\n`);
+      }
     }
   }
 
-  const index = await loadVectorIndex(readPath, deltaPath);
   if (!index) {
     throw new Error(
       `vector index not found: ${readPath}. Build it first: build-vector-index --vault <dir>. ` +
@@ -168,25 +209,6 @@ export async function loadRequiredVectorIndex(
     );
   }
   return index;
-}
-
-export function mergeVectorIndexes(baseIndex, deltaIndex) {
-  if (!baseIndex) return deltaIndex ?? null;
-  if (!deltaIndex) return baseIndex;
-  if (baseIndex.provider !== deltaIndex.provider) {
-    throw new Error(`Vector index provider mismatch: ${baseIndex.provider} != ${deltaIndex.provider}`);
-  }
-  if (baseIndex.dimensions !== deltaIndex.dimensions) {
-    throw new Error(`Vector index dimensions mismatch: ${baseIndex.dimensions} != ${deltaIndex.dimensions}`);
-  }
-
-  const rowsById = new Map((baseIndex.rows ?? []).map((row) => [row.node_id, row]));
-  for (const row of deltaIndex.rows ?? []) rowsById.set(row.node_id, row);
-  return {
-    ...baseIndex,
-    generated_at: deltaIndex.generated_at ?? baseIndex.generated_at,
-    rows: [...rowsById.values()]
-  };
 }
 
 export async function prepareVectorSearch(query, options: any = {}) {
@@ -250,30 +272,59 @@ export function searchGraph(graph, query, options: any = {}) {
   const types = new Set(options.types ?? []);
   const limit = options.limit ?? 10;
 
+  // issue #33: 永続転置 index (lexical-index.ts の loadLexicalIndex) があれば、
+  // per-node の正規化/ngram Set 生成を省く。ngram ヒット数は gram → node の
+  // posting list から先に集計し、haystack / aliases は保存済みの正規化文字列を
+  // 使う — スコア計算そのものは従来経路と完全同値 (同じ入力を別経路で得るだけ)。
+  // index に載っていないノード (index 無し / 想定外の欠落) は従来どおりその場で
+  // 計算する = fallback が常に生きている。
+  const lexicalIndex = options.lexicalIndex?.byId && options.lexicalIndex?.postings
+    ? options.lexicalIndex
+    : null;
+  const lexicalHits = lexicalIndex
+    ? queryGramSets.map((grams) => {
+        const counts = new Uint32Array(lexicalIndex.size);
+        for (const gram of grams) {
+          const posting = lexicalIndex.postings.get(gram);
+          if (!posting) continue;
+          for (const nodeIdx of posting) counts[nodeIdx] += 1;
+        }
+        return counts;
+      })
+    : null;
+
   const scored = [];
   for (const node of graph.nodes ?? []) {
     if (types.size > 0 && !types.has(node.type)) continue;
-
-    const fields = buildSearchFields(node);
-    const normalizedFields = fields.map((field) => normalizeText(field));
-    const haystack = normalizedFields.join("\n");
-    const aliases = (node.aliases ?? []).map((alias) => normalizeText(alias));
-
-    const reasons = [];
 
     // --- 文字一致系を 0〜1 に統合 (lexical) ---
     // 完全一致 (別名一致=1) / 単語カバー率 / ngram 比率 の最大値。
     // ngram 比率は confidence 判定 (judgeMatchConfidence) の reason も兼ねるため
     // 別名一致の有無に関わらず常に算出する。全体クエリとスクリプト別部分クエリの max。
-    const fieldNgrams = makeNgrams(haystack);
+    let haystack: string;
+    let aliases: string[];
     let ngramRatio = 0;
-    for (const grams of queryGramSets) {
-      let hits = 0;
-      for (const ngram of grams) {
-        if (fieldNgrams.has(ngram)) hits += 1;
+    const cached = lexicalIndex?.byId.get(node.id);
+    if (cached) {
+      haystack = cached.haystack;
+      aliases = cached.aliases;
+      for (let setIdx = 0; setIdx < queryGramSets.length; setIdx += 1) {
+        ngramRatio = Math.max(ngramRatio, lexicalHits[setIdx][cached.idx] / queryGramSets[setIdx].size);
       }
-      ngramRatio = Math.max(ngramRatio, hits / grams.size);
+    } else {
+      const lexical = computeNodeLexical(node);
+      haystack = lexical.haystack;
+      aliases = lexical.aliases;
+      for (const grams of queryGramSets) {
+        let hits = 0;
+        for (const ngram of grams) {
+          if (lexical.grams.has(ngram)) hits += 1;
+        }
+        ngramRatio = Math.max(ngramRatio, hits / grams.size);
+      }
     }
+
+    const reasons = [];
     if (ngramRatio > 0) reasons.push(`ngram:${ngramRatio.toFixed(2)}`);
 
     const hitTerms = queryTerms.filter((term) => term && haystack.includes(term));
@@ -512,18 +563,31 @@ export function nodeForOutput(node) {
   return out;
 }
 
-function buildSearchFields(node) {
-  // node.id (識別子) と node.type (分類) は意味ではない。文字一致の対象に含めると
-  // canonical 化 / 改名 (vein:→concern:, Vein→Concern) で検索が移行に反応する
-  // ため、除外する。type での絞り込みは searchGraph の types フィルタで行う。
-  return [
-    node.title,
-    node.summary,
-    node.path,
-    ...(node.aliases ?? []),
-    ...(node.tags ?? []),
-    ...displayTextFields(node.display)
-  ].filter((value) => typeof value === "string" && value.length > 0);
+// ノードの lexical 検索素材 (正規化 haystack / 正規化 alias / ngram Set) を一箇所で
+// 計算する。searchGraph の従来経路と lexical-index.ts (永続転置 index の構築) の
+// 双方がこれを単一の正として使う — 二重実装で同値性が割れないように。
+//
+// node.id (識別子) と node.type (分類) は意味ではない。文字一致の対象に含めると
+// canonical 化 / 改名 (vein:→concern:, Vein→Concern) で検索が移行に反応する
+// ため、除外する。type での絞り込みは searchGraph の types フィルタで行う。
+//
+// alias は「別名完全一致」判定と検索フィールドの両方で使うため、ここで一度だけ
+// 正規化して共有する (旧実装は buildSearchFields 内の正規化と別名判定用の正規化で
+// 同じ alias を二重に正規化していた)。haystack のフィールド順は旧実装の
+// buildSearchFields と同一 (title, summary, path, aliases, tags, display)。
+export function computeNodeLexical(node): { haystack: string; aliases: string[]; grams: Set<string> } {
+  const rawAliases = node.aliases ?? [];
+  const aliases = rawAliases.map((alias) => normalizeText(alias));
+  const isText = (value) => typeof value === "string" && value.length > 0;
+  const normalizedFields = [
+    ...[node.title, node.summary, node.path].filter(isText).map((field) => normalizeText(field)),
+    ...aliases.filter((_, index) => isText(rawAliases[index])),
+    ...[...(node.tags ?? []), ...displayTextFields(node.display)]
+      .filter(isText)
+      .map((field) => normalizeText(field))
+  ];
+  const haystack = normalizedFields.join("\n");
+  return { haystack, aliases, grams: makeNgrams(haystack) };
 }
 
 function displayTextFields(display) {

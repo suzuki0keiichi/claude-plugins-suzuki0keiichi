@@ -92,6 +92,9 @@ export async function suggestBindingsForNodes(args: {
   vectorIndex: { rows?: any[] } | null | undefined;
   nodes: any[];
   embed: (text: string) => Promise<number[]>;
+  // issue #31: 複数ノードをバッチで埋め込む口 (省略時は embed の直列 fallback)。
+  // 返却順は入力 texts 順であること。
+  embedMany?: (texts: string[]) => Promise<number[][]>;
   threshold?: number;
   topN?: number;
 }): Promise<NodeBindingSuggestion[]> {
@@ -110,7 +113,9 @@ export async function suggestBindingsForNodes(args: {
     fileRows.map((r) => [r.node_id, { path: r.path, title: r.title }])
   );
 
-  const out: NodeBindingSuggestion[] = [];
+  // issue #31: 対象ノードのテキストを先に列挙し、embedMany があれば 1 バッチ
+  // (チャンク直列) で埋め込む。無ければ従来どおり直列 embed。
+  const targets: { node: any; ctype: string; text: string }[] = [];
   for (const node of args.nodes) {
     const ctype = canonicalType(node?.type);
     if (!ctype || !BINDING_EDGE_TYPE_BY_NODE[ctype]) continue;
@@ -118,7 +123,26 @@ export async function suggestBindingsForNodes(args: {
       .filter((v) => typeof v === "string" && v.trim().length > 0)
       .join(" ");
     if (!text) continue;
-    const vec = await args.embed(text);
+    targets.push({ node, ctype, text });
+  }
+  if (targets.length === 0) return [];
+  let vectors: number[][];
+  if (args.embedMany) {
+    vectors = await args.embedMany(targets.map((t) => t.text));
+    if (!Array.isArray(vectors) || vectors.length !== targets.length) {
+      throw new Error(
+        `embedMany returned ${Array.isArray(vectors) ? vectors.length : "no"} vector(s) for ${targets.length} text(s)`
+      );
+    }
+  } else {
+    vectors = [];
+    for (const target of targets) vectors.push(await args.embed(target.text));
+  }
+
+  const out: NodeBindingSuggestion[] = [];
+  for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
+    const { node, ctype } = targets[targetIndex];
+    const vec = vectors[targetIndex];
     const nNorm = vnorm(vec);
     if (nNorm === 0) continue;
 

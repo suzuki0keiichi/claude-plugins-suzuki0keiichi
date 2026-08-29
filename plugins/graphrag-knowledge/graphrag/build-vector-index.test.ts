@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { embedNodes, embedNodesIncremental, vectorTextHash, buildVectorIndex, parseArgs, writeFileAtomic, main } from "./build-vector-index.ts";
+import { embedNodes, embedNodesIncremental, vectorTextHash, buildVectorIndex, parseArgs, writeFileAtomic, main, indexWriteWouldRegress } from "./build-vector-index.ts";
 import { defaultVectorIndexPath } from "./retrieval.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -103,17 +103,8 @@ test("parseArgs reads --vault and GRAPHRAG_VAULT_DIR", () => {
   }
 });
 
-test("buildVectorIndex rejects vault + base together (loud, no silent broken delta)", async () => {
-  const dir = writeVault({ nodes: [{ id: "system:acme", type: "System", title: "A" }], edges: [] });
-  try {
-    await assert.rejects(
-      () => buildVectorIndex({ vault: dir, base: "/whatever.json" }, { provider: fakeProvider(3) }),
-      /vault \+ base/
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+// (旧テスト「vault + base together を reject」は撤去: --base / base-delta ビルド自体を
+// issue #30 で丸ごと削除したため、ガード対象の引数が存在しない。)
 
 test("buildVectorIndex prefers vault over graph when both are given", async () => {
   const dir = writeVault({
@@ -455,4 +446,410 @@ test("buildVectorIndex stamps noise_baseline into the payload meta", async () =>
   assert.equal(typeof payload.noise_baseline.median_cosine, "number");
   assert.equal(typeof payload.noise_baseline.p90_cosine, "number");
   assert.ok(payload.noise_baseline.pairs > 0);
+});
+
+// ── issue #34: vectorIndexMatchesGraph (graph/index 内容突合による鮮度判定) ──
+
+import { vectorIndexMatchesGraph } from "./build-vector-index.ts";
+
+const freshNodes = [
+  { id: "decision:s:d1", type: "Decision", title: "D1", summary: "alpha" },
+  { id: "decision:s:d2", type: "Decision", title: "D2", summary: "beta" }
+];
+
+function rowsFor(nodes, prefix = "") {
+  return nodes.map((n) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n, prefix) }));
+}
+
+test("vectorIndexMatchesGraph: node_id 集合と text_hash が一致すれば fresh", () => {
+  const graph = { nodes: freshNodes, edges: [] };
+  assert.equal(vectorIndexMatchesGraph(graph, { rows: rowsFor(freshNodes) }), true);
+});
+
+test("vectorIndexMatchesGraph: ノード削除 (index に余分な row) は stale", () => {
+  const graph = { nodes: [freshNodes[0]], edges: [] };
+  assert.equal(vectorIndexMatchesGraph(graph, { rows: rowsFor(freshNodes) }), false);
+});
+
+test("vectorIndexMatchesGraph: ノード追加 (row 不足) は stale", () => {
+  const graph = { nodes: freshNodes, edges: [] };
+  assert.equal(vectorIndexMatchesGraph(graph, { rows: rowsFor([freshNodes[0]]) }), false);
+});
+
+test("vectorIndexMatchesGraph: 内容変更 (text_hash 不一致) は stale", () => {
+  const changed = [freshNodes[0], { ...freshNodes[1], summary: "beta v2" }];
+  assert.equal(vectorIndexMatchesGraph({ nodes: changed, edges: [] }, { rows: rowsFor(freshNodes) }), false);
+});
+
+test("vectorIndexMatchesGraph: prefix_policy は index 記録値で hash を計算する", () => {
+  const graph = { nodes: freshNodes, edges: [] };
+  const prefixed = { prefix_policy: { document: "search_document: ", query: "search_query: " }, rows: rowsFor(freshNodes, "search_document: ") };
+  assert.equal(vectorIndexMatchesGraph(graph, prefixed), true, "記録された document 接頭辞込みで一致");
+  const mismatched = { prefix_policy: { document: "search_document: ", query: "search_query: " }, rows: rowsFor(freshNodes, "") };
+  assert.equal(vectorIndexMatchesGraph(graph, mismatched), false, "接頭辞不整合は stale");
+});
+
+test("vectorIndexMatchesGraph: text_hash を持たない旧形式 row は stale (安全側)", () => {
+  const graph = { nodes: [freshNodes[0]], edges: [] };
+  const rows = [{ node_id: freshNodes[0].id, dimensions: 3, vector: [1, 0, 0] }];
+  assert.equal(vectorIndexMatchesGraph(graph, { rows }), false);
+});
+
+// ── issue #27: 一貫読み・開始時打刻・snapshot 比較書込み ─────────────────────
+
+import { beginVaultWrite, endVaultWrite } from "./vault-lock.ts";
+import { cacheDirForVault } from "./cli-env.ts";
+import { buildAndWriteVectorIndex } from "./build-vector-index.ts";
+
+// vault を root/vault に置く (cacheDirForVault が root/.graphrag/cache になり、
+// 共有 tmpdir 直下に .graphrag を掘らない)。
+function writeVaultUnder(root: string, graph): string {
+  const vaultDir = path.join(root, "vault");
+  for (const f of buildVaultFiles(graph)) {
+    const abs = path.join(vaultDir, f.relPath);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, f.content);
+  }
+  return vaultDir;
+}
+
+test("issue #27: build は writer 進行中 (seq 奇数) に torn snapshot を読まず、確定後の graph から索引を作る", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-consistent-"));
+  const nodeOld = { id: "decision:s:tear", type: "Decision", title: "T", summary: "OLD-summary" };
+  const nodeNew = { id: "decision:s:tear", type: "Decision", title: "T", summary: "NEW-summary" };
+  try {
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeOld], edges: [] });
+    const cacheDir = cacheDirForVault(vaultDir);
+    mkdirSync(cacheDir, { recursive: true });
+    // writer 進行中を模擬 (vault-lock.test.ts の手法): 実 writer と同じく lock 保持下で
+    // seq を奇数にしてから、少し遅れて vault を NEW に書き換えて seq を閉じる。lock 不在の
+    // 奇数 seq は「静的な crash residue」として読まれる (vault-lock writerCrashed —
+    // 敵対レビュー指摘A) ため、生き writer の再現には生きた PID の lock が必須。
+    const lockPath = path.join(cacheDir, "vault.lock");
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    const began = beginVaultWrite(cacheDir);
+    const writer = (async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      for (const f of buildVaultFiles({ generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] })) {
+        const abs = path.join(vaultDir, f.relPath);
+        mkdirSync(path.dirname(abs), { recursive: true });
+        writeFileSync(abs, f.content);
+      }
+      endVaultWrite(cacheDir, began);
+      rmSync(lockPath, { force: true });
+    })();
+    const payload = await buildVectorIndex({ vault: vaultDir }, { provider: fakeProvider(3) });
+    await writer;
+    const row = payload.rows.find((r) => r.node_id === "decision:s:tear");
+    assert.ok(row, "node embedded");
+    assert.equal(row.text_hash, vectorTextHash(nodeNew), "書込完了後の (NEW) snapshot から索引を作る");
+    assert.notEqual(row.text_hash, vectorTextHash(nodeOld), "書込前の (OLD/torn) snapshot を読まない");
+    assert.equal(payload.snapshot_seq, began + 1, "確定した seq (偶数) が payload に打刻される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: vault_head は build 開始時 snapshot の HEAD (embed 中に進んだ HEAD を打刻しない)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-head-"));
+  try {
+    const vaultDir = writeVaultUnder(root, {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      nodes: [{ id: "goal:acme:p99", type: "Goal", title: "p99", summary: "perf" }],
+      edges: []
+    });
+    execFileSync("git", ["-C", vaultDir, "init", "-q"]);
+    execFileSync("git", ["-C", vaultDir, "config", "user.email", "t@t"]);
+    execFileSync("git", ["-C", vaultDir, "config", "user.name", "t"]);
+    execFileSync("git", ["-C", vaultDir, "add", "."]);
+    execFileSync("git", ["-C", vaultDir, "commit", "-q", "-m", "seed"]);
+    const headA = execFileSync("git", ["-C", vaultDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    // embed 中に vault が commit されて HEAD が進む状況を fake provider で模擬する。
+    let advanced = false;
+    const provider: any = fakeProvider(3);
+    const baseEmbed = provider.embed;
+    provider.embed = async (text: string) => {
+      if (!advanced) {
+        advanced = true;
+        execFileSync("git", ["-C", vaultDir, "commit", "-q", "--allow-empty", "-m", "concurrent mutation"]);
+      }
+      return baseEmbed(text);
+    };
+    const payload = await buildVectorIndex({ vault: vaultDir }, { provider });
+    const headB = execFileSync("git", ["-C", vaultDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    assert.notEqual(headA, headB, "embed 中に HEAD が進んでいる (前提)");
+    assert.equal(payload.vault_head, headA, "rows と同じ build 開始時 snapshot の HEAD を打刻する (embed 後の HEAD ではない)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: graph_fingerprint は rows と同一 snapshot の内容を指す (決定論・順序非依存・内容変更で変わる)", async () => {
+  const { computeGraphFingerprint } = await import("./build-vector-index.ts") as any;
+  const a = { id: "decision:s:a", type: "Decision", title: "A", summary: "alpha" };
+  const b = { id: "decision:s:b", type: "Decision", title: "B", summary: "beta" };
+  const g = { version: 1, nodes: [a, b], edges: [] };
+  const payload = await buildVectorIndex({}, { provider: fakeProvider(3), graphObject: g });
+  assert.equal(typeof payload.graph_fingerprint, "string");
+  assert.equal(payload.graph_fingerprint, computeGraphFingerprint(g), "payload の fingerprint は build に使った graph のもの");
+  assert.equal(
+    computeGraphFingerprint({ nodes: [b, a], edges: [] }),
+    computeGraphFingerprint({ nodes: [a, b], edges: [] }),
+    "node 順序に依存しない (id 順ソート)"
+  );
+  assert.notEqual(
+    computeGraphFingerprint({ nodes: [a, { ...b, summary: "beta v2" }], edges: [] }),
+    computeGraphFingerprint(g),
+    "内容が変われば fingerprint も変わる"
+  );
+});
+
+// PR #41 [P2]: seq は同一 cache 世代内でしか単調でない。既存 index の seq が高くても、
+// それだけでは skip しない — 既存が「現 graph と一致するか」(fingerprint fallback) で裁定する。
+// 旧テスト「seq 10 の合成 index (rows: [] = 現 graph と不一致) を seq 0 の builder が
+// 踏まない」は新仕様で意味が変わるため、以下の2本に分解した。
+
+test("issue #27/PR #41: 既存 index が現 graph と一致するなら、古い snapshot の builder は seq に関係なく破棄される (stale builder 防止の維持)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-lastwrite-"));
+  const nodeNew = { id: "decision:s:x", type: "Decision", title: "X", summary: "NEW" };
+  const nodeOld = { id: "decision:s:x", type: "Decision", title: "X", summary: "OLD" };
+  try {
+    // vault (現 graph) は NEW。より新しい snapshot (seq 10) から作られた、現 graph と
+    // 内容一致する index が既に公開されている。
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    const currentNodes = (await import("./import-vault.ts") as any).importVault(vaultDir).nodes;
+    const newer = {
+      version: 1,
+      provider: "other",
+      snapshot_seq: 10,
+      graph_fingerprint: "f".repeat(64),
+      rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) }))
+    };
+    writeFileSync(out, JSON.stringify(newer));
+    // 自分は OLD snapshot (seq 0) から build した stale builder。
+    const res: any = await buildAndWriteVectorIndex(
+      { vault: vaultDir, out },
+      { provider: fakeProvider(3), graphObject: { nodes: [nodeOld], edges: [] }, snapshotSeq: 0, previousIndex: null }
+    );
+    assert.equal(res.skipped, true, "古い builder の書き込みは破棄される");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 10, "新しい index は踏み潰されない");
+    assert.equal(onDisk.provider, "other", "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("PR #41: cache 初期化後 (seq リセット)、現 graph と一致しない高 seq の既存 index は低 seq の builder が上書きできる (恒久 skip の解消)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec41-reinit-"));
+  try {
+    const vaultDir = writeVaultUnder(root, {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      nodes: [{ id: "decision:s:x", type: "Decision", title: "X", summary: "x" }],
+      edges: []
+    });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    // cache 初期化前の旧世代 index: seq 10 だが rows は現 graph と不一致 (別 seq 空間の遺物)。
+    const relic = { version: 1, provider: "other", snapshot_seq: 10, graph_fingerprint: "f".repeat(64), rows: [] };
+    writeFileSync(out, JSON.stringify(relic));
+    // cache 初期化後の builder: 現 seq ファイル無し = 0 から build。
+    const res: any = await buildAndWriteVectorIndex({ vault: vaultDir, out }, { provider: fakeProvider(3) });
+    assert.equal(res.skipped, false, "現 graph と乖離した index を高 seq が恒久に守らない");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.rows.length, 1, "現 graph の index で置き換わる");
+    assert.equal(onDisk.snapshot_seq, 0, "新しい seq 空間の打刻に置き換わる");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("PR #41 再指摘: 現 graph と一致する低 seq の既存 index は、旧世代の高 seq builder に踏み潰されない (seq 逆向きの穴)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec41-revdir-"));
+  const nodeNew = { id: "decision:s:x", type: "Decision", title: "X", summary: "NEW" };
+  const nodeOld = { id: "decision:s:x", type: "Decision", title: "X", summary: "OLD" };
+  try {
+    // vault (現 graph) は NEW。cache 初期化後の新 seq 空間 (seq 0) で build された、
+    // 現 graph と内容一致する fresh な index が既に公開されている。
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    const currentNodes = (await import("./import-vault.ts") as any).importVault(vaultDir).nodes;
+    const fresh = {
+      version: 1,
+      provider: "other",
+      snapshot_seq: 0,
+      graph_fingerprint: "e".repeat(64),
+      rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) }))
+    };
+    writeFileSync(out, JSON.stringify(fresh));
+    // 自分は cache 初期化前の旧 seq 空間 (seq 100) で OLD snapshot から build した stale builder。
+    // 現行の高速パス (existing.seq 0 <= payload.seq 100 → 即 no-regress) だと書けてしまう。
+    const res: any = await buildAndWriteVectorIndex(
+      { vault: vaultDir, out },
+      { provider: fakeProvider(3), graphObject: { nodes: [nodeOld], edges: [] }, snapshotSeq: 100, previousIndex: null }
+    );
+    assert.equal(res.skipped, true, "旧世代の高 seq builder は現 graph と一致する index を上書きできない");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 0, "fresh な index は踏み潰されない");
+    assert.equal(onDisk.provider, "other", "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: fingerprint 一致は seq より先に判定され、退行ではない (同一 snapshot 内容の上書きは無害)", async () => {
+  const { indexWriteWouldRegress } = await import("./build-vector-index.ts") as any;
+  const fp = "a".repeat(64);
+  const existing = { version: 1, snapshot_seq: 10, graph_fingerprint: fp, rows: [] };
+  const payload = { version: 1, snapshot_seq: 0, graph_fingerprint: fp, rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false, "fingerprint 一致 → seq が高くても退行扱いしない");
+});
+
+test("issue #27: 自分の snapshot の方が新しければ従来どおり上書きする (後勝ちの正しい側)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-newer-"));
+  try {
+    const vaultDir = writeVaultUnder(root, {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      nodes: [{ id: "decision:s:x", type: "Decision", title: "X", summary: "x" }],
+      edges: []
+    });
+    const cacheDir = cacheDirForVault(vaultDir);
+    mkdirSync(cacheDir, { recursive: true });
+    const out = path.join(cacheDir, "vector.json");
+    writeFileSync(out, JSON.stringify({ version: 1, provider: "other", snapshot_seq: 0, graph_fingerprint: "0".repeat(64), rows: [] }));
+    // 現在の seq を 2 に進める (自分の snapshot の方が新しい)。
+    endVaultWrite(cacheDir, beginVaultWrite(cacheDir));
+    const res: any = await buildAndWriteVectorIndex({ vault: vaultDir, out }, { provider: fakeProvider(3) });
+    assert.equal(res.skipped, false);
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.snapshot_seq, 2, "新しい snapshot の index で置き換わる");
+    assert.equal(onDisk.rows.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("issue #27: seq 比較不能でも、既存 index が現 graph と一致していれば古い builder は破棄される (fingerprint 優先)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vec27-fp-"));
+  const nodeNew = { id: "decision:s:x", type: "Decision", title: "X", summary: "NEW" };
+  const nodeOld = { id: "decision:s:x", type: "Decision", title: "X", summary: "OLD" };
+  try {
+    // vault (現 graph) は NEW。
+    const vaultDir = writeVaultUnder(root, { generated_at: "2026-01-01T00:00:00.000Z", nodes: [nodeNew], edges: [] });
+    const out = path.join(root, ".graphrag", "cache", "vector.json");
+    mkdirSync(path.dirname(out), { recursive: true });
+    // 既存 index は現 graph (NEW) と一致する内容 (別 builder が先に最新を公開済み)。
+    // seq 打刻は無い = seq では比較できない。
+    const currentNodes = (await import("./import-vault.ts") as any).importVault(vaultDir).nodes;
+    const freshIndex = {
+      version: 1,
+      provider: "other",
+      rows: currentNodes.map((n: any) => ({ node_id: n.id, dimensions: 3, vector: [1, 0, 0], text_hash: vectorTextHash(n) }))
+    };
+    writeFileSync(out, JSON.stringify(freshIndex));
+    // 自分は OLD snapshot (graphObject 直渡し = seq 不明) から build。
+    const res: any = await buildAndWriteVectorIndex(
+      { vault: vaultDir, out },
+      { provider: fakeProvider(3), graphObject: { nodes: [nodeOld], edges: [] }, previousIndex: null }
+    );
+    assert.equal(res.skipped, true, "現 graph と一致する index を古い snapshot で踏み潰さない");
+    const onDisk = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(onDisk.provider, "other", "ファイル内容は不変");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── issue #31: 逐次 embed → embedMany バッチ ─────────────────────────────────
+test("embedNodesIncremental: miss 分を node 順どおり embedMany で 1 バッチ送出 (再利用行はバッチに載らない)", async () => {
+  const batches: string[][] = [];
+  const provider: any = {
+    id: "fake", capability: "semantic", semantic: true, dimensions: 3,
+    metadata: { endpoint: "http://fake/v1/embeddings", model: "fake-model" },
+    embed: async (text: string) => { batches.push([text]); return [text.length % 5, 1, 0]; },
+    embedMany: async (texts: string[]) => { batches.push([...texts]); return texts.map((t) => [t.length % 5, 1, 0]); }
+  };
+  const a = { id: "decision:s:a", type: "Decision", title: "A", summary: "alpha" };
+  const b = { id: "decision:s:b", type: "Decision", title: "B", summary: "beta" };
+  const c = { id: "decision:s:c", type: "Decision", title: "C", summary: "gamma" };
+  const prev = [{ node_id: "decision:s:b", dimensions: 3, vector: [9, 9, 9], text_hash: vectorTextHash(b) }];
+  const rows = await embedNodesIncremental([a, b, c], provider, prev);
+  assert.equal(batches.length, 1, "miss 2 件は 1 回の embedMany バッチ (現行は 1 件ずつ = red)");
+  assert.deepEqual(batches[0], [nodeVectorText(a), nodeVectorText(c)], "バッチ内容は node 順の miss テキスト");
+  assert.deepEqual(
+    rows.map((r: any) => r.node_id),
+    ["decision:s:a", "decision:s:b", "decision:s:c"],
+    "rows は node 順 (決定論的順序を維持)"
+  );
+  assert.deepEqual(rows[1].vector, [9, 9, 9], "unchanged (text_hash 一致) は再利用しバッチに含めない");
+  assert.equal(rows[1].text_hash, vectorTextHash(b));
+});
+
+test("embedNodesIncremental: documentPrefix はバッチの各 miss テキストにも付く", async () => {
+  const batches: string[][] = [];
+  const provider: any = {
+    id: "fake", capability: "semantic", semantic: true, dimensions: 3,
+    metadata: { endpoint: "http://fake/v1/embeddings", model: "fake-model" },
+    embed: async (text: string) => { batches.push([text]); return [1, 0, 0]; },
+    embedMany: async (texts: string[]) => { batches.push([...texts]); return texts.map(() => [1, 0, 0]); }
+  };
+  const a = { id: "decision:s:a", type: "Decision", title: "A", summary: "alpha" };
+  const b = { id: "decision:s:b", type: "Decision", title: "B", summary: "beta" };
+  const rows = await embedNodesIncremental([a, b], provider, [], "search_document: ");
+  assert.equal(batches.length, 1);
+  assert.deepEqual(batches[0], [`search_document: ${nodeVectorText(a)}`, `search_document: ${nodeVectorText(b)}`]);
+  assert.equal(rows[0].text_hash, vectorTextHash(a, "search_document: "), "text_hash は prefix 込み (従来どおり)");
+});
+
+// ── P3-G: indexWriteWouldRegress の seqVerdict リファクタリング ─────────────
+
+test("R4: indexWriteWouldRegress no-vaultDir path — graph 読み不可なので seq に関係なく後勝ち", async () => {
+  const existing = { snapshot_seq: 5, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 2, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false,
+    "vaultDir 無し → graph で世代を証明できない → 後勝ち");
+});
+
+test("P3-G: indexWriteWouldRegress no-vaultDir path — existing.seq <= payload.seq は後勝ち", async () => {
+  const existing = { snapshot_seq: 2, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 5, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false,
+    "seq が自分の方が新しければ退行ではない");
+});
+
+test("P3-G: indexWriteWouldRegress no-vaultDir path — seq が片方欠落なら後勝ち", async () => {
+  const existing = { graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 5, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing), false,
+    "existing.seq 無し → 比較不能 → 後勝ち");
+  const payload2 = { graph_fingerprint: "b".repeat(64), rows: [] };
+  const existing2 = { snapshot_seq: 5, graph_fingerprint: "a".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload2, existing2), false,
+    "payload.seq 無し → 比較不能 → 後勝ち");
+});
+
+test("R4: indexWriteWouldRegress catch fallback — graph 読み失敗時は seq に関係なく後勝ち", async () => {
+  const existing = { snapshot_seq: 8, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 3, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-r4-seq"),
+    false, "graph 読み失敗 → 世代同一性を証明できない → 後勝ち");
+});
+
+test("R4: indexWriteWouldRegress catch fallback — cache 再初期化後 (payload.seq = 0) は後勝ち", async () => {
+  const existing = { snapshot_seq: 10, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 0, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-r4-reinit"),
+    false, "graph 読み失敗 → 後勝ち");
+});
+
+test("R4: indexWriteWouldRegress catch fallback — cache 再初期化後 seq > 0 (payload.seq = 2) でも後勝ち", async () => {
+  // R3 指摘: payload.seq === 0 の特別扱いだけでは 2 回目以降 (seq=2,4,...) を捕まえない。
+  // graph 読み不可 → seq 比較自体が安全でない → 一律後勝ち。
+  const existing = { snapshot_seq: 10, graph_fingerprint: "a".repeat(64), rows: [] };
+  const payload = { snapshot_seq: 2, graph_fingerprint: "b".repeat(64), rows: [] };
+  assert.equal(await indexWriteWouldRegress(payload, existing, "/nonexistent-vault-r4-seq2"),
+    false, "graph 読み失敗 + 新 epoch seq=2 vs 旧 epoch seq=10 → 後勝ち (恒久 skip しない)");
 });

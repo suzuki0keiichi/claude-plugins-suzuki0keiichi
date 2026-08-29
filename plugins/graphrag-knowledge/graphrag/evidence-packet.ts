@@ -1,5 +1,6 @@
 import { confidenceMessage, gradeConfidence } from "./confidence.ts";
 import { expandNeighbors, loadGraph, loadRequiredVectorIndex, nodeForOutput, prepareVectorSearch, searchGraph } from "./retrieval.ts";
+import { loadLexicalIndex } from "./lexical-index.ts";
 import { describeVectorIndex } from "./vector.ts";
 import { pathToFileURL } from "node:url";
 
@@ -18,9 +19,10 @@ export async function buildEvidencePacket(args) {
   const graph = args.graphData ?? await loadGraph(args.vault);
   // useVector === false (ask --lexical-only) は明示 degrade: 索引読込も embedding も
   // 行わない (brief.buildQueryBrief と同じ契約 — 無言 fallback ではない)。
+  // issue #34: graph を渡して鮮度判定を内容突合にする (vault の mtime walk なし)。
   const vectorIndex = args.useVector === false
     ? null
-    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector, args.vectorDelta);
+    : args.vectorIndex ?? await loadRequiredVectorIndex(args.vault, args.vector, { graph });
   const vectorDescription = describeVectorIndex(vectorIndex);
   // R6 multi-query: 呼び出し側が --gist 込みの queryVectors を渡していればそれを使う。
   const vectorSearch = args.useVector === false
@@ -28,9 +30,15 @@ export async function buildEvidencePacket(args) {
     : Array.isArray(args.queryVectors) && args.queryVectors.length > 0
       ? { vectorIndex, queryVectors: args.queryVectors }
       : await prepareVectorSearch(args.request, { vectorIndex });
+  // issue #33: 永続転置 index。ask (runAsk) が brief と共有してくれば再利用し、
+  // 単体実行では自前で読む (指紋不一致/破損は loadLexicalIndex 内で自己修復)。
+  const lexicalIndex = args.lexicalIndex !== undefined
+    ? args.lexicalIndex
+    : await loadLexicalIndex(args.vault, graph);
   const matches = searchGraph(graph, args.request, {
     types: args.types,
     limit: args.limit,
+    lexicalIndex,
     ...vectorSearch
   });
   const matchIds = matches.map((match) => match.node.id);
@@ -129,9 +137,6 @@ export function parseArgs(argv) {
     request: typeof parsed.request === "string" ? parsed.request : "",
     vault: typeof parsed.vault === "string" ? parsed.vault : process.env.GRAPHRAG_VAULT_DIR,
     vector: typeof parsed.vector === "string" ? parsed.vector : undefined,
-    vectorDelta: typeof (parsed.vectorDelta ?? parsed["vector-delta"]) === "string"
-      ? parsed.vectorDelta ?? parsed["vector-delta"]
-      : undefined,
     limit: typeof parsed.limit === "string" ? Number(parsed.limit) : 8,
     neighbors: typeof parsed.neighbors === "string" ? Number(parsed.neighbors) : 1,
     types: typeof parsed.types === "string" ? parsed.types.split(",").filter(Boolean) : []

@@ -13,13 +13,15 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
   readdirSync,
   statSync,
   existsSync,
   chmodSync,
   unlinkSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import os from "node:os";
+const { tmpdir } = os;
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
 import {
@@ -27,6 +29,9 @@ import {
   writeVaultDelta,
   writeFileAtomic,
   vaultHead,
+  writeVaultWriteJournal,
+  vaultWriteJournalPath,
+  sha256Hex,
 } from "./mutate-vault.ts";
 import { importVault } from "./import-vault.ts";
 import { validateGraph } from "./schema.ts";
@@ -405,7 +410,7 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   assert.equal(began % 2, 1);
   writeFileSync(
     path.join(cacheDir, "vault.lock"),
-    JSON.stringify({ pid: deadPid(), ts: Date.now() }) // 死んだ writer のロック残骸
+    JSON.stringify({ pid: deadPid(), ts: Date.now(), hostname: os.hostname() }) // 死んだ writer のロック残骸
   );
   const torn = {
     generated_at: FIXED_TS,
@@ -413,11 +418,37 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
       { id: "file:s:README.md", type: "File", title: "README.md", path: "README.md" },
       { id: "decision:s:torn", type: "Decision", title: "Torn", summary: "written but never committed" },
     ],
-    edges: [],
+    // source backing (issue #28): torn ノードにも provenance edge を持たせ、回復後の
+    // fsck (source-backing check) が全 ok になる前提を保つ — この test の焦点は torn
+    // write 回復であって unbacked legacy ではない。
+    edges: [
+      {
+        id: "decision_s_torn__documented_by__file_s_README.md",
+        type: "documented_by",
+        from: "decision:s:torn",
+        to: "file:s:README.md",
+      },
+    ],
   };
   const delta = writeVaultDelta(vault, torn);
   assert.ok(delta.written.length > 0, "前提: 未 commit の delta がディスクに在る");
   assert.equal(vaultHead(vault), head0, "前提: commit はされていない (torn)");
+  // 実 writer は begin → write journal → writeDelta の順で進む (順序は mutate-vault.test.ts
+  // のライフサイクルテストが固定) ので、writeDelta 後 (= この kill 地点) のプロセスは必ず
+  // 触接パスの journal を残している。回復側の吸収 stage はこの journal 記載パスに限定される
+  // (再レビュー指摘3: 生成集合全体を吸収すると crash 以前からの利用者 WIP まで巻き込む)。
+  // 3回目レビュー指摘1: journal には書込窓の奇数 seq (began) が打刻され、回復側は
+  // 「打刻 seq === 観測した奇数 seq」の一致で今回の crash に属する journal と識別する。
+  // 敵対レビュー指摘B: エントリは {path, sha256(intended)} — 書いた内容のハッシュを打刻。
+  writeVaultWriteJournal(
+    cacheDir,
+    delta.written.map((rel) => ({
+      path: rel.split(path.sep).join("/"),
+      sha256: sha256Hex(readFileSync(path.join(vault, rel), "utf8")),
+    })),
+    began
+  );
+  assert.ok(existsSync(vaultWriteJournalPath(cacheDir)), "前提: crash 時点で write journal が在る");
 
   // (a) fsck は torn write を ERROR + 復旧ヒントで検知する。
   const report = fsckVault({ vaultDir: vault });
@@ -447,6 +478,7 @@ test("注入5: delta と commit の間で kill → fsck が torn write を検知
   assert.deepEqual(validateGraph(after), []);
   assert.ok(after.nodes.some((n: any) => n.id === "decision:s:torn"), "torn delta は commit に吸収");
   assert.ok(after.nodes.some((n: any) => n.id === "decision:s:rec1"), "新 mutation も適用");
+  assert.ok(!existsSync(vaultWriteJournalPath(cacheDir)), "journal は回復 commit 成功後に削除される");
 
   // (c) 回復後の fsck は全チェック ok。
   const report2 = fsckVault({ vaultDir: vault });

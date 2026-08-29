@@ -1,15 +1,40 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { cacheDirForVault, cacheDirUnder, consumerCacheDirForVault, type VaultMode } from "./cli-env.ts";
+import { pidAlive } from "./vault-lock.ts";
 
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 時間
 const STATE_FILENAME = "ask-state.json";
 
-// checkpoint 復元の予約キー。8 文字 fingerprint (fingerprintQuestion) とは長さで
+// checkpoint 復元の予約キーの stem。8 文字 fingerprint (fingerprintQuestion) とは長さで
 // 衝突しない (14 文字・アンダースコア境界)。checkpoint-mark verb が書き、clear-restore
 // フックが one-shot で消費する。ask の連打カウントとは別レーンで ask-state.json に同居する。
+// #29 以降の実キーは identity 別の `__checkpoint__:<hash>` (checkpointStateKey)。この stem
+// 単体のキーは旧フォーマット (単一予約キー時代) で、フック側が読み互換で消費する。
 export const CHECKPOINT_STATE_KEY = "__checkpoint__";
+
+// checkpoint 予約キーの失効窓 (60 分)。主の消費はフック側の one-shot 削除であり、これは
+// 「checkpoint-mark を撃ったが clear しなかった」古い意図の暴発防止と、identity 別キーで
+// map が育たないための inline GC (下の gcInPlace) の両方に使う。
+// hooks/clear-restore.mjs は依存ゼロ方針でこの値を import せず複製する (相互参照コメントを両側に置く)。
+export const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
+
+/**
+ * checkpoint 予約キーを identity (session_dir ?? git root ?? cwd を realpath 正規化した文字列) 別に
+ * 分ける (#29)。単一キーだと同じ vault を共有する複数 session の checkpoint が後勝ちで消え、
+ * 別 project の /clear に判定前消費 (先食い) される。hash は衝突回避のためだけの短縮で、
+ * 復元フックはキーの suffix を解釈しない (照合は entry の session_dir/root/cwd で行う)。
+ */
+export function checkpointStateKey(identity: string): string {
+  return `${CHECKPOINT_STATE_KEY}:${createHash("sha1").update(identity).digest("hex").slice(0, 12)}`;
+}
+
+/** key が checkpoint 予約キー (旧単一キー / identity 別キー) か。TTL の使い分けに使う。 */
+export function isCheckpointStateKey(key: string): boolean {
+  return key === CHECKPOINT_STATE_KEY || key.startsWith(`${CHECKPOINT_STATE_KEY}:`);
+}
 
 // hits: その質問の直近の top≤3 ヒットノード id (E4 ask-trail)。premise 候補提案が
 // 「直近で見ていたノード」を引くために使う。既存 count/last_at の entry に同居する。
@@ -107,21 +132,230 @@ export function saveAskState(baseDir: string, state: AskState): void {
   // 原子書き込み: 同ディレクトリの一時ファイルへ書いてから rename する。
   // rename は同一 FS 上で原子的なので、並行 load→save が競合しても読み手は
   // 常に「古い完全な JSON」か「新しい完全な JSON」を見る (中途半端な切れた
-  // ファイルを読まない)。完全な排他ではない — 片方の更新が消える可能性は残るが、
-  // lock を持ち込まずに「壊れた JSON を読ませない」ところまでを保証する。
+  // ファイルを読まない)。これ単体は排他ではない — read-modify-write の lost update は
+  // 呼び手側が withAskStateLock で囲んで防ぐ (#29。read-only の読み手は lock 不要)。
   const fp = stateFilePath(baseDir);
   const tmp = `${fp}.tmp.${process.pid}`;
   writeFileSync(tmp, JSON.stringify(state, null, 2));
   renameSync(tmp, fp);
 }
 
-export function gcAskState(baseDir: string, now: number = Date.now()): void {
-  const state = loadAskState(baseDir);
-  const fresh: AskState = {};
-  for (const [key, entry] of Object.entries(state)) {
-    if (now - entry.last_at < TTL_MS) fresh[key] = entry;
+// ── mkdir ベースの軽量 lock (#29) ─────────────────────────────────────────
+// saveAskState の tmp+rename は「壊れた JSON を読ませない」までしか保証せず、load→save の
+// read-modify-write は並行実行で片方の更新が消える (lost update: bump 同士 / bump と
+// checkpoint-mark / フックの consume 書き戻し、が実際に競合する)。RMW 全経路をこの lock で囲む。
+//
+// プロトコル (hooks/clear-restore.mjs に依存ゼロ方針で同一実装を複製する — 変える時は両側を直すこと):
+//   - lock は <baseDir>/ask-state.lock という「ディレクトリ」。mkdir は既存時に EEXIST で
+//     失敗するため、素の node だけで原子的な取得になる (恒久ファイル種は増えない — owner ファイル
+//     も一時 dir 内のみ)。
+//   - 取得直後に lock dir 内へ owner ファイル (pid + hostname + ランダム nonce + 取得時刻) を
+//     書く (#41)。mkdir 直後の dir mtime は新しいので、owner を書くまでの間に stale 判定される
+//     ことはない。
+//   - 取得失敗時は 25ms 間隔でリトライ。stale 判定 (#41 再レビュー — vault-lock.ts と同じ流儀):
+//     主軸は「owner pid の死亡」。owner の hostname が自ホストと一致する時だけ pid 生存を見る
+//     (state dir は機械ローカル前提 — cli-env.ts 参照 — なので通常は必ず一致する)。
+//       * mtime (owner ファイル、無ければ dir) が 5 秒以内 → fresh、待つ。
+//       * 5 秒超 + owner pid 死亡 → 残骸 (クラッシュした保持者)、奪取。
+//       * 5 秒超 + owner pid 生存 → 奪取しない (fn 内で停止しているだけの生きた保持者から
+//         横取りすると双方が RMW を完走して lost update になる — レビュアー実機再現)。
+//         例外は LOCK_PID_REUSE_MAX_MS (10 分) 超: pid 再利用の保険としての絶対上限。
+//       * owner が無い/読めない/hostname 不一致 (ネットワーク共有 state dir 等) → 従来の
+//         mtime 判定 (5 秒超で奪取可) に落とす。
+//     奪取前に「最初に読んだ nonce と現在の nonce が同一のままであること」を再確認する
+//     (read→rm 間に別プロセスが奪取済みなら nonce が変わる — 二重奪取の大半を検出。残る窓は
+//     mkdir の原子性が受け止める: 同時奪取しても mkdir に勝つのは一方だけ)。
+//     削除は owner ファイル → dir の順。dir が空でなければ rmdir が ENOTEMPTY で失敗し retry に戻る。
+//   - release (finally) は owner ファイルの nonce が自分と一致する場合のみ削除する (#41 ABA:
+//     停止中に stale 奪取されていたら lock はもう他者のもの — 不一致/読めない場合は触らない。
+//     従来は無条件 rmdir だったため、奪取者の lock を消して第三者を進入させ lost update が再発した)。
+//   - fencing (#41 再レビュー): RMW の save 直前に owner の nonce が自分のままかを再確認し、
+//     失われていたら書かずに RMW 全体を再試行する (再 acquire → fn 再実行、最大 3 回)。
+//     奪取された後に旧 owner が save を完走して奪取者の更新を踏み潰す残余窓を塞ぐ。
+//     上限到達時は従来同等の best-effort で書く (console.error で可視化)。
+//   - 10 秒でタイムアウトし「lock なしで続行」する (best-effort、console.error で可視化)。
+//     ask も復元フックもブロックで殺すより、最悪ケースで従来同等 (lost update の可能性) に
+//     落ちる方を選ぶ。
+const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_OWNER_FILENAME = "owner.json";
+const LOCK_STALE_MS = 5_000;
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_POLL_MS = 25;
+// 生存 pid の lock でも奪取を許す絶対上限 (pid 再利用の保険)。vault-lock.ts の staleMs と同じ流儀。
+const LOCK_PID_REUSE_MAX_MS = 600_000;
+// fencing 喪失時の RMW 再試行上限 (初回込み)。
+const RMW_MAX_ATTEMPTS = 3;
+
+// owner ファイルの中身。欠け/型不正のフィールドは null (旧フォーマットの owner は hostname を
+// 持たない → null → mtime 判定に落ちる)。
+type LockOwner = { pid: number | null; nonce: string | null; hostname: string | null };
+
+// owner ファイルを読む。無い/読めない/形式不正は null (= owner 不明)。
+function readLockOwner(ownerPath: string): LockOwner | null {
+  try {
+    const parsed = JSON.parse(readFileSync(ownerPath, "utf8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      pid: typeof parsed.pid === "number" ? parsed.pid : null,
+      nonce: typeof parsed.nonce === "string" ? parsed.nonce : null,
+      hostname: typeof parsed.hostname === "string" ? parsed.hostname : null
+    };
+  } catch {
+    return null;
   }
-  saveAskState(baseDir, fresh);
+}
+
+function readLockOwnerNonce(ownerPath: string): string | null {
+  return readLockOwner(ownerPath)?.nonce ?? null;
+}
+
+// stale 経過後 (age > LOCK_STALE_MS) の lock を奪取してよいか。プロトコルコメント参照。
+function lockOwnerConsideredDead(owner: LockOwner | null, ageMs: number): boolean {
+  if (!owner || owner.pid === null || owner.hostname === null || owner.hostname !== os.hostname()) {
+    return true; // owner 不明 / 旧フォーマット / 別ホスト → 従来の mtime 判定 (呼び手が stale 済み)
+  }
+  if (!pidAlive(owner.pid)) return true; // 保持者は死んでいる → 残骸
+  return ageMs > LOCK_PID_REUSE_MAX_MS; // 生存 pid は原則奪わない。絶対上限だけは例外
+}
+
+// 同期 sleep。Atomics.wait はメインスレッドの素 node で使える (timer も child_process も不要)。
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // SharedArrayBuffer が使えない環境では即リトライ (busy loop 側に倒す)。
+  }
+}
+
+// save 直前の fencing 再検証で lock 喪失を検出した時の内部シグナル (withAskStateLock が捕捉して
+// RMW 全体を再試行する)。呼び手のエラーと混ざらないよう専用クラス。
+class AskStateFencingLostError extends Error {
+  constructor() {
+    super("ask-state lock lost before save");
+  }
+}
+
+type AskStateLockHandle = { held: boolean; nonce: string; ownerPath: string; release: () => void };
+
+function acquireAskStateLock(baseDir: string): AskStateLockHandle {
+  if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
+  const lockDir = path.join(baseDir, LOCK_DIRNAME);
+  const ownerPath = path.join(lockDir, LOCK_OWNER_FILENAME);
+  const nonce = `${process.pid}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let held = false;
+  while (!held) {
+    try {
+      mkdirSync(lockDir); // 非 recursive: 既存なら EEXIST → 原子的な取得判定
+      held = true;
+      try {
+        // 取得の証明を即座に書く。失敗しても保持は続行 — owner 不明 lock として振る舞う
+        // (stale 化したら他者に無条件奪取され、release も nonce 不一致で触らない)。
+        writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, nonce, hostname: os.hostname(), acquired_at: Date.now() }));
+      } catch (e: any) { console.error(`[graphrag] ask-state lock: owner write failed (${e?.code ?? e}) — lock held without identity`); }
+    } catch (e: any) {
+      if (e?.code !== "EEXIST") {
+        // 権限等の想定外 — lock なしで続行 (best-effort)
+        console.error(`[graphrag] ask-state lock: unexpected acquire failure (${e?.code ?? e}) — continuing without lock (best-effort)`);
+        break;
+      }
+      // タイムアウトは全 retry 経路 (stale 奪取の continue 含む) が通る位置で判定する。
+      // 旧実装は stale 分岐の continue が判定を素通りし、消せない残骸で無限 busy loop になった。
+      if (Date.now() > deadline) {
+        // タイムアウト — lock なしで続行 (best-effort)。無音だと lost update の可能性が見えない。
+        console.error(`[graphrag] ask-state lock: timeout after ${LOCK_TIMEOUT_MS}ms (${lockDir}) — continuing without lock (best-effort, lost update possible)`);
+        break;
+      }
+      try {
+        const seenOwner = readLockOwner(ownerPath); // null = owner 不明
+        let mtimeMs: number;
+        try {
+          mtimeMs = statSync(ownerPath).mtimeMs; // 保持者の証明の鮮度で判定
+        } catch {
+          mtimeMs = statSync(lockDir).mtimeMs; // owner 無し lock は dir の鮮度で判定
+        }
+        const age = Date.now() - mtimeMs;
+        if (age > LOCK_STALE_MS && lockOwnerConsideredDead(seenOwner, age)) {
+          // 奪取直前に nonce が変わっていないか再確認 (#41: 別プロセスが先に奪取して保持中の
+          // lock を消さない)。owner 不明 (null) かつ stale はそのまま削除可。
+          if (readLockOwnerNonce(ownerPath) === (seenOwner?.nonce ?? null)) {
+            rmSync(ownerPath, { force: true });
+            rmdirSync(lockDir); // 残骸を奪取 (rmdir の競合は片方が ENOENT/ENOTEMPTY → 次ループで再判定)
+          }
+          continue;
+        }
+      } catch {
+        continue; // stat/rm 中に消えた等 → すぐ再取得を試みる
+      }
+      sleepSync(LOCK_POLL_MS);
+    }
+  }
+  return {
+    held,
+    nonce,
+    ownerPath,
+    release(): void {
+      if (!held) return;
+      try {
+        // 自分の nonce のままの時だけ解放する (#41 ABA)。不一致/読めない場合は停止中に
+        // stale 奪取済み — その lock はもう他者のものなので触らない。
+        if (readLockOwnerNonce(ownerPath) === nonce) {
+          rmSync(ownerPath, { force: true });
+          rmdirSync(lockDir);
+        }
+      } catch (e: any) { if (e?.code !== "ENOENT" && e?.code !== "ENOTEMPTY") console.error(`[graphrag] ask-state lock: release failed (${e?.code ?? e})`); }
+    }
+  };
+}
+
+/**
+ * ask-state.json への read-modify-write を排他する。fn は同期で短く保つこと。
+ *
+ * 契約 (#41 再レビュー):
+ *   - fn は再実行され得る (最大 RMW_MAX_ATTEMPTS 回)。load は必ず fn の中で行い、
+ *     書き込みは渡される save を通すこと。save は書き込み直前に owner の nonce が
+ *     自分のままかを再検証し (fencing)、失われていたら書かずに fn ごと再試行する
+ *     (奪取者の更新を旧 owner の save が踏み潰す lost update を塞ぐ)。
+ *   - 上限到達時は従来同等の best-effort で書く (console.error で可視化)。
+ *   - lock なし (タイムアウト等) で走る時は fencing 検証をスキップして書く (従来動作)。
+ */
+export function withAskStateLock<T>(baseDir: string, fn: (save: (state: AskState) => void) => T): T {
+  for (let attempt = 1; ; attempt += 1) {
+    const lock = acquireAskStateLock(baseDir);
+    const lastAttempt = attempt >= RMW_MAX_ATTEMPTS;
+    try {
+      const save = (state: AskState): void => {
+        if (lock.held && readLockOwnerNonce(lock.ownerPath) !== lock.nonce) {
+          if (!lastAttempt) throw new AskStateFencingLostError();
+          console.error("[graphrag] ask-state lock: lost before save and retries exhausted — writing best-effort (lost update possible)");
+        }
+        saveAskState(baseDir, state);
+      };
+      return fn(save);
+    } catch (e) {
+      if (e instanceof AskStateFencingLostError) continue; // 再 acquire → fn 再実行
+      throw e;
+    } finally {
+      lock.release();
+    }
+  }
+}
+
+// inline GC: ask entry は 24h、checkpoint 予約キー (identity 別で増える) は 60 分で掃除する。
+// last_at はどちらも必ず持つ不変条件 (CheckpointStateEntry のコメント参照)。
+function gcInPlace(state: AskState, now: number): void {
+  for (const key of Object.keys(state)) {
+    const ttl = isCheckpointStateKey(key) ? CHECKPOINT_TTL_MS : TTL_MS;
+    if (now - state[key].last_at >= ttl) delete state[key];
+  }
+}
+
+export function gcAskState(baseDir: string, now: number = Date.now()): void {
+  withAskStateLock(baseDir, (save) => {
+    const state = loadAskState(baseDir);
+    gcInPlace(state, now);
+    save(state);
+  });
 }
 
 /**
@@ -129,17 +363,16 @@ export function gcAskState(baseDir: string, now: number = Date.now()): void {
  */
 export function bumpCallCount(question: string, baseDir: string, now: number = Date.now()): number {
   const fp = fingerprintQuestion(question);
-  const state = loadAskState(baseDir);
-  // inline GC
-  for (const key of Object.keys(state)) {
-    if (now - state[key].last_at >= TTL_MS) delete state[key];
-  }
-  const prev = state[fp];
-  const next = (prev?.count ?? 0) + 1;
-  // hits は record 専用なので bump では保持する (連打カウントが hits を消さない)。
-  state[fp] = { count: next, last_at: now, ...(prev?.hits ? { hits: prev.hits } : {}) };
-  saveAskState(baseDir, state);
-  return next;
+  return withAskStateLock(baseDir, (save) => {
+    const state = loadAskState(baseDir);
+    gcInPlace(state, now);
+    const prev = state[fp] as AskStateEntry | undefined;
+    const next = (prev?.count ?? 0) + 1;
+    // hits は record 専用なので bump では保持する (連打カウントが hits を消さない)。
+    state[fp] = { count: next, last_at: now, ...(prev?.hits ? { hits: prev.hits } : {}) };
+    save(state);
+    return next;
+  });
 }
 
 /**
@@ -154,15 +387,14 @@ export function recordAskHits(
   now: number = Date.now()
 ): void {
   const fp = fingerprintQuestion(question);
-  const state = loadAskState(baseDir);
-  // inline GC (bumpCallCount と同じ TTL 掃除を同居させる)。
-  for (const key of Object.keys(state)) {
-    if (now - state[key].last_at >= TTL_MS) delete state[key];
-  }
-  const prev = state[fp];
-  const hits = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string").slice(0, 3);
-  state[fp] = { count: prev?.count ?? 0, last_at: now, hits };
-  saveAskState(baseDir, state);
+  withAskStateLock(baseDir, (save) => {
+    const state = loadAskState(baseDir);
+    gcInPlace(state, now);
+    const prev = state[fp] as AskStateEntry | undefined;
+    const hits = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string").slice(0, 3);
+    state[fp] = { count: prev?.count ?? 0, last_at: now, hits };
+    save(state);
+  });
 }
 
 /**

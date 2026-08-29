@@ -44,9 +44,11 @@ test("cli has expected headline verbs", () => {
 // (rail-prompt / rail-touch を追加。読みレールの判定本体 — どちらも read + ranked JSON の読み面で、生クエリ経路ではない)
 // (v1.32.0: embedder-setup を追加。同梱デフォルト embedding の 1 マシン 1 回セットアップ —
 //  環境構築 verb であり、グラフの読み書き接面ではない)
-test("listKnownVerbs returns all 47 verbs (27 primitive + 20 headline)", () => {
+// (v1.41.0: rail-read を追加。read レールの判定本体 — rail-touch と同じ登記逆引きの読み面で、
+//  生クエリ経路ではない)
+test("listKnownVerbs returns all 48 verbs (28 primitive + 20 headline)", () => {
   const all = listKnownVerbs();
-  assert.equal(all.length, 47);
+  assert.equal(all.length, 48);
   // Guard against a verb id being registered twice across the primitive/headline lists.
   assert.equal(new Set(all).size, all.length, "duplicate verb id across primitive/headline lists");
 });

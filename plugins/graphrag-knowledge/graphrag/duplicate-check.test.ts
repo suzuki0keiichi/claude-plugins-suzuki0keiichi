@@ -542,3 +542,37 @@ test("duplicateGateText は索引行の埋め込み入力 (nodeVectorText) と�
   assert.match(duplicateGateText(node), /D/, "description も埋め込みテキストに含まれる");
   assert.match(duplicateGateText(node), /alias-1/, "aliases も含まれる (索引行と同じ)");
 });
+
+// ── issue #31: embedMany バッチ経由 (fallback loop の逐次 embed 解消) ────────
+test("embedMany が渡されたら候補全件を 1 バッチで埋め込む (単発 embed は呼ばない)", async () => {
+  const manyBatches: string[][] = [];
+  const res = await runDuplicateCheck({
+    plan: {
+      nodes: [
+        { op: "create", id: "decision:s:x", type: "Decision", title: "X", summary: "x" },
+        { op: "create", id: "decision:s:y", type: "Decision", title: "Y", summary: "y" },
+      ],
+    },
+    currentGraph: graphWith(existingDecision),
+    vectorIndex: indexWith({ node_id: "decision:s:a", vector: [1, 0, 0] }),
+    embed: async () => { throw new Error("single embed must not be called when embedMany is provided"); },
+    embedMany: async (texts: string[]) => { manyBatches.push([...texts]); return texts.map(() => [0, 1, 0]); },
+  } as any);
+  assert.equal(res.status, "ok", "embedMany 経由で埋め込みが成立する (直交 = suspect 無し)");
+  assert.equal(manyBatches.length, 1, "候補は 1 バッチ");
+  assert.equal(manyBatches[0].length, 2, "候補 2 件が同一バッチに載る");
+});
+
+test("embedMany の件数不一致は embedding 段の非致命 skip に落ちる (lexical は保持)", async () => {
+  const res = await runDuplicateCheck({
+    plan: {
+      nodes: [{ op: "create", id: "decision:s:x", type: "Decision", title: "X", summary: "x" }],
+    },
+    currentGraph: graphWith(existingDecision),
+    vectorIndex: indexWith({ node_id: "decision:s:a", vector: [1, 0, 0] }),
+    embed: async () => [0, 1, 0],
+    embedMany: async () => [],
+  } as any);
+  assert.equal(res.status, "skipped");
+  assert.match(res.reason ?? "", /embedding unavailable/);
+});

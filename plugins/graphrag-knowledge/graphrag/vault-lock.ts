@@ -1,9 +1,15 @@
 import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, statSync, renameSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-type LockInfo = { pid: number; ts: number };
+type LockInfo = { pid: number; ts: number; hostname?: string; nonce?: string };
 
-function pidAlive(pid: number): boolean {
+/**
+ * pid が生きているか (kill 0 プローブ。EPERM = 存在するが権限なし → 生存扱い)。
+ * cli-ask-state.ts の lock の stale 判定も共有する (state dir は機械ローカル前提 —
+ * cli-env.ts 参照 — なので pid ベース判定が成立する)。
+ */
+export function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
 }
 
@@ -17,13 +23,21 @@ function isStale(lockPath: string, staleMs: number, graceMs: number): boolean {
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    // metadata が正常に読めた場合: PID 死亡なら stale。生きた PID のロックは
-    // 年齢だけでは奪わない (git commit や FS が遅いだけの生きた writer から
-    // ロックを横取りすると二重書きになる)。staleMs は PID 再利用への保険としての
-    // 大きな絶対上限 (既定 10 分) にのみ使う。
-    if (!pidAlive(info.pid)) return true;
-    if (Date.now() - info.ts > staleMs) return true;
-    return false;
+    // hostname が明示的に異なる場合だけ PID 生存確認を避ける — 別ホストの PID は
+    // ローカルの PID テーブルでは判定できない。hostname 欠落は v1.40.2 以前の
+    // 機械ローカルな旧形式 lock なので、同一ホストと同じく pidAlive が有効。
+    if (!info.hostname || info.hostname === os.hostname()) {
+      if (!pidAlive(info.pid)) return true;
+      // PID alive + ローカル lock → staleMs は PID 再利用への保険の絶対上限 (既定 10 分)。
+      return Date.now() - info.ts > staleMs;
+    }
+    // hostname が明示的に不一致 → mtime + staleMs 判定にフォールバック。
+    try {
+      const mtimeMs = statSync(lockPath).mtimeMs;
+      return Date.now() - mtimeMs > staleMs;
+    } catch {
+      return true; // stat 失敗 (消えた) → 取得可能
+    }
   } catch {
     // 空/部分/壊れた lock: 別プロセスが openSync 直後・metadata 書き込み前かもしれない。
     // mtime が grace 内なら「生成途中」とみなして待つ（奪わない）。grace 超過なら壊れた残骸として奪う。
@@ -65,13 +79,18 @@ export function endVaultWrite(stateDir: string, beganAt: number): void {
 }
 
 /**
- * writer が書込途中(seq 奇数)で hard crash したかを判定する。
- * 実運用では seq 奇数窓は常に vault.lock 保持と同時 (applyMutationToVault は withVaultLock
- * 内で beginVaultWrite する)。endVaultWrite は withVaultLock の finally より前に走るので、
- * 正常完了/例外では「seq 偶数 → ロック解放」の順になる。よって「ロックが在り、その PID が
- * 死んでいる」= writer が beginVaultWrite と endVaultWrite の間で hard crash し、seq が
- * 奇数のまま取り残された、と判定できる。この時もう誰も vault を書いていないので読んで良い。
- * ロックが無い/生成途中(空・壊れ)の場合は live 扱い(= bypass せず待つ)で保守的にする。
+ * writer が書込途中(seq 奇数)で hard crash したか (= 奇数 seq が「静的な残骸」か) を
+ * 判定する。実運用では seq 奇数窓は常に vault.lock 保持と同時 (applyMutationToVault は
+ * withVaultLock 内で beginVaultWrite する)。endVaultWrite は withVaultLock の finally より
+ * 前に走るので、生きた writer の奇数窓では必ず lock が存在し PID も生きている。よって:
+ *  - ロックが在り PID が死んでいる = writer が begin と end の間で hard crash。
+ *  - ロックが無い = 生きた writer は居ない (writer は lock 取得後にしか begin しない)。
+ *    crash 残骸が後続 writer に stale 回収された後の奇数 seq、または失敗した回復 run が
+ *    意図的に残した crash residue (mutate-vault 敵対レビュー指摘A: 前世代の torn 回復
+ *    材料を焼かないため endVaultWrite を呼ばず lock だけ解放する) — どちらも静的状態
+ *    なので読んで良い。読み後の再検査 (seq 不変 + 本判定の再実行) が、直後に開始した
+ *    writer との競合を弾く。
+ * 生成途中 (空・壊れ) のロックだけは live 扱い (= bypass せず待つ) で保守的にする。
  */
 function writerCrashed(stateDir: string): boolean {
   const lockPath = path.join(stateDir, "vault.lock");
@@ -79,11 +98,17 @@ function writerCrashed(stateDir: string): boolean {
   try {
     raw = readFileSync(lockPath, "utf8");
   } catch {
-    return false; // ロック無し(実運用では seq 偶数のはず) → bypass しない
+    return true; // ロック無し + seq 奇数 (呼び出し文脈) = 静的な residue → 読んで良い
   }
   try {
     const info = JSON.parse(raw) as LockInfo;
-    return !pidAlive(info.pid); // ロック在り + PID 死亡 → crash 確定
+    // hostname が明示的に異なる場合だけ PID 検査を skip (別ホストの PID テーブルは見えない)。
+    // hostname 欠落 (v1.40.2 以前の旧フォーマット) は常にローカル lock なので pidAlive が有効。
+    // ※ isStale は hostname 欠落時に mtime フォールバックがあるため一律 skip で安全だが、
+    //   writerCrashed にはフォールバックが無く、skip すると旧形式 lock の crash recovery が
+    //   永久に進まない — 両関数の hostname 欠落時の挙動が異なるのはこの構造差による。
+    if (info.hostname && info.hostname !== os.hostname()) return false;
+    return !pidAlive(info.pid);
   } catch {
     return false; // 生成途中の空/壊れロック → 別 writer が取得中かもしれない → 待つ
   }
@@ -94,6 +119,21 @@ export async function readVaultConsistent<T>(
   read: () => T,
   opts: { pollMs?: number; timeoutMs?: number } = {}
 ): Promise<T> {
+  return (await readVaultConsistentWithSeq(stateDir, read, opts)).data;
+}
+
+/**
+ * readVaultConsistent の「確定した seq 値も返す」variant (issue #27)。
+ * 返る seq は読みの前後で不変だった値 = この snapshot の世代番号。index builder は
+ * これを payload に打刻し、rename 直前の「自分より新しい snapshot の index を
+ * 踏み潰さない」比較に使う。crash bypass 経路では取り残された奇数値をそのまま返す
+ * (それがその静的状態の世代)。
+ */
+export async function readVaultConsistentWithSeq<T>(
+  stateDir: string,
+  read: () => T,
+  opts: { pollMs?: number; timeoutMs?: number } = {}
+): Promise<{ data: T; seq: number }> {
   const pollMs = opts.pollMs ?? 10;
   const deadline = Date.now() + (opts.timeoutMs ?? 10_000);
   for (;;) {
@@ -106,14 +146,14 @@ export async function readVaultConsistent<T>(
       if (writerCrashed(stateDir)) {
         const data = read();
         const s2 = readSeq(stateDir);
-        if (s1 === s2 && writerCrashed(stateDir)) return data;
+        if (s1 === s2 && writerCrashed(stateDir)) return { data, seq: s1 };
       }
       if (Date.now() > deadline) throw new Error("readVaultConsistent timeout (write in progress)");
       await new Promise((r) => setTimeout(r, pollMs)); continue;
     }
     const data = read();
     const s2 = readSeq(stateDir);
-    if (s1 === s2) return data;
+    if (s1 === s2) return { data, seq: s1 };
     if (Date.now() > deadline) throw new Error("readVaultConsistent timeout (kept changing)");
     await new Promise((r) => setTimeout(r, pollMs));
   }
@@ -145,16 +185,18 @@ export async function withVaultLock<T>(
       await new Promise((r) => setTimeout(r, pollMs));
     }
   }
+  const nonce = `${process.pid}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
   try {
-    writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() } satisfies LockInfo));
+    writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now(), hostname: os.hostname(), nonce } satisfies LockInfo));
     return await fn();
   } finally {
     try { closeSync(fd); } catch { /* noop */ }
-    // 自分の PID が入ったロックだけを消す。絶対上限超過等で誰かに奪われていた場合、
+    // 自分の PID + nonce が入ったロックだけを消す。絶対上限超過等で誰かに奪われていた場合、
     // 無条件 unlink は「奪った側のロック」を消してしまい三重目の writer を招く。
+    // PID のみの比較では PID 再利用で他者の lock を消す (ABA) ため、nonce も検証する。
     try {
       const cur = JSON.parse(readFileSync(lockPath, "utf8")) as LockInfo;
-      if (cur.pid === process.pid) unlinkSync(lockPath);
+      if (cur.pid === process.pid && cur.nonce === nonce) unlinkSync(lockPath);
     } catch { /* 消えている/壊れている → 触らない (残骸は stale 判定が回収する) */ }
   }
 }

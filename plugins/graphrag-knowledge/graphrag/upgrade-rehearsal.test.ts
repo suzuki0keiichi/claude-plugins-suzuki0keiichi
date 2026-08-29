@@ -20,18 +20,20 @@ import http from "node:http";
 import { execFile, execFileSync } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync,
-  existsSync, realpathSync, readdirSync, utimesSync
+  existsSync, realpathSync, readdirSync
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildVaultFiles } from "./build-vault.ts";
+import { vectorTextHash } from "./build-vector-index.ts";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.ts");
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
 
-/** OpenAI 互換 embedding endpoint のモック。全入力に同一ベクトル [1,0] を返す。 */
+/** OpenAI 互換 embedding endpoint のモック。全入力に同一ベクトル [1,0] を返す。
+ *  実 endpoint と同じく input は string / string[] の両対応 (issue #31 のバッチ形)。 */
 function startEmbeddingMock(): Promise<{ base: string; close: () => Promise<void> }> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -40,9 +42,16 @@ function startEmbeddingMock(): Promise<{ base: string; close: () => Promise<void
         res.end(JSON.stringify({ data: [{ id: "nomic-embed-text" }] }));
         return;
       }
-      req.resume();
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
-        res.end(JSON.stringify({ data: [{ embedding: [1, 0] }] }));
+        let input: unknown = null;
+        try {
+          input = JSON.parse(body)?.input;
+        } catch { /* input 不明なら単発扱い */ }
+        const count = Array.isArray(input) ? input.length : 1;
+        const data = Array.from({ length: count }, (_v, index) => ({ index, embedding: [1, 0] }));
+        res.end(JSON.stringify({ data }));
       });
     });
     server.listen(0, "127.0.0.1", () => {
@@ -161,14 +170,15 @@ test("upgrade rehearsal: 1.9.1 レイアウトを 1.10 CLI で開いて一連の
       provider_options: { endpoint: `${mock.base}/embeddings`, model: "nomic-embed-text" },
       graph_version: null,
       generated_at: FIXED_TS,
+      // text_hash は現行 vault の内容と整合する faithful な値 (1.9.1 が同じ vault から
+      // 構築した索引の姿)。issue #34 以降、鮮度判定は mtime でなく graph/index の内容
+      // 突合なので、hash が合っていれば legacy 索引は fresh として読まれ、合っていな
+      // ければ (正しく) 自動再構築される — ここは「fresh な legacy を fallback 読み
+      // できる」ことの検証なので前者を仕込む。
       rows: seedGraph.nodes.map((n) => ({
-        node_id: n.id, dimensions: 2, vector: [1, 0], text_hash: `legacy-${n.id}`
+        node_id: n.id, dimensions: 2, vector: [1, 0], text_hash: vectorTextHash(n)
       }))
     }, null, 2));
-    // 索引 mtime を vault ファイルより確実に新しくして、mtime 同着による
-    // 自動再構築 (legacy を読んだ事実が消える) を決定論的に防ぐ。
-    const future = new Date(Date.now() + 5_000);
-    utimesSync(legacyVectorPath, future, future);
 
     // 旧位置の ask-state: 同じ質問を過去に 3 回聞いている (fresh な last_at)。
     // 1.10 がこれを読めていれば次の ask は call_number 4 になる。
@@ -193,7 +203,7 @@ test("upgrade rehearsal: 1.9.1 レイアウトを 1.10 CLI で開いて一連の
     };
     for (const key of [
       "GRAPHRAG_VAULT_DIR", "GRAPHRAG_STATE_DIR", "GRAPHRAG_VAULT_MODE",
-      "GRAPHRAG_VECTOR_INDEX_PATH", "GRAPHRAG_VECTOR_INDEX_BASE",
+      "GRAPHRAG_VECTOR_INDEX_PATH",
       "GRAPHRAG_VECTOR_PROVIDER", "GRAPHRAG_GRAPH_JSON_PATH",
       "GRAPHRAG_WORLD_DIR", "GRAPHRAG_EMBEDDING_API_KEY"
     ]) delete env[key];

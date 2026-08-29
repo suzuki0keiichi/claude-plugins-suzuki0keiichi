@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { confidenceMessage, gradeConfidence, judgeMatchConfidence } from "./confidence.ts";
 import { edgePriority, loadGraph, loadRequiredVectorIndex, prepareVectorSearch, searchGraph } from "./retrieval.ts";
+import { loadLexicalIndex } from "./lexical-index.ts";
 import { validateGraph } from "./schema.ts";
 import { describeVectorIndex } from "./vector.ts";
 import { stocktake } from "./stocktake.ts";
@@ -66,6 +67,7 @@ export async function buildGraphBrief(options: any = {}) {
         vaultDir: graphSource,
         vectorPath: options.vector,
         vectorIndex: options.vectorIndex,
+        lexicalIndex: options.lexicalIndex,
         queryVector: options.queryVector,
         // R6 multi-query (--gist): 複数クエリベクトル。R5 graph rerank の on/off。
         // どちらも未指定なら従来挙動 (single vector / rerank on)。
@@ -212,9 +214,15 @@ export async function buildQueryBrief(graph, nodesById, options: any = {}) {
   // useVector === false (ask --lexical-only) は明示 degrade: 索引読込も embedding も
   // 一切行わず lexical (alias/ngram/coverage) のみで検索する。無言 fallback ではない —
   // 呼び出し側が出力に degraded を焼き込む責務を持つ。
+  // issue #34: graph を渡して鮮度判定を内容突合にする (vault の mtime walk なし)。
   const vectorIndex = options.useVector === false
     ? null
-    : options.vectorIndex ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath);
+    : options.vectorIndex ?? await loadRequiredVectorIndex(options.vaultDir, options.vectorPath, { graph });
+  // issue #33: 永続転置 index。呼び出し側 (ask) が共有してくれば再利用し、無ければ
+  // ここで読む (指紋不一致/破損は loadLexicalIndex 内で再計算+再永続化)。
+  const lexicalIndex = options.lexicalIndex !== undefined
+    ? options.lexicalIndex
+    : await loadLexicalIndex(options.vaultDir, graph);
   // R6: queryVectors (複数) が来ていれば最優先 (gist + 質問の両埋め込み)。
   // 次に従来の単一 queryVector、無ければここで embed する。
   let vectorSearch: any;
@@ -229,6 +237,7 @@ export async function buildQueryBrief(graph, nodesById, options: any = {}) {
   }
   const matches = searchGraph(graph, options.query, {
     limit: options.limit,
+    lexicalIndex,
     // R5 graph rerank: 既定 off (実 vault で hub 偏重の net-negative を実測。
     // retrieval.ts の R5 コメント参照)。--graph-rerank on で opt-in。
     ...(options.graphRerank !== undefined ? { graphRerank: options.graphRerank } : {}),

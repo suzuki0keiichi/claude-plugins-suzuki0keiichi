@@ -12,7 +12,7 @@ const PRIMITIVE_VERBS = [
   "branch-merge", "world-refresh", "world-join",
   "carving-allow", "harvest-history", "staleness-check",
   "xref-check", "fsck", "stocktake", "constraint-check", "frame-check", "delta-check",
-  "rail-prompt", "rail-touch", "embedder-setup"
+  "rail-prompt", "rail-touch", "rail-read", "embedder-setup"
 ] as const;
 
 const HEADLINE_VERBS = [
@@ -71,6 +71,7 @@ const PRIMITIVE_FILE_MAP: Record<PrimitiveVerb, { file: string; exportName?: str
   "delta-check": { file: "./delta-check.ts", exportName: "runDeltaCheck" },
   "rail-prompt": { file: "./rail-prompt.ts", exportName: "runRailPrompt" },
   "rail-touch": { file: "./rail-touch.ts", exportName: "runRailTouch" },
+  "rail-read": { file: "./rail-read.ts", exportName: "runRailRead" },
   "embedder-setup": { file: "./embedder-setup.ts", exportName: "runEmbedderSetup" }
 };
 

@@ -47,8 +47,9 @@ import { evidenceStaleNoteForNode, readEvidenceChangesByPath, refuteEvidenceChan
 import { isEchoAlias } from "./delta-check.ts";
 import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
 import { buildWorldHints, resolveWorldDir, worldCachePath, WORLD_FILE } from "./world.ts";
-import { augmentMatchesWithXRefResolutions } from "./xref-resolver.ts";
+import { augmentMatchesWithXRefResolutions, createXRefResolutionContext } from "./xref-resolver.ts";
 import { loadRequiredVectorIndex, prepareVectorSearch, loadGraph, vaultVectorIndexReadPath } from "./retrieval.ts";
+import { loadLexicalIndex } from "./lexical-index.ts";
 import { embedForIndex } from "./vector.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { importVault } from "./import-vault.ts";
@@ -595,16 +596,25 @@ export async function runAsk(argv: string[]) {
   // When --gist is specified, pass both question and gist as 2 R6 queryVectors.
   const worldDir = resolveWorldDir(typeof f.world === "string" ? f.world : undefined);
   const graphData = await loadGraph(vaultDir);
+  // issue #33: 永続転置 index を 1 回だけ読み、brief / evidence の両段で共有する
+  // (loadLexicalIndex は指紋不一致/破損なら再計算+再永続化し、失敗時は null =
+  //  searchGraph の従来経路のまま)。
+  const sharedLexicalIndex = await loadLexicalIndex(vaultDir, graphData);
   let sharedVectorIndex: any = null;
   let sharedQueryVector: number[] | null = null;
   let sharedQueryVectors: number[][] | null = null;
   try {
     if (lexicalOnly) throw new Error("lexical-only: skip vector index");
-    sharedVectorIndex = await loadRequiredVectorIndex(vaultDir);
+    // issue #34: 読み込み済み graph を渡す — 鮮度判定は graph/index の内容突合
+    // (vault の mtime walk なし)。stale 再 build も同じ graph から行う。
+    sharedVectorIndex = await loadRequiredVectorIndex(vaultDir, undefined, { graph: graphData });
     if (gist) {
       // 質問と gist を index の prefix_policy に従って query 接頭辞付きで埋め込む。
-      const qv = await embedForIndex(sharedVectorIndex, question, "query");
-      const gv = await embedForIndex(sharedVectorIndex, gist, "query");
+      // issue #31: 2 件固定なので直列に待たず並置する (embedMany は不要)。
+      const [qv, gv] = await Promise.all([
+        embedForIndex(sharedVectorIndex, question, "query"),
+        embedForIndex(sharedVectorIndex, gist, "query"),
+      ]);
       sharedQueryVectors = [qv, gv];
       sharedQueryVector = qv; // world ヒント等の単一ベクトル経路には質問側を渡す
     } else {
@@ -627,6 +637,7 @@ export async function runAsk(argv: string[]) {
     graphData,
     limit,
     callNumber,
+    lexicalIndex: sharedLexicalIndex,
     vectorIndex: sharedVectorIndex ?? undefined,
     queryVector: sharedQueryVector ?? undefined,
     queryVectors: sharedQueryVectors ?? undefined,
@@ -673,6 +684,7 @@ export async function runAsk(argv: string[]) {
       types: [],
       // brief と同じ graph / 索引 / query embedding を共有する (再読込・再 embed しない)。
       graphData,
+      lexicalIndex: sharedLexicalIndex,
       vectorIndex: sharedVectorIndex ?? undefined,
       queryVectors: sharedQueryVectors ?? (sharedQueryVector ? [sharedQueryVector] : undefined),
       ...(lexicalOnly ? { useVector: false } : {})
@@ -707,12 +719,15 @@ export async function runAsk(argv: string[]) {
   // Non-throwing: failures are noted inline, ask output is never dropped.
   if (worldDir) {
     try {
+      // issue #32: brief / evidence の augmentation で 1 つの解決 context を共有し、
+      // 同一 ref / 同一 target vault の world scan・import・台帳読込を command 内 1 回にする。
+      const xrefCtx = createXRefResolutionContext();
       if (briefOut?.query?.matches) {
-        briefOut.query.matches = augmentMatchesWithXRefResolutions(briefOut.query.matches, worldDir);
+        briefOut.query.matches = augmentMatchesWithXRefResolutions(briefOut.query.matches, worldDir, xrefCtx);
       }
       for (const stage of stages) {
         if (stage?.output?.direct_evidence) {
-          stage.output.direct_evidence = augmentMatchesWithXRefResolutions(stage.output.direct_evidence, worldDir);
+          stage.output.direct_evidence = augmentMatchesWithXRefResolutions(stage.output.direct_evidence, worldDir, xrefCtx);
         }
       }
     } catch {

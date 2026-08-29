@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { validateGraph, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
+import { parseCrossVaultRef } from "./xref-resolver.ts";
 
 export async function loadMutationPlan(planPath) {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
@@ -175,7 +176,7 @@ export function validateMutation({ currentGraph, plan, enforceSourceBacking = fa
   const nextGraph = applyMutationToGraph(currentGraph, plan, audit);
   failures.push(...successorFailures({ plan, nextGraph }));
   if (enforceSourceBacking) {
-    failures.push(...sourceBackingFailures({ plan, nextGraph, schema }));
+    failures.push(...sourceBackingFailures({ currentGraph, nextGraph, schema }));
   }
   failures.push(...validateGraph(nextGraph, schema));
 
@@ -559,22 +560,38 @@ function immutableUpdateFailures({ currentGraph, plan }) {
   return failures;
 }
 
-// categories.distilled (source backing 必須型) から取得。
+// ── source backing (issue #28) ───────────────────────────────────────────────
+//
+// 対象型は categories.distilled (source backing 必須型) から取得。
 // Constraint は除外 (schema が Constraint に source への outgoing edge を持たないため)。
+// backing に数える edge type は categories.provenance (documented_by/derived_from) が
+// 単一正本 — schema 上正当でも sets_policy_for / risks_in / rejected_in /
+// temporary_relation_candidate 等の非 provenance edge は backing に数えない。
+//
+// 検査は plan.nodes の走査ではなく before/after 全 distilled node の差分比較 (O(N+E)×2):
+// edge だけの削除・source node 削除の DETACH cascade・source を劣化させる update の
+// いずれで backing を失っても捕捉できる。
 
 type GraphNodeLike = {
   id: string;
   type?: string;
   path?: string;
+  url?: string;
   raw_content?: string;
   raw_content_status?: string;
 };
-type GraphEdgeLike = { from: string; to: string };
+type GraphEdgeLike = { type?: string; from: string; to: string };
+type GraphLike = { nodes?: GraphNodeLike[]; edges?: GraphEdgeLike[] };
 
 function isQualifyingSource(node: GraphNodeLike | undefined) {
   if (!node) return false;
   if (node.type === "File") {
     return typeof node.path === "string" && node.path.trim().length > 0;
+  }
+  // project/principal preset: Source は File の置き換え (外部情報源)。url が接地の実体
+  // なので File.path と対称に url 非空で qualifying とする。
+  if (node.type === "Source") {
+    return typeof node.url === "string" && node.url.trim().length > 0;
   }
   if (node.type === "ConversationChunk" || node.type === "Investigation") {
     return (
@@ -586,37 +603,88 @@ function isQualifyingSource(node: GraphNodeLike | undefined) {
   return false;
 }
 
-function sourceBackingFailures({ plan, nextGraph, schema }: { plan: { nodes: { id: string; op?: string }[] }; nextGraph: { nodes?: GraphNodeLike[]; edges?: GraphEdgeLike[] }; schema?: SchemaDefinition }) {
-  const DISTILLED_NODE_TYPES = new Set((schema ?? DEFAULT_SCHEMA).categories.distilled);
-  const nodesById = new Map<string, GraphNodeLike>((nextGraph.nodes ?? []).map((node) => [node.id, node]));
-  const outgoing = new Map<string, string[]>();
-  for (const edge of nextGraph.edges ?? []) {
-    if (!outgoing.has(edge.from)) outgoing.set(edge.from, []);
-    outgoing.get(edge.from).push(edge.to);
-  }
-  const failures = [];
-  for (const planNode of plan.nodes) {
-    if (mutationOp(planNode) === "delete") continue;
-    const node = nodesById.get(planNode.id);
-    if (!node || !node.type || !DISTILLED_NODE_TYPES.has(node.type)) continue;
-    // Legacy damage-control exception: an explicitly stamped node carries its
-    // own copied-from-summary raw_content. This is the honest "unverified
-    // legacy" marker; it must be allowed so the migration and benign updates
-    // to already-stamped legacy nodes are not blocked.
-    if (
-      typeof node.raw_content === "string" &&
-      node.raw_content.trim().length > 0 &&
-      node.raw_content_status === "copied_from_summary"
-    ) {
+// Legacy damage-control exception: an explicitly stamped node carries its
+// own copied-from-summary raw_content. This is the honest "unverified
+// legacy" marker; it must be allowed so the migration and benign updates
+// to already-stamped legacy nodes are not blocked.
+function isLegacyStamped(node: GraphNodeLike | undefined): boolean {
+  return (
+    !!node &&
+    typeof node.raw_content === "string" &&
+    node.raw_content.trim().length > 0 &&
+    node.raw_content_status === "copied_from_summary"
+  );
+}
+
+function provenanceEdgeTypes(schema?: SchemaDefinition): readonly string[] {
+  // 古い形の SchemaDefinition (provenance 未定義) を渡されても既定にフォールバック。
+  return (schema ?? DEFAULT_SCHEMA).categories.provenance ?? DEFAULT_SCHEMA.categories.provenance;
+}
+
+// backed = provenance edge で qualifying source に接続しているノード id の集合。
+// cross-vault への provenance edge はローカルで実在検証できないので backed に数える
+// (validateGraph の existence skip と同じ整合) — ただし parseCrossVaultRef が受理する
+// 整形式 `vault:<slug>/<nodeId>` のみ。prefix だけの奇形 (fsck edge-endpoints が
+// error にする形) を backing に数えると判定が二正本化するため。
+function backedNodeIds(graph: GraphLike, provenance: ReadonlySet<string>): Set<string> {
+  const nodesById = new Map<string, GraphNodeLike>((graph.nodes ?? []).map((node) => [node.id, node]));
+  const backed = new Set<string>();
+  for (const edge of graph.edges ?? []) {
+    if (!edge.type || !provenance.has(edge.type)) continue;
+    if (typeof edge.to === "string" && parseCrossVaultRef(edge.to) !== null) {
+      backed.add(edge.from);
       continue;
     }
-    const targets = outgoing.get(node.id) ?? [];
-    const ok = targets.some((targetId) => isQualifyingSource(nodesById.get(targetId)));
-    if (!ok) {
+    if (isQualifyingSource(nodesById.get(edge.to))) backed.add(edge.from);
+  }
+  return backed;
+}
+
+// unbacked な distilled node の列挙 (fsck の事後検出と mutation ゲートで共用)。
+// copied_from_summary スタンプ付き legacy は honest marker として除外する。
+export function unbackedDistilledNodes(
+  graph: GraphLike,
+  schema?: SchemaDefinition
+): Array<{ id: string; type: string }> {
+  const distilled = new Set((schema ?? DEFAULT_SCHEMA).categories.distilled);
+  const backed = backedNodeIds(graph, new Set(provenanceEdgeTypes(schema)));
+  return (graph.nodes ?? [])
+    .filter(
+      (node) =>
+        !!node.type && distilled.has(node.type) && !isLegacyStamped(node) && !backed.has(node.id)
+    )
+    .map((node) => ({ id: node.id, type: node.type as string }));
+}
+
+function sourceBackingFailures({ currentGraph, nextGraph, schema }: {
+  currentGraph: GraphLike;
+  nextGraph: GraphLike;
+  schema?: SchemaDefinition;
+}) {
+  const provenance = provenanceEdgeTypes(schema);
+  const provLabel = provenance.join("/");
+  const beforeIds = new Set((currentGraph.nodes ?? []).map((node) => node.id));
+  const beforeBacked = backedNodeIds(currentGraph, new Set(provenance));
+  const failures: string[] = [];
+  for (const { id } of unbackedDistilledNodes(nextGraph, schema)) {
+    if (!beforeIds.has(id)) {
+      // 新規追加なのに unbacked (現行の意図の維持 + provenance edge 限定の厳格化)。
       failures.push(
-        `distilled node ${node.id} has no qualifying source (link it to a ConversationChunk/Investigation with raw_content (status != copied_from_summary), or a File with path)`
+        `distilled node ${id} has no qualifying source (new node; link it via a provenance edge (${provLabel}) ` +
+          `to a ConversationChunk/Investigation with raw_content (status != copied_from_summary), a File with path, ` +
+          `or a Source with url — other edge types do not count as source backing)`
+      );
+    } else if (beforeBacked.has(id)) {
+      // backed → unbacked 遷移 (edge 削除・source 削除 cascade・source 劣化 update)。
+      failures.push(
+        `mutation would leave distilled node ${id} without a qualifying source (backed -> unbacked: this plan ` +
+          `removes or degrades its provenance edge (${provLabel}) or its source — delete the node itself, or ` +
+          `keep/re-link a qualifying source)`
       );
     }
+    // before から既に unbacked の既存 node は legacy 猶予 — その node の update を含め
+    // mutation をブロックしない (既存 vault を壊さない)。fsck の source-backing check が
+    // 事後検出として列挙し続ける。
   }
   return failures;
 }

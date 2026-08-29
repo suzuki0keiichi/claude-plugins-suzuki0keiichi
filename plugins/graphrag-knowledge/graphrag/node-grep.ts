@@ -5,7 +5,7 @@
  * 背景 (実運用の観測): vault .md への直接 grep/cat が ask 呼び出しに匹敵する規模で
  * 発生していた。原因は欠けていた2つの読み口:
  *   - ranked search (ask/search) は改名耐性のため node.id / node.type を意図的に
- *     ランキング対象から外し (retrieval.buildSearchFields のコメント参照)、
+ *     ランキング対象から外し (retrieval.computeNodeLexical のコメント参照)、
  *     description / raw_content も対象外 — id 断片・本文・型名で「探す」手段が無い。
  *   - 出力は nodeForOutput のホワイトリスト + summary 短縮で、ノード本文を「読む」
  *     手段が無い (.md を cat するしかない)。

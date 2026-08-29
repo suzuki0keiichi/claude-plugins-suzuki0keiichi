@@ -2,8 +2,9 @@
 //
 // graphrag-checkpoint skill が退避 (A ステップ: active Investigation の raw_content 更新) を
 // 書き終えた後にこれを呼ぶ。ここで active Investigation の work_state を「検証」してから、
-// ask-state.json の予約キー (CHECKPOINT_STATE_KEY) に「clear されたら復元せよ」の内容を書く。
-// SessionStart フック (hooks/clear-restore.mjs) が source==="clear" のときだけ one-shot で消費する。
+// ask-state.json の identity 別予約キー (checkpointStateKey — #29) に「clear されたら復元せよ」の
+// 内容を書く。SessionStart フック (hooks/clear-restore.mjs) が source==="clear" のときだけ
+// identity 一致の entry を one-shot で消費する。
 //
 // 設計 (旧「ファイルマーカー方式」からの転換):
 //   - 新ファイル種を増やさない: checkpoint-pending.json を廃し ask-state.json に相乗り。
@@ -16,16 +17,17 @@ import path from "node:path";
 import { cacheDirForVault } from "./cli-env.ts";
 import { loadGraph } from "./retrieval.ts";
 import {
-  CHECKPOINT_STATE_KEY,
+  CHECKPOINT_TTL_MS,
+  checkpointStateKey,
   loadAskState,
-  saveAskState,
+  withAskStateLock,
   type CheckpointStateEntry
 } from "./cli-ask-state.ts";
 
-// 予約キーの失効窓。主の消費はフック側の one-shot 削除であり、これは「checkpoint-mark を
-// 撃ったが clear しなかった」古い意図が翌日の無関係な /clear で暴発しないための保険。
+// 予約キーの失効窓 (60 分)。定義は cli-ask-state.ts へ移った (#29 で inline GC も参照するため)。
+// 既存の読み手 (テスト等) 向けにここからも re-export する。
 // hooks/clear-restore.mjs は依存ゼロ方針でこの値を import せず複製する (相互参照コメントを両側に置く)。
-export const CHECKPOINT_TTL_MS = 60 * 60 * 1000; // 60 分
+export { CHECKPOINT_TTL_MS };
 
 // raw_content の上限。これを超える深い生ログは ConversationChunk に置くべき。
 const RAW_CONTENT_MAX_BYTES = 8 * 1024; // 8KB
@@ -167,10 +169,20 @@ export async function runCheckpointMark(argv: string[]): Promise<void> {
     work_state: raw
   };
 
-  // 他キー (ask 連打カウント等) を保ったまま予約キーだけ差し替える。
-  const state = loadAskState(stateDir);
-  state[CHECKPOINT_STATE_KEY] = entry;
-  saveAskState(stateDir, state);
+  // 予約キーは identity 別 (#29): 単一キーだと同じ vault を共有する複数 session の checkpoint が
+  // 後勝ちで消え、別 project の /clear に判定前消費される。identity は同一性判定の三段
+  // フォールバックと同じ優先順 (session_dir → git root → cwd) の最上位を realpath 正規化した値。
+  // 同一 identity の再 checkpoint は同じキーへの上書き (意図どおり最新だけ残る)。
+  const identity = sessionDir ?? projectRoot ?? resolveRealPath(process.cwd());
+  const stateKey = checkpointStateKey(identity);
+  // 他キー (ask 連打カウント / 他 session の checkpoint) を保ったまま自分のキーだけ差し替える。
+  // load→save の RMW は ask 書き込みやフックの consume と競合し得るので lock で囲む (#29)。
+  // 書き込みは渡される save 経由 (save 直前 fencing — lock を失っていたら fn ごと再試行される)。
+  withAskStateLock(stateDir, (save) => {
+    const state = loadAskState(stateDir);
+    state[stateKey] = entry;
+    save(state);
+  });
 
   const statePath = path.join(stateDir, "ask-state.json");
   // 書き込み系 verb と同じく、どの state dir へ書いたかを stderr で可視化する。

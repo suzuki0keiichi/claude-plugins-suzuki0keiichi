@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
   LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_PROVIDER,
-  localEmbedderStatus, embedLocalText
+  localEmbedderStatus, embedLocalText, embedLocalTexts
 } from "./embedder-local.ts";
 
 loadDotEnv();
@@ -100,11 +100,7 @@ export function prefixPolicyForModel(
 // 共通ヘルパ。重複ゲート・提案器が「索引と同じ空間」で text を埋め込むために使う。
 // kind: "document"=文書側接頭辞 / "query"=クエリ側接頭辞。メタ無し index では
 // 接頭辞を付けない (旧 index 互換)。
-export async function embedForIndex(
-  vectorIndex: any,
-  text: string,
-  kind: "document" | "query"
-): Promise<number[]> {
+function indexProviderAndPrefix(vectorIndex: any, kind: "document" | "query") {
   const providerName = vectorIndex?.provider;
   if (!providerName) {
     throw new Error("Missing vector index provider. Rebuild the vector index with a semantic embedding provider.");
@@ -117,7 +113,91 @@ export async function embedForIndex(
   });
   const policy = vectorIndex?.prefix_policy ?? null;
   const prefix = policy && typeof policy[kind] === "string" ? policy[kind] : "";
+  return { provider, prefix };
+}
+
+export async function embedForIndex(
+  vectorIndex: any,
+  text: string,
+  kind: "document" | "query"
+): Promise<number[]> {
+  const { provider, prefix } = indexProviderAndPrefix(vectorIndex, kind);
   return provider.embed(`${prefix}${text}`);
+}
+
+// embedForIndex の複数 text 版 (issue #31)。接頭辞を全件に付け、embedTextsWithProvider
+// でバッチ送出する。返却順は入力順。
+export async function embedManyForIndex(
+  vectorIndex: any,
+  texts: string[],
+  kind: "document" | "query"
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const { provider, prefix } = indexProviderAndPrefix(vectorIndex, kind);
+  return embedTextsWithProvider(provider, texts.map((text) => `${prefix}${text}`));
+}
+
+// ── embedding バッチ化 (issue #31) ──────────────────────────────────────────
+// provider 契約は optional embedMany(texts) を持つ。消費側はこの共通ヘルパを経由し、
+// embedMany の無い provider (テスト DI 等) には従来どおり直列 embed で代替する。
+// バッチは「往復数を減らす」ためだけのもので、チャンクは直列に送る (並行リクエストは
+// しない — circuit breaker の fail-fast 前提を保つ。バッチが失敗したらそのバッチの
+// 全 text が失敗、以後のチャンクは circuit open で即失敗する自然な劣化)。
+export const EMBEDDING_BATCH_MAX_ITEMS = readPositiveIntEnv("GRAPHRAG_EMBEDDING_BATCH_MAX_ITEMS", 64);
+export const EMBEDDING_BATCH_MAX_BYTES = readPositiveIntEnv("GRAPHRAG_EMBEDDING_BATCH_MAX_BYTES", 262_144);
+
+// 件数 + UTF-8 byte 数の両方でチャンクを刻む。単体で byte 上限を超えるテキストも
+// 捨てず単独チャンクで送る (上限は「まとめすぎ防止」であって入力の切り捨てではない)。
+export function chunkTextsForEmbedding(
+  texts: string[],
+  maxItems = EMBEDDING_BATCH_MAX_ITEMS,
+  maxBytes = EMBEDDING_BATCH_MAX_BYTES
+): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentBytes = 0;
+  for (const text of texts) {
+    const bytes = Buffer.byteLength(text, "utf8");
+    if (current.length > 0 && (current.length >= maxItems || currentBytes + bytes > maxBytes)) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(text);
+    currentBytes += bytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+export async function embedTextsWithProvider(
+  provider: any,
+  texts: string[],
+  caps: { maxItems?: number; maxBytes?: number } = {}
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  // 1 件、または embedMany 非対応 provider は従来の単発 embed (リクエスト形も従来どおり)。
+  if (texts.length === 1 || typeof provider?.embedMany !== "function") {
+    const out: number[][] = [];
+    for (const text of texts) out.push(await provider.embed(text));
+    return out;
+  }
+  const out: number[][] = [];
+  const chunks = chunkTextsForEmbedding(
+    texts,
+    caps.maxItems ?? EMBEDDING_BATCH_MAX_ITEMS,
+    caps.maxBytes ?? EMBEDDING_BATCH_MAX_BYTES
+  );
+  for (const chunk of chunks) {
+    const vectors = await provider.embedMany(chunk);
+    if (!Array.isArray(vectors) || vectors.length !== chunk.length) {
+      throw new Error(
+        `embedMany returned ${Array.isArray(vectors) ? vectors.length : "no"} vector(s) for ${chunk.length} input(s)`
+      );
+    }
+    out.push(...vectors);
+  }
+  return out;
 }
 
 export const DEFAULT_LOCAL_EMBEDDING_BASES = [
@@ -291,6 +371,14 @@ export function createVectorProvider(options: any = {}) {
     throw new Error("Missing vector provider. Set GRAPHRAG_VECTOR_PROVIDER to a semantic embedding provider.");
   }
 
+  // 次元検証 + 正規化の共通後処理 (embed / embedMany の両方が通る)。
+  const finishVector = (vector: number[]): number[] => {
+    if (options.dimensions && vector.length !== Number(options.dimensions)) {
+      throw new Error(`Embedding dimensions mismatch for ${provider}: expected ${options.dimensions}, got ${vector.length}`);
+    }
+    return normalizeVector(vector);
+  };
+
   if (provider === LOCAL_EMBEDDING_PROVIDER) {
     const model = options.model ?? localEmbedderStatus().model;
     return {
@@ -308,11 +396,12 @@ export function createVectorProvider(options: any = {}) {
       },
       async embed(text) {
         // 未導入時は embedLocalText が embedder-setup への導線付きでハードエラー。
-        const vector = await embedLocalText(model, text);
-        if (options.dimensions && vector.length !== Number(options.dimensions)) {
-          throw new Error(`Embedding dimensions mismatch for ${provider}: expected ${options.dimensions}, got ${vector.length}`);
-        }
-        return normalizeVector(vector);
+        return finishVector(await embedLocalText(model, text));
+      },
+      async embedMany(texts) {
+        // transformers.js の native batch (extractor に配列を渡して全行取得)。
+        const vectors = await embedLocalTexts(model, texts);
+        return vectors.map(finishVector);
       }
     };
   }
@@ -341,11 +430,11 @@ export function createVectorProvider(options: any = {}) {
         dimensions: options.dimensions ? Number(options.dimensions) : null
       },
       async embed(text) {
-        const vector = await embedOpenAiCompatibleText({ endpoint, model, apiKey, text });
-        if (options.dimensions && vector.length !== Number(options.dimensions)) {
-          throw new Error(`Embedding dimensions mismatch for ${provider}: expected ${options.dimensions}, got ${vector.length}`);
-        }
-        return normalizeVector(vector);
+        return finishVector(await embedOpenAiCompatibleText({ endpoint, model, apiKey, text }));
+      },
+      async embedMany(texts) {
+        const vectors = await embedOpenAiCompatibleTexts({ endpoint, model, apiKey, texts });
+        return vectors.map(finishVector);
       }
     };
   }
@@ -467,7 +556,9 @@ export function resetEmbeddingCircuit(): void {
   embeddingCircuitOpenByEndpoint.clear();
 }
 
-async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
+// /embeddings への 1 リクエスト (circuit breaker 込み) の共通部。input は string
+// (単発・従来のリクエスト形) または string[] (バッチ、issue #31)。
+async function postOpenAiCompatibleEmbeddings({ endpoint, model, apiKey, input }) {
   const circuitReason = embeddingCircuitOpenByEndpoint.get(String(endpoint));
   if (circuitReason) {
     throw new Error(
@@ -487,7 +578,7 @@ async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
       },
       body: JSON.stringify({
         model,
-        input: text
+        input
       })
     }, EMBEDDING_FETCH_TIMEOUT_MS);
   } catch (error) {
@@ -506,12 +597,54 @@ async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
     }
     throw new Error(`Embedding request failed: ${response.status} ${response.statusText} ${body.slice(0, 500)}`);
   }
-  const payload = await response.json();
+  return response.json();
+}
+
+async function embedOpenAiCompatibleText({ endpoint, model, apiKey, text }) {
+  const payload = await postOpenAiCompatibleEmbeddings({ endpoint, model, apiKey, input: text });
   const vector = payload?.data?.[0]?.embedding;
   if (!Array.isArray(vector) || vector.length === 0) {
     throw new Error("Embedding response did not include data[0].embedding");
   }
   return vector.map((value) => Number(value));
+}
+
+// バッチ版 (issue #31): input を配列で送り、応答の data[].index で入力順に並べ直す
+// (OpenAI 互換仕様は応答順を保証しない)。件数・index の整合・次元の一貫性を検証し、
+// 不一致は明示 Error (無音で欠けたベクトルを返さない)。
+async function embedOpenAiCompatibleTexts({ endpoint, model, apiKey, texts }) {
+  if (texts.length === 0) return [];
+  const payload = await postOpenAiCompatibleEmbeddings({ endpoint, model, apiKey, input: texts });
+  const data = Array.isArray(payload?.data) ? payload.data : null;
+  if (!data || data.length !== texts.length) {
+    throw new Error(
+      `Embedding batch response mismatch: sent ${texts.length} input(s), got ` +
+      `${data ? data.length : "no"} embedding row(s) from ${endpoint}`
+    );
+  }
+  const ordered: number[][] = new Array(texts.length);
+  data.forEach((entry, position) => {
+    const index = typeof entry?.index === "number" ? entry.index : position;
+    if (!Number.isInteger(index) || index < 0 || index >= texts.length || ordered[index] !== undefined) {
+      throw new Error(
+        `Embedding batch response has an invalid/duplicate index ${index} for ${texts.length} input(s) from ${endpoint}`
+      );
+    }
+    const vector = entry?.embedding;
+    if (!Array.isArray(vector) || vector.length === 0) {
+      throw new Error(`Embedding batch response row ${index} did not include an embedding (from ${endpoint})`);
+    }
+    ordered[index] = vector.map((value) => Number(value));
+  });
+  const dimensions = ordered[0].length;
+  for (const vector of ordered) {
+    if (vector.length !== dimensions) {
+      throw new Error(
+        `Embedding batch response has inconsistent dimensions (${dimensions} vs ${vector.length}) from ${endpoint}`
+      );
+    }
+  }
+  return ordered;
 }
 
 function normalizeVector(vector) {

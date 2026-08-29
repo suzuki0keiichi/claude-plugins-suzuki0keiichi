@@ -416,7 +416,10 @@ export function indexCodebase(opts: { root: string; systemName?: string; previou
     for (const fid of ids.slice(0, 100)) edges.push({ id: `edge:evidenced_by:${lid}->${fid}`, type: "evidenced_by", from: lid, to: fid });
   }
 
-  const deleted = [...prevById.values()].filter((n) => n.type === "File" && !nodes.some((x) => x.id === n.id)).map((n) => n.id);
+  // 削除 File 検出: current 側の照合は fileNodeById (現存 File 全件の id→node) で O(1)。
+  // フィルタは File 限定で、File id は `file:` 接頭辞 (非 File は `component:`/`layer:`) なので
+  // fileNodeById だけ見れば十分 (nodes 全体の線形走査は不要)。順序は prevById 挿入順 = previous.nodes 順。
+  const deleted = [...prevById.values()].filter((n) => n.type === "File" && !fileNodeById.has(n.id)).map((n) => n.id);
   const graph = { version: 1, generated_at: new Date().toISOString(), nodes, edges, stale_candidates: { deleted_files: deleted } };
   return graph;
 }

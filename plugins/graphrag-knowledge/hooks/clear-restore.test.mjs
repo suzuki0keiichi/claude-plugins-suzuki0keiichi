@@ -3,11 +3,15 @@
 // 予約キー方式: ask-state.json の __checkpoint__ キーを clear で one-shot 消費して注入する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+const execFileP = promisify(execFile);
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "clear-restore.mjs");
 const CHECKPOINT_KEY = "__checkpoint__";
@@ -20,6 +24,16 @@ const runHook = (input, env = {}) =>
     encoding: "utf8",
     env: { ...process.env, GRAPHRAG_VAULT_DIR: "", ...env }
   });
+
+// stderr も返す variant (同期)。spawnSync は stdout/stderr を分離して返す。
+const runHookWithStderr = (input, env = {}) => {
+  const result = spawnSync(process.execPath, [SCRIPT], {
+    input: JSON.stringify(input),
+    encoding: "utf8",
+    env: { ...process.env, GRAPHRAG_VAULT_DIR: "", ...env }
+  });
+  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+};
 
 // 既定レイアウト <root>/.graphrag/vault の一時 fixture。
 const makeAnchor = () => {
@@ -452,6 +466,299 @@ test("clear + session_dir が symlink 経由の表記違い: 実体パス一致�
     const ctx = JSON.parse(runHook({ source: "clear", cwd: root })).hookSpecificOutput.additionalContext;
     assert.match(ctx, /Automatic restore/, "未解決表記の input.cwd でも実体が同じなら復元される");
     assert.ok(!(CHECKPOINT_KEY in JSON.parse(readFileSync(fp, "utf8"))), "消費される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- #29: identity 別キー (__checkpoint__:<hash>) — 複数 session/project の共存 ---
+
+// 書き手 (checkpoint-mark) と同じ identity 別キー。suffix hash の中身をフックは解釈しない
+// (照合は entry の session_dir/root/cwd で行う) が、実物と同じ形で作る。
+const ckptKeyFor = (identity) =>
+  `${CHECKPOINT_KEY}:${createHash("sha1").update(identity).digest("hex").slice(0, 12)}`;
+
+test("#29 clear + identity 別キー2件: 自分の entry だけ復元・消費し、他 project の entry は残る (2回目は無音)", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const realA = realpathSync(rootA);
+    const otherReal = realpathSync(otherDir);
+    const fp = writeState(rootA, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: rootA, session_dir: realA, first_action: "A の一手" }),
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal, first_action: "B の一手" })
+    });
+
+    const out = runHook({ source: "clear", cwd: rootA });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "自分の identity に一致する entry から復元される");
+    assert.match(ctx, /A の一手/, "復元されるのは自分の checkpoint");
+    assert.ok(!ctx.includes("B の一手"), "他 project の checkpoint は注入されない");
+
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "自分の entry は one-shot 消費される");
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "他 project の entry は消費されず残る");
+
+    // 同一 project の 2 回目の /clear は無音 (consume-first のセマンティクス維持)。
+    assert.equal(runHook({ source: "clear", cwd: rootA }), "", "2回目は無音");
+    const onDisk2 = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(ckptKeyFor(otherReal) in onDisk2, "2回目でも他 project の entry は残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+test("#29 clear + 一致 identity 無し: 無音で、他 project の entry は判定前消費されない (先食いバグの解消)", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const otherReal = realpathSync(otherDir);
+    const fp = writeState(rootA, {
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal, first_action: "B の一手" })
+    });
+    assert.equal(runHook({ source: "clear", cwd: rootA }), "", "一致なしは予約キー無しと同じ無音");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "本来の持ち主のために entry は残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+test("#29 clear + 旧単一キー互換: __checkpoint__ は従来どおり消費・復元され、他 project の identity キーは残る", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const otherReal = realpathSync(otherDir);
+    const fp = writeState(rootA, {
+      [CHECKPOINT_KEY]: checkpointEntry({ cwd: rootA, first_action: "旧キーの一手" }),
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal, first_action: "B の一手" })
+    });
+    const out = runHook({ source: "clear", cwd: rootA });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /Automatic restore/, "旧単一キーからの復元互換");
+    assert.match(ctx, /旧キーの一手/);
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(CHECKPOINT_KEY in onDisk), "旧単一キーは従来どおり消費される (移行措置)");
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "他 project の identity キーは残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+test("#29 clear + identity キーが失効 (60分超): 理由一行を注入し自分の entry のみ消費", () => {
+  const rootA = makeAnchor();
+  const otherDir = mkdtempSync(path.join(tmpdir(), "graphrag-ckpt-other-"));
+  try {
+    const realA = realpathSync(rootA);
+    const otherReal = realpathSync(otherDir);
+    const oldMs = Date.now() - 2 * 60 * 60 * 1000;
+    const fp = writeState(rootA, {
+      [ckptKeyFor(realA)]: checkpointEntry({
+        cwd: rootA, session_dir: realA, marked_at: new Date(oldMs).toISOString(), last_at: oldMs
+      }),
+      [ckptKeyFor(otherReal)]: checkpointEntry({ cwd: otherDir, session_dir: otherReal })
+    });
+    const out = runHook({ source: "clear", cwd: rootA });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /NOT restored/);
+    assert.match(ctx, /freshness window/);
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "失効した自分の entry は消費される");
+    assert.ok(ckptKeyFor(otherReal) in onDisk, "他 project の entry は残る");
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
+});
+
+// --- #29: 実並行 — フックの consume と CLI の bump が同一ファイルで競合しても lost update しない ---
+
+test("#29 実並行: /clear の consume と並列 bump 群が競合しても count が失われず checkpoint は一度だけ消費される", async () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const cacheDir = path.join(root, ".graphrag", "cache");
+    const fp = writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "並行の一手" })
+    });
+
+    const askStateUrl = pathToFileURL(
+      path.join(path.dirname(SCRIPT), "..", "graphrag", "cli-ask-state.ts")
+    ).href;
+    const bumpChild = () =>
+      execFileP(process.execPath, [
+        "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--input-type=module",
+        "-e",
+        `const { bumpCallCount } = await import(process.argv[1]);\n` +
+        `for (let i = 0; i < 50; i++) bumpCallCount("hook parallel q", process.argv[2]);\n`,
+        askStateUrl,
+        cacheDir
+      ]);
+
+    // 子プロセス群を走らせつつ、途中でフック (同期) を実行して consume を混ぜる。
+    const children = Array.from({ length: 4 }, () => bumpChild());
+    const out = runHook({ source: "clear", cwd: root });
+    await Promise.all(children);
+
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /並行の一手/, "並行中でも自分の checkpoint が復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "checkpoint は消費されている");
+    // fingerprintQuestion("hook parallel q") の複製はせず、count 合計で検証する
+    // (このファイルは依存ゼロ方針で graphrag/*.ts を import しない)。
+    const total = Object.values(onDisk).reduce((s, e) => s + (e?.count ?? 0), 0);
+    assert.equal(total, 200, "フックの書き戻しが bump を巻き戻さない (lost update 無し)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- P3-H: save 失敗時に stderr へ出力する (無音ではない) ---
+
+test("clear + save の IO 失敗は stderr に出力される (P3-H: 無音解消)", () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const cacheDir = path.join(root, ".graphrag", "cache");
+    writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "IO失敗の一手" })
+    });
+    // cache ディレクトリの書き込みを禁止して save (tmp ファイルの書き込み) を失敗させる。
+    // 0o555: 読み+実行は許可 (readFileSync が通る)、書き込みのみ禁止。
+    // lock 取得 (mkdir) も同じディレクトリ内で失敗するが、lock 失敗は best-effort 続行。
+    chmodSync(cacheDir, 0o555);
+    const { stdout, stderr } = runHookWithStderr({ source: "clear", cwd: root });
+    // save が IO 失敗しても復元自体は続行する (best-effort)。
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /IO失敗の一手/, "save 失敗でも復元判定は続行される");
+    // lock 取得失敗の stderr (ask-state lock) とは別に、save 固有のエラーが出ることを確認。
+    // 修正後: IO 失敗は stderr に出力される (現行は無音 — lock 失敗の stderr だけが出る)。
+    assert.match(stderr, /save|consume|checkpoint.*fail/i, "save の IO 失敗が stderr に出力される");
+  } finally {
+    // 権限を戻してから掃除。
+    try { chmodSync(path.join(root, ".graphrag", "cache"), 0o755); } catch { /* noop */ }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- #41: lock の owner プロトコル — stale 残骸 (owner ファイルあり/なし) の奪取 ---
+
+const LOCK_DIRNAME = "ask-state.lock";
+const LOCK_OWNER_FILENAME = "owner.json";
+
+// lock (dir と、在れば owner ファイル) の mtime を過去へ偽装して stale 化する。
+const backdateLock = (lockDir, ms) => {
+  const past = new Date(Date.now() - ms);
+  const ownerFp = path.join(lockDir, LOCK_OWNER_FILENAME);
+  if (existsSync(ownerFp)) utimesSync(ownerFp, past, past);
+  utimesSync(lockDir, past, past);
+};
+
+test("#41 stale lock (owner ファイル付き残骸) はフックが奪取して復元し、lock が残らない", () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const fp = writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "奪取後の一手" })
+    });
+    // クラッシュした保持者の残骸: owner ファイル入りの lock dir (#41 の新プロトコルが書く形)。
+    const lockDir = path.join(root, ".graphrag", "cache", LOCK_DIRNAME);
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      path.join(lockDir, LOCK_OWNER_FILENAME),
+      JSON.stringify({ pid: 99999999, nonce: "dead-crashed-holder", acquired_at: Date.now() - 60_000 })
+    );
+    backdateLock(lockDir, 60_000);
+
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /奪取後の一手/, "残骸 lock 越しでも復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "checkpoint は消費されている");
+    assert.ok(!existsSync(lockDir), "残骸 lock は奪取・解放され、残らない");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#41 stale lock (owner ファイル無し・owner 不明の残骸) もフックが奪取して復元する", () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "素の残骸越しの一手" })
+    });
+    const lockDir = path.join(root, ".graphrag", "cache", LOCK_DIRNAME);
+    mkdirSync(lockDir, { recursive: true });
+    backdateLock(lockDir, 60_000);
+
+    const out = runHook({ source: "clear", cwd: root });
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /素の残骸越しの一手/, "owner 不明の残骸でも奪取して復元される");
+    assert.ok(!existsSync(lockDir), "奪取後に自分の lock として解放される");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- #41 再レビュー: 生存 owner の lock は奪取しない (pid 生存確認) ---
+
+// 子プロセス: フックと同一プロトコルで lock を取得し、「生存したまま」holdMs 停止してから
+// state に増分を書いて正常に解放する (レビュアー実機再現の holder 側)。依存ゼロ方針に合わせ
+// graphrag/*.ts は import せず、素の fs でプロトコルを直接実装する。
+const aliveHolderChild = (cacheDir, fp, holdMs) =>
+  execFileP(process.execPath, [
+    "--input-type=module",
+    "-e",
+    `const { mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, rmdirSync } = await import("node:fs");\n` +
+    `const { hostname } = await import("node:os");\n` +
+    `const path = (await import("node:path")).default;\n` +
+    `const cacheDir = process.argv[1], fp = process.argv[2], holdMs = Number(process.argv[3]);\n` +
+    `const lockDir = path.join(cacheDir, "ask-state.lock");\n` +
+    `mkdirSync(lockDir, { recursive: true });\n` +
+    `writeFileSync(path.join(lockDir, "owner.json"), JSON.stringify({ pid: process.pid, nonce: "holder-nonce", hostname: hostname(), acquired_at: Date.now() }));\n` +
+    `const state = JSON.parse(readFileSync(fp, "utf8"));\n` +
+    `writeFileSync(path.join(cacheDir, "holder-acquired"), "1");\n` +
+    `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, holdMs);\n` +
+    `state["holderbump"] = { count: 1, last_at: Date.now() };\n` +
+    `const tmp = fp + ".tmp.holder";\n` +
+    `writeFileSync(tmp, JSON.stringify(state, null, 2));\n` +
+    `renameSync(tmp, fp);\n` +
+    `rmSync(path.join(lockDir, "owner.json"), { force: true });\n` +
+    `rmdirSync(lockDir);\n`,
+    cacheDir,
+    fp,
+    String(holdMs)
+  ]);
+
+test("#41 生存 owner の lock は stale 閾値超過でも奪取せず、解放を待ってから consume する", async () => {
+  const root = makeAnchor();
+  try {
+    const realA = realpathSync(root);
+    const cacheDir = path.join(root, ".graphrag", "cache");
+    const fp = writeState(root, {
+      [ckptKeyFor(realA)]: checkpointEntry({ cwd: root, session_dir: realA, first_action: "生存保持後の一手" })
+    });
+    // holder (子プロセス) が lock 内で 6.5 秒停止 (stale 閾値 5 秒超) してから増分を書いて解放する。
+    const child = aliveHolderChild(cacheDir, fp, 6_500);
+    const marker = path.join(cacheDir, "holder-acquired");
+    const t0 = Date.now();
+    while (!existsSync(marker)) {
+      if (Date.now() - t0 > 10_000) throw new Error("holder が lock を取得しない");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // 旧実装はここで 5 秒後に奪取して先に consume し、holder の書き戻し (checkpoint 入りの
+    // 古い state) が checkpoint を復活させて one-shot を壊した (lost update)。
+    const out = runHook({ source: "clear", cwd: root });
+    await child;
+    const ctx = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /生存保持後の一手/, "holder 解放後に復元される");
+    const onDisk = JSON.parse(readFileSync(fp, "utf8"));
+    assert.ok(!(ckptKeyFor(realA) in onDisk), "checkpoint は一度だけ消費され、holder の書き戻しで復活しない");
+    assert.equal(onDisk["holderbump"]?.count, 1, "holder の増分も失われない");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

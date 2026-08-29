@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { buildVaultFiles } from "./build-vault.ts";
 import { writeVaultDelta } from "./mutate-vault.ts";
 import { fsckVault, runFsck, type FsckReport } from "./fsck.ts";
+import { PROJECT_SCHEMA } from "./schema-project.ts";
 
 // 固定タイムスタンプ (banner round-trip で決定論的に byte 一致させる)。
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
@@ -76,6 +77,7 @@ const ALL_CHECK_IDS = [
   "id-path-consistency",
   "edge-endpoints",
   "schema-validate",
+  "source-backing",
   "round-trip",
   "tombstones",
   "git-uncommitted",
@@ -166,6 +168,79 @@ test("fsck: vault: 参照は形のみ検査 — 正形は ok、slash 無しの�
   assert.match(problems[0].problem, /malformed cross-vault ref/);
   // validateGraph は vault: 参照を一律 skip するので、この奇形は fsck だけが捕まえる
   assert.equal(check(report, "schema-validate").status, "ok");
+});
+
+test("fsck: unbacked distilled node は source-backing WARN で列挙 (legacy が居るので error にしない)", () => {
+  const g = seedGraph();
+  // provenance edge を持たない Decision と、非 provenance edge (sets_policy_for → File)
+  // しか持たない Decision — どちらも unbacked として報告されること。
+  g.nodes.push(
+    { id: "decision:s:orphan", type: "Decision", title: "Orphan", summary: "o" },
+    { id: "decision:s:policy-only", type: "Decision", title: "PolicyOnly", summary: "p" }
+  );
+  g.edges.push({
+    id: "decision_s_policy-only__sets_policy_for__file_s_README.md",
+    type: "sets_policy_for",
+    from: "decision:s:policy-only",
+    to: "file:s:README.md",
+  });
+  const { vault } = gitVault(g);
+  const report = fsckVault({ vaultDir: vault });
+  assert.equal(report.status, "warn");
+  const c = check(report, "source-backing");
+  assert.equal(c.status, "warn");
+  const unbacked: any[] = (c.detail as any).unbacked;
+  assert.deepEqual(
+    unbacked.map((u: any) => u.id).sort(),
+    ["decision:s:orphan", "decision:s:policy-only"]
+  );
+  assert.match(c.hint ?? "", /provenance/);
+  // seed の decision:s:a (documented_by → File) は報告されない
+  assert.ok(!unbacked.some((u: any) => u.id === "decision:s:a"));
+});
+
+test("fsck: copied_from_summary スタンプ付き legacy node は source-backing で報告しない (honest marker)", () => {
+  const g = seedGraph();
+  g.nodes.push({
+    id: "decision:s:stamped",
+    type: "Decision",
+    title: "Stamped",
+    summary: "s",
+    raw_content: "s",
+    raw_content_status: "copied_from_summary",
+  });
+  const { vault } = gitVault(g);
+  const report = fsckVault({ vaultDir: vault });
+  const c = check(report, "source-backing");
+  assert.equal(c.status, "ok", JSON.stringify(c.detail));
+});
+
+test("fsck: project schema — documented_by → Source(url) で backed な distilled node は source-backing で警告しない (PR #41 指摘A)", () => {
+  // PROJECT_SCHEMA では Source が File の置き換え (documented_by の到達先は Source のみ)。
+  // isQualifyingSource が Source を知らないと project vault の backed 構成にも全数誤警告が出る。
+  const g = {
+    generated_at: FIXED_TS,
+    nodes: [
+      {
+        id: "source:p:rfp", type: "Source", title: "RFP",
+        source_kind: "document", url: "https://example.com/rfp.pdf",
+      },
+      { id: "decision:p:vendor", type: "Decision", title: "Vendor", summary: "v" },
+    ],
+    edges: [
+      {
+        id: "decision_p_vendor__documented_by__source_p_rfp",
+        type: "documented_by",
+        from: "decision:p:vendor",
+        to: "source:p:rfp",
+      },
+    ],
+  };
+  const { vault } = gitVault(g);
+  const report = fsckVault({ vaultDir: vault, schema: PROJECT_SCHEMA });
+  assert.equal(check(report, "schema-validate").status, "ok", JSON.stringify(check(report, "schema-validate").detail));
+  const c = check(report, "source-backing");
+  assert.equal(c.status, "ok", JSON.stringify(c.detail));
 });
 
 test("fsck: 手編集でパースは通るが直列化が非 canonical → round-trip WARN (破損ではなく漂流)", () => {

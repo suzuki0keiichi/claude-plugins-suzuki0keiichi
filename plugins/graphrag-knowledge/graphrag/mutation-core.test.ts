@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { validateMutation, applyMutationToGraph, normalizeMutationPlan } from "./mutation-core.ts";
+import { PROJECT_SCHEMA } from "./schema-project.ts";
 
 const baseGraph = () => ({
   nodes: [
@@ -412,4 +413,323 @@ test("idempotent replay: 既存より少ないフィールドの create は repl
   assert.deepEqual(p.replayedNodeIds, [], "対称比較: 既存の summary と plan の undefined が不一致");
   const v = validateMutation({ currentGraph: baseGraph(), plan: p.plan });
   assert.equal(v.valid, false, "id 衝突として fail-loud する");
+});
+
+// ── source backing (issue #28): 差分比較 + provenance edge 限定 ──────────────
+//
+// backed = 「provenance edge (documented_by/derived_from) で qualifying source に接続」。
+// mutation の before/after 両方の全 distilled node について backing を比較し、
+// (a) 新規 distilled node が after で unbacked、(b) before で backed だった node が
+// after で unbacked、の両遷移を拒否する。before から unbacked の legacy は猶予。
+
+// backed な Decision (File + documented_by) を持つ基準グラフ。
+const backedGraph = () => ({
+  nodes: [
+    { id: "file:s:src/a.ts", type: "File", title: "a.ts", path: "src/a.ts" },
+    { id: "decision:s:a", type: "Decision", title: "A", summary: "a" },
+  ],
+  edges: [
+    {
+      id: "decision_s_a__documented_by__file_s_src_a.ts",
+      type: "documented_by",
+      from: "decision:s:a",
+      to: "file:s:src/a.ts",
+    },
+  ],
+});
+
+test("source backing: documented_by edge だけの削除は拒否 (plan.nodes 空でも backed→unbacked を捕捉)", () => {
+  const plan = {
+    reason: "strip edge",
+    nodes: [],
+    edges: [{ op: "delete", id: "decision_s_a__documented_by__file_s_src_a.ts" }],
+  };
+  const v = validateMutation({ currentGraph: backedGraph(), plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false, "edge-only delete must not silently orphan decision:s:a");
+  assert.ok(
+    v.failures.some((f) => f.includes("decision:s:a") && f.includes("backed")),
+    v.failures.join("; ")
+  );
+});
+
+test("source backing: File 削除の DETACH cascade で unbacked になる Decision を拒否", () => {
+  const plan = {
+    reason: "delete source",
+    nodes: [{ op: "delete", id: "file:s:src/a.ts" }],
+    edges: [],
+  };
+  const v = validateMutation({ currentGraph: backedGraph(), plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false, "cascade must not silently orphan decision:s:a");
+  assert.ok(v.failures.some((f) => f.includes("decision:s:a")), v.failures.join("; "));
+});
+
+test("source backing: 非 provenance edge (sets_policy_for → File) は backing に数えない", () => {
+  const plan = {
+    reason: "bypass via sets_policy_for",
+    nodes: [
+      { op: "create", id: "decision:s:p", type: "Decision", title: "P", summary: "p" },
+      { op: "create", id: "file:s:src/p.ts", type: "File", title: "p.ts", path: "src/p.ts" },
+    ],
+    edges: [
+      { op: "create", id: "ep1", type: "sets_policy_for", from: "decision:s:p", to: "file:s:src/p.ts" },
+    ],
+  };
+  const v = validateMutation({ currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false, "sets_policy_for must not count as source backing");
+  assert.ok(v.failures.some((f) => f.includes("decision:s:p")), v.failures.join("; "));
+});
+
+test("source backing: risks_in / rejected_in / temporary_relation_candidate も backing に数えない", () => {
+  // ターゲットはすべて qualifying source (path 付き File / raw_content 付き Investigation /
+  // raw_content 付き ConversationChunk) — edge type が provenance でない限り backed にならないこと。
+  const plan = {
+    reason: "bypass via non-provenance edges",
+    nodes: [
+      { op: "create", id: "risk:s:r", type: "Risk", title: "R", summary: "r" },
+      { op: "create", id: "rejectedoption:s:x", type: "RejectedOption", title: "X", summary: "x" },
+      { op: "create", id: "decision:s:t", type: "Decision", title: "T", summary: "t" },
+      { op: "create", id: "file:s:src/r.ts", type: "File", title: "r.ts", path: "src/r.ts" },
+      { op: "create", id: "investigation:s:i", type: "Investigation", title: "I", raw_content: "log", state: "closed" },
+      { op: "create", id: "conversationchunk:s:c", type: "ConversationChunk", title: "C", raw_content: "talk" },
+    ],
+    edges: [
+      { op: "create", id: "er1", type: "risks_in", from: "risk:s:r", to: "file:s:src/r.ts" },
+      { op: "create", id: "er2", type: "rejected_in", from: "rejectedoption:s:x", to: "investigation:s:i" },
+      { op: "create", id: "er3", type: "temporary_relation_candidate", from: "decision:s:t", to: "conversationchunk:s:c" },
+    ],
+  };
+  const v = validateMutation({ currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false);
+  for (const id of ["risk:s:r", "rejectedoption:s:x", "decision:s:t"]) {
+    assert.ok(v.failures.some((f) => f.includes(id)), `${id} must be reported: ${v.failures.join("; ")}`);
+  }
+});
+
+test("source backing: File の path を空にする update で依存 Decision が unbacked → 拒否", () => {
+  const plan = {
+    reason: "degrade source",
+    nodes: [{ op: "update", id: "file:s:src/a.ts", updates: { path: "" } }],
+    edges: [],
+  };
+  const v = validateMutation({ currentGraph: backedGraph(), plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false, "path-less File is no longer a qualifying source");
+  assert.ok(v.failures.some((f) => f.includes("decision:s:a")), v.failures.join("; "));
+});
+
+test("source backing: source の raw_content_status を copied_from_summary にする update で依存 node が unbacked → 拒否", () => {
+  const graph = {
+    nodes: [
+      { id: "conversationchunk:s:c", type: "ConversationChunk", title: "C", raw_content: "talk" },
+      { id: "decision:s:d", type: "Decision", title: "D", summary: "d" },
+    ],
+    edges: [
+      { id: "ed1", type: "derived_from", from: "decision:s:d", to: "conversationchunk:s:c" },
+    ],
+  };
+  const plan = {
+    reason: "degrade chunk",
+    nodes: [
+      { op: "update", id: "conversationchunk:s:c", updates: { raw_content_status: "copied_from_summary" } },
+    ],
+    edges: [],
+  };
+  const v = validateMutation({ currentGraph: graph, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false);
+  assert.ok(v.failures.some((f) => f.includes("decision:s:d")), v.failures.join("; "));
+});
+
+test("source backing: legacy 猶予 — before から unbacked の既存 node は無関係な mutation をブロックしない", () => {
+  const graph = {
+    nodes: [{ id: "decision:s:legacy", type: "Decision", title: "L", summary: "l" }],
+    edges: [],
+  };
+  const plan = {
+    reason: "unrelated",
+    nodes: [{ op: "create", id: "file:s:src/n.ts", type: "File", title: "n.ts", path: "src/n.ts" }],
+    edges: [],
+  };
+  const v = validateMutation({ currentGraph: graph, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, true, v.failures.join("; "));
+});
+
+test("source backing: legacy 猶予 — before から unbacked の node 自体の update も通る (既存 vault を壊さない)", () => {
+  const graph = {
+    nodes: [{ id: "decision:s:legacy", type: "Decision", title: "L", summary: "l" }],
+    edges: [],
+  };
+  const plan = {
+    reason: "benign update",
+    nodes: [{ op: "update", id: "decision:s:legacy", updates: { summary: "l2" } }],
+    edges: [],
+  };
+  const v = validateMutation({ currentGraph: graph, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, true, v.failures.join("; "));
+});
+
+test("source backing: copied_from_summary スタンプ付き legacy node の新設は従来どおり通る (honest marker)", () => {
+  const plan = {
+    reason: "stamped legacy migration",
+    nodes: [
+      {
+        op: "create", id: "decision:s:stamped", type: "Decision", title: "S", summary: "s",
+        raw_content: "s", raw_content_status: "copied_from_summary",
+      },
+    ],
+    edges: [],
+  };
+  const v = validateMutation({ currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, true, v.failures.join("; "));
+});
+
+test("source backing: cross-vault documented_by のみでも backed 扱い (validateGraph の existence skip と同じ整合)", () => {
+  const plan = {
+    reason: "cross-vault backed",
+    nodes: [{ op: "create", id: "decision:s:xv", type: "Decision", title: "XV", summary: "xv" }],
+    edges: [
+      { op: "create", id: "exv1", type: "documented_by", from: "decision:s:xv", to: "vault:other/file:o:src/x.ts" },
+    ],
+  };
+  const v = validateMutation({ currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, true, v.failures.join("; "));
+});
+
+test("source backing: 正常系 — documented_by 付き追加は通り、node ごと削除 (cascade 込み) も通る", () => {
+  const addPlan = {
+    reason: "add backed decision",
+    nodes: [
+      { op: "create", id: "decision:s:n", type: "Decision", title: "N", summary: "n" },
+      { op: "create", id: "file:s:src/n.ts", type: "File", title: "n.ts", path: "src/n.ts" },
+    ],
+    edges: [
+      { op: "create", id: "en1", type: "documented_by", from: "decision:s:n", to: "file:s:src/n.ts" },
+    ],
+  };
+  const add = validateMutation({ currentGraph: { nodes: [], edges: [] }, plan: addPlan, enforceSourceBacking: true });
+  assert.equal(add.valid, true, add.failures.join("; "));
+
+  const deletePlan = {
+    reason: "delete decision together with its edge",
+    nodes: [{ op: "delete", id: "decision:s:a" }],
+    edges: [],
+  };
+  const del = validateMutation({ currentGraph: backedGraph(), plan: deletePlan, enforceSourceBacking: true });
+  assert.equal(del.valid, true, del.failures.join("; "));
+});
+
+// ── source backing: PR #41 指摘A — Source 型 (project/principal preset) ──────
+//
+// PROJECT_SCHEMA では Source が File の置き換え (PROJECT_NODE_TYPES に File は無く、
+// documented_by の到達先は Source のみ)。isQualifyingSource が Source を知らないと
+// project/principal vault の新規 distilled node が全て "no qualifying source" で
+// ハード拒否される (機能停止級)。Source は url 非空で qualifying (File.path と対称)。
+
+test("source backing (project): documented_by → Source(url あり) の新規 Decision は通る", () => {
+  const plan = {
+    reason: "project decision backed by source",
+    nodes: [
+      { op: "create", id: "decision:p:vendor", type: "Decision", title: "Vendor", summary: "v" },
+      {
+        op: "create", id: "source:p:rfp", type: "Source", title: "RFP",
+        source_kind: "document", url: "https://example.com/rfp.pdf",
+      },
+    ],
+    edges: [
+      { op: "create", id: "ep1", type: "documented_by", from: "decision:p:vendor", to: "source:p:rfp" },
+    ],
+  };
+  const v = validateMutation({
+    currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true, schema: PROJECT_SCHEMA,
+  });
+  assert.equal(v.valid, true, v.failures.join("; "));
+});
+
+test("source backing (project): Source の url 空/欠落は qualifying でない → 拒否", () => {
+  for (const source of [
+    { op: "create", id: "source:p:empty", type: "Source", title: "Empty", url: "" },
+    { op: "create", id: "source:p:empty", type: "Source", title: "NoUrl" }, // url 欠落
+    { op: "create", id: "source:p:empty", type: "Source", title: "Blank", url: "   " },
+  ]) {
+    const plan = {
+      reason: "url-less source must not back",
+      nodes: [
+        { op: "create", id: "risk:p:slip", type: "Risk", title: "Slip", summary: "s" },
+        source,
+      ],
+      edges: [
+        { op: "create", id: "ep2", type: "documented_by", from: "risk:p:slip", to: "source:p:empty" },
+      ],
+    };
+    const v = validateMutation({
+      currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true, schema: PROJECT_SCHEMA,
+    });
+    assert.equal(v.valid, false, `url=${JSON.stringify((source as any).url)} must not qualify`);
+    assert.ok(v.failures.some((f) => f.includes("risk:p:slip")), v.failures.join("; "));
+  }
+});
+
+test("source backing (project): derived_from → Source も backing に数える", () => {
+  const plan = {
+    reason: "derived from source",
+    nodes: [
+      { op: "create", id: "decision:p:pricing", type: "Decision", title: "Pricing", summary: "p" },
+      {
+        op: "create", id: "source:p:regulation", type: "Source", title: "Reg",
+        source_kind: "regulation", url: "https://example.com/reg",
+      },
+    ],
+    edges: [
+      { op: "create", id: "ep3", type: "derived_from", from: "decision:p:pricing", to: "source:p:regulation" },
+    ],
+  };
+  const v = validateMutation({
+    currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true, schema: PROJECT_SCHEMA,
+  });
+  assert.equal(v.valid, true, v.failures.join("; "));
+});
+
+// ── source backing: PR #41 指摘B — malformed cross-vault ref の素通り封鎖 ────
+//
+// `to.startsWith("vault:")` の prefix 判定だけだと `vault:not-a-valid-ref` のような
+// 奇形 (parseCrossVaultRef が null を返し fsck edge-endpoints が error にする形) でも
+// backed 扱いになる。backing 判定は parseCrossVaultRef と同じ整形式のみ認める。
+
+test("source backing: malformed cross-vault ref (vault:not-a-valid-ref) は backing に数えない → 拒否", () => {
+  const plan = {
+    reason: "malformed xref must not back",
+    nodes: [{ op: "create", id: "decision:s:mal", type: "Decision", title: "M", summary: "m" }],
+    edges: [
+      { op: "create", id: "emal1", type: "documented_by", from: "decision:s:mal", to: "vault:not-a-valid-ref" },
+    ],
+  };
+  const v = validateMutation({ currentGraph: { nodes: [], edges: [] }, plan, enforceSourceBacking: true });
+  assert.equal(v.valid, false, "prefix-only vault: ref must not count as source backing");
+  assert.ok(v.failures.some((f) => f.includes("decision:s:mal")), v.failures.join("; "));
+});
+
+test("source backing: 整形式 vault:slug/node-id は引き続き backed (空 slug/空 nodeId は不可)", () => {
+  const wellFormed = validateMutation({
+    currentGraph: { nodes: [], edges: [] },
+    plan: {
+      reason: "well-formed xref",
+      nodes: [{ op: "create", id: "decision:s:wf", type: "Decision", title: "WF", summary: "w" }],
+      edges: [
+        { op: "create", id: "ewf1", type: "documented_by", from: "decision:s:wf", to: "vault:billing/file:b:src/x.ts" },
+      ],
+    },
+    enforceSourceBacking: true,
+  });
+  assert.equal(wellFormed.valid, true, wellFormed.failures.join("; "));
+
+  for (const to of ["vault:/file:b:src/x.ts", "vault:billing/"]) {
+    const v = validateMutation({
+      currentGraph: { nodes: [], edges: [] },
+      plan: {
+        reason: "degenerate xref",
+        nodes: [{ op: "create", id: "decision:s:deg", type: "Decision", title: "D", summary: "d" }],
+        edges: [{ op: "create", id: "edeg1", type: "documented_by", from: "decision:s:deg", to }],
+      },
+      enforceSourceBacking: true,
+    });
+    assert.equal(v.valid, false, `${to} must not count as backing`);
+  }
 });
