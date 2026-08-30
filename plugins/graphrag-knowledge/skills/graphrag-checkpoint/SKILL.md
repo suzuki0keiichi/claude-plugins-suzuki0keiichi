@@ -1,12 +1,12 @@
 ---
 name: graphrag-checkpoint
-version: 1.5.0
-description: context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、`/clear` で綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。退避後に `/clear` すると SessionStart フックが直前の作業状態を自動で戻す (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
+description: >-
+  context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。Claude Codeでは退避後の `/clear` をSessionStartフックが自動復元し、Codexでは次のtaskで `$CLI brief --mode resume` を手動実行する。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
 ---
 
 # Compact Checkpoint (flush / final flush)
 
-Fire manually when context is filling up (just before compact, or before a deliberate `/clear`), flushing to the graph with **A (flush of work-state) and B (rescue of un-written-back durable knowledge) as equal partners**. A clean restart is **checkpoint → `/clear`** (§C). For the read/write foundation and CLI details, follow the parent skill `graphrag-knowledge` and `$REF/` (= `${CLAUDE_PLUGIN_ROOT}/references`). `$CLI` = `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts`.
+Fire manually when context is filling up (just before compact, or before a deliberate clear/restart), flushing to the graph with **A (flush of work-state) and B (rescue of un-written-back durable knowledge) as equal partners**. In Claude Code, a clean restart is **checkpoint → `/clear`** (§C). In Codex, start the next task with `$CLI brief --mode resume`. For the read/write foundation and CLI details, load the parent skill `graphrag-knowledge` first and reuse its provider-neutral `$CLI` and `$REF` bindings.
 
 ## Scope (what this skill does and does not do)
 
@@ -14,8 +14,8 @@ Fire manually when context is filling up (just before compact, or before a delib
 - **The primary channel is always-on triggers.** checkpoint can only capture what still remains in context at fire time — you cannot preserve everything from a 100%-full context. The value is **deliberately keeping what matters** (better than compact's blind summarization).
 - **Firing is manual, human-only.** No signal for remaining context exists, and the "right moment" cannot be auto-detected. A human fires it while there is still headroom. Firing itself consumes context, so **fire before things get tight**.
 - **checkpoint's essence is saving ctx.** Since each flush/rescue step itself consumes context, keep reading within this skill to a minimum (the lightweight duplicate-check rule for B is in §B).
-- **Restore is out of scope for this skill.** The SessionStart hook (`clear-restore.mjs`) reads the intent that Procedure C wrote into the reserved `__checkpoint__` key of the vault-side `.graphrag/cache/ask-state.json` (resolved by the same rule as the writer, including `.env` `GRAPHRAG_VAULT_DIR` redirects) **only right after `/clear`**, and **consumes it (one-shot, single use)** the moment it reads, then restores. 60-min expiry, and an identity match in three tiers (`session_dir` declared by Procedure C → project root → strict cwd; see §C). **Nothing is injected after compact** (left to blind summarization — the old auto-injection is fully abolished). **checkpoint → `/clear` → clean restart** is the cleanest, with zero blind summarization, and is the sole auto-restore path. If tightness lets auto-compact swallow you, there is no fallback — next session, manually fire `$CLI brief --mode resume` to trace from the same Investigation.
-- **Handover ack contract.** The hook's injection is invisible to the human, so it obligates the restored agent to **open its first reply by declaring the restore** (restored focus + first action), and likewise to declare when a checkpoint existed but was not restored (expired / different project). Therefore: **a first reply after `/clear` that opens with no declaration means the handover failed** — recover with `$CLI brief --mode resume`. This detection rule is told to the user at checkpoint time (§Reporting).
+- **Restore is provider-specific and out of scope for the flush itself.** In Claude Code, Procedure C writes a one-shot intent that the `clear-restore.mjs` SessionStart hook consumes only after `/clear` (60-min expiry; identity match by declared `session_dir` → project root → strict cwd). Codex installs no lifecycle hook, so it never auto-restores this marker; start the next task with `$CLI brief --mode resume`. Nothing is injected after compact on either provider.
+- **Claude Code handover ack contract.** Hook injection is invisible to the human, so the restored agent must open its first reply by declaring the restored focus and first action. A first reply after `/clear` with no declaration means restore failed; recover with `$CLI brief --mode resume`. In Codex, the explicit resume command is the acknowledgement boundary.
 
 ## Procedure
 
@@ -25,9 +25,9 @@ Run `$CLI inspect` to check the vault type → read only the matching system / p
 ### A. Flush (work-state → active Investigation + ConversationChunk)
 
 1. Run `$CLI brief --mode resume` to find **the active Investigation for the current focus**.
-   - If present, **update** (while the focus is the same, keep updating the one). Procedure C **passes this Investigation's id to `checkpoint-mark` by name**, so keep exactly 1 active per focus (restore is by id name — it does not depend on generated_at or primary selection).
+   - If present, **update** (while the focus is the same, keep updating the one). Keep exactly 1 active per focus; Claude Code's Procedure C passes this Investigation's id to `checkpoint-mark`, while Codex resumes it explicitly with `$CLI brief --mode resume`.
    - If absent, **create** (`state: active`). If the focus changed midway, set the old one to `state: closed` and create a new one (§Focus continuity in the parent skill).
-   - **If the checkpoint is the session's "close" and the focus itself is settled**, set this Investigation to `state: closed` and do NOT fire Procedure C (checkpoint-mark) — settled work needs no restore.
+   - **If the checkpoint is the session's "close" and the focus itself is settled**, set this Investigation to `state: closed` and do not prepare a restore — settled work needs no handoff.
 2. Write the **work-state as structured text into that Investigation's `raw_content`** (via commit-mutation `updates`; note: do not create a dedicated field):
    - `current focus:` what you are doing now (a one-liner restart point after restore)
    - `next:` the concrete next action (granular enough to resume without re-deriving; drop finished branches). **The first item is the "unique first action"** — always place at the head one action concretized down to its target (file:line or command to run) and expected result, so the agent right after restore can start without hesitation. Writing that can only start with exploration, like "investigate ~" or "clean up around ~", is forbidden (that is the main cause of post-restore wandering and ctx waste).
@@ -58,21 +58,21 @@ For each candidate:
 
 **Off-limits**: do NOT write to planning/schedule types (**Task / Milestone / Resource / Stakeholder**). project's Task is the project's own plan, not a sink for the products of this chat work.
 
-### C. Marker (declaring /clear-restore intent; the mandatory close)
+### C. Handoff close (Claude Code marker / Codex manual resume)
 
-Once writing is done, fire **`$CLI checkpoint-mark --investigation <id> --session-dir <dir>`** (`<id>` is the id of the active Investigation you updated/created in Procedure A). This is the **one-shot intent declaration** to the SessionStart hook: "if `/clear` happens, restore me":
+In **Claude Code**, once writing is done, fire **`$CLI checkpoint-mark --investigation <id> --session-dir <dir>`** (`<id>` is the active Investigation from Procedure A). This declares one-shot restore intent for the SessionStart hook. In **Codex**, do not fire `checkpoint-mark`; it has no hook consumer. End by telling the user to start the next task with **`$CLI brief --mode resume`**.
 
 - **`--session-dir` must be your session's primary working directory — the one stated in your system prompt (environment section), not the Bash tool's current directory** (that may be polluted by an earlier `cd`, and the CLI cannot see the session's own directory). Pass it verbatim. It is the most precise identity the restore hook has: it is matched **alone** against the directory Claude Code hands the hook, so a checkpoint fired in one monorepo subdirectory-as-project never leaks into a session opened at another. Omit it and identity falls back to the coarser git-root / cwd match.
 - The verb validates before firing and, if it fails, **hard-errors and makes you fix it on the spot**: the target node is an **active Investigation** / `raw_content` has both `current focus:` and `next:` / a **unique first action** can be extracted from the head of `next` / `raw_content` is **within 8KB** (if over, split deep raw logs out into a ConversationChunk). §A's self-check is guidance at write time; this validation is the **last line of defense**.
 - If it passes, it stamps the `work_state` snapshot and `first_action` into the reserved key **`__checkpoint__`** of `.graphrag/cache/ask-state.json` (no new file is created).
 - The SessionStart hook (`clear-restore.mjs`) reads this key **only right after `/clear`**, and **consumes it (one-shot, single use)** the moment it reads, then restores. 60-min expiry, plus an identity match in three tiers, most precise first: **`session_dir`** (from `--session-dir`; when present it decides alone — a mismatch is refused, never softened by the tiers below), else **project root** (closest ancestor with a `.git`, so a checkpoint fired from a subdirectory still restores at the session root), else **strict cwd match** (entries with neither). It does not rely on wall-clock alone, so it will not miss even if you read the report or chat before `/clear`. The injected text obligates the restored agent to open its first reply with a restore declaration (§Scope, Handover ack contract) — success is always verbalized, so silence is a reliable failure signal.
 - **Nothing is injected after compact** (the old behavior is fully abolished). If auto-compact swallows you under tightness, next session, manually fire `$CLI brief --mode resume` to trace from the same Investigation.
-- **Forget to fire it and no `/clear` restore happens at all** (the old generated_at 10-min gate is already abolished — the problem of missing on a re-checkpoint with unchanged content is itself gone). Do not skip C.
+- **Claude Code only:** forget to fire it and no `/clear` restore happens. **Codex only:** forget the explicit resume command and no automatic fallback exists.
 
 ## Reporting (user-facing)
 
-In natural language: the flushed focus / **the first action at the head of next (in one sentence)** / the count of next actions / sticking points; and for the rescue, **what you wrote / what was skipped as existing / what was deferred as a judgment call** — briefly. Close with "Marked — OK to `/clear` (within 60 min)" **plus the detection rule in one sentence**: after `/clear`, the first reply will open by declaring the restored focus and first action — if it doesn't, the handover failed; recover with `brief --mode resume`. Do not dump IDs / raw JSON (§Reporting format in the parent skill).
+In natural language: the flushed focus / **the first action at the head of next (in one sentence)** / the count of next actions / sticking points; and for the rescue, **what you wrote / what was skipped as existing / what was deferred as a judgment call** — briefly. In Claude Code, close with "Marked — OK to `/clear` (within 60 min)" plus the restore-declaration detection rule. In Codex, close with "Saved — start the next task with `$CLI brief --mode resume`". Do not dump IDs / raw JSON (§Reporting format in the parent skill).
 
 ## Batch-apply hint
 
-A and B are independent node groups, but can be **bundled into a single `commit-mutation` plan** (Investigation update + ConversationChunk + new knowledge nodes + `discussed_in`/`derived_from`/`led_to` edges). Template: `$REF/mutation-templates.md`. For just a single piece of knowledge, typed-add (`add-*`) suffices. C's `checkpoint-mark --investigation <id> --session-dir <dir>` is a standalone verb not part of the plan — fire it once at the end.
+A and B are independent node groups, but can be **bundled into a single `commit-mutation` plan** (Investigation update + ConversationChunk + new knowledge nodes + `discussed_in`/`derived_from`/`led_to` edges). Template: `$REF/mutation-templates.md`. For just a single piece of knowledge, typed-add (`add-*`) suffices. In Claude Code, C's `checkpoint-mark --investigation <id> --session-dir <dir>` is a standalone verb not part of the plan; Codex skips it.

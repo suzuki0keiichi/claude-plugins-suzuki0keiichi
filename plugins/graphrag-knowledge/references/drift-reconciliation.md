@@ -23,7 +23,7 @@ Options:
 
 ## Applying after the user's ruling
 
-If the user picks `[u]` / `[d]`, write back to the vault via `commit-mutation` (an op:update / op:delete plan) (typed-update is not provided; reconsider if it recurs). Plan templates: the Update / Delete sections of `${CLAUDE_PLUGIN_ROOT}/references/mutation-templates.md`.
+If the user picks `[u]` / `[d]`, write back to the vault via `commit-mutation` (an op:update / op:delete plan) (typed-update is not provided; reconsider if it recurs). Plan templates: the Update / Delete sections of `$REF/mutation-templates.md`.
 
 - `[s]` writes nothing (just state the skip reason in conversation; do not create a skip-record node in the graph).
 - `[i]` is split off as an investigation task. If the investigation continues across sessions, stand up an Investigation via `add-investigation` (default state is "active").

@@ -1,6 +1,5 @@
 ---
 name: graphrag-knowledge
-version: 4.15.0
 description: プロジェクトの永続的な設計知識 (採用判断/却下案/制約/目的/リスク/運用知識と、それらを貫く横断構造) を vault を単一正本に安全に読み書きする。作業の最上流と一段落で発火する。【読み — 着手前に先に引く (コードやファイルを読む前にこれを起動)】① 「○○を実装/修正/改善/リファクタしたい」「○○がバグってる/動かない/エラー」「○○周りを整理/調査/レビュー/設計したい」と課題や依頼を受け取った直後 (レビュー自体は graphrag-pr-review / graphrag-design-review の担当 — 本 skill はその上流の知識引き)、触る領域の Decision / Risk / Constraint / 運用知識を `ask` で先に引く (1発で網羅、連打しない)。② 「前回の続き」「引き継ぎ」「過去どう判断した」「なぜこの設計に」と経緯を問われた時。③ 「影響範囲」「どこに波及」と影響伝播を辿りたい時。【書き戻し — 一段落で能動的に (ユーザーの「覚えて」を待たない)】④ 実装/修正が一段落した時・commit 直前 (無言のアクショントリガ — 採用判断/却下案/リスク/運用ハマりを書き戻し、決着した focus の Investigation を閉じる)。⑤ 「Xで行く」「Xはやめる」「今後はY」と結論/却下が確定した時、「覚えて/記録して」と指示された時 (詳細は §Proactive Persistence)。
 ---
 
@@ -10,13 +9,19 @@ A skill that lets agents accumulate knowledge in a vault (Obsidian Markdown) as 
 
 ## Overview / How to call
 
-CLI for safely reading and writing a persistent knowledge graph. All verbs go through a single launcher:
+CLI for safely reading and writing a persistent knowledge graph. Resolve `<PLUGIN_ROOT>` once before running commands:
+
+- In Claude Code, use the plugin installation directory exposed as `${CLAUDE_PLUGIN_ROOT}`.
+- In Codex, derive the absolute plugin root by walking two directories up from this `SKILL.md` path. Codex includes that path when it loads the skill.
+- Do not infer the plugin root from the current working directory. Substitute the resolved absolute path for `<PLUGIN_ROOT>`; never pass the angle-bracket token literally.
+
+All verbs go through the provider-neutral launcher:
 
 ```sh
-node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts <verb> [args]
+node "<PLUGIN_ROOT>/bin/graphrag.mjs" <verb> [args]
 ```
 
-Hereafter `$CLI` = the launcher above, `$REF` = `${CLAUDE_PLUGIN_ROOT}/references`.
+Hereafter `$CLI` = the launcher above, `$REF` = `<PLUGIN_ROOT>/references`, and `$DOCS` = `<PLUGIN_ROOT>/docs`.
 
 Verbs fall into 4 categories: read (`ask`), write (`add-*` / `commit-mutation`), index (`carve`), inspect (`inspect`). Details in §Recipe / §Headline verbs. Primitives (per-stage fine-grained operations) in §Primitive verbs + `$REF/cli-primitives.md`.
 
@@ -28,7 +33,7 @@ This skill is the read/write foundation. Three derived skills review changes and
 - `/graphrag-knowledge:graphrag-pr-review` — PR/diff review against graph (crosscut + knowledge axes: boundaries, constraints, rejected options, operational burns, risks, goals), detecting concept deltas in 3 tiers
 - `/graphrag-knowledge:graphrag-review-doc` — generate concept-level explanation doc (HTML) for human reviewers
 
-**Checkpoint / clear handoff lifecycle** (separate from review): `/graphrag-knowledge:graphrag-checkpoint` flushes the live session to the graph before `/compact` (A: work-state → active Investigation `raw_content` + ConversationChunk; B: unpersisted durable knowledge → normal knowledge nodes, wired back via `derived_from`/`led_to`), then fires `checkpoint-mark --investigation <id>` to write a one-shot restore intent into the reserved `__checkpoint__` key of `ask-state.json`. Restore is automatic on `/clear` only — the `clear-restore.mjs` SessionStart hook consumes the one-shot intent (60-min expiry, plus a three-tier identity match: declared `session_dir` → project root → strict cwd) and injects the snapshot. Nothing is injected after compact; run `brief --mode resume` manually to reach the same Investigation.
+**Checkpoint / clear handoff lifecycle** (separate from review): `/graphrag-knowledge:graphrag-checkpoint` flushes the live session to the graph before `/compact` (A: work-state → active Investigation `raw_content` + ConversationChunk; B: unpersisted durable knowledge → normal knowledge nodes, wired back via `derived_from`/`led_to`). In Claude Code, it then fires `checkpoint-mark --investigation <id>`; the `clear-restore.mjs` SessionStart hook consumes that one-shot intent after `/clear` and injects the snapshot. Codex does not install this hook, so start the next task with `$CLI brief --mode resume` instead. Nothing is injected after compact on either provider.
 
 ## Invariants (non-negotiable design boundaries)
 

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "GraphRAG knowledge base: Obsidian vault as the single source of truth, LLM-safe read/write via single launcher (graphrag/cli.ts).",
+  "description": "GraphRAG knowledge base: Obsidian vault as the single source of truth, with LLM-safe read/write through the shared bin/graphrag.mjs launcher.",
   "engines": {
     "node": ">=22.6.0"
   },

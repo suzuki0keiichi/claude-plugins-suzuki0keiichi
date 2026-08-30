@@ -1,6 +1,6 @@
 # Mutation Plan Templates
 
-These plans are validated and applied **to the vault** via `node graphrag/cli.ts commit-mutation <plan.json>` (the vault is the single source of truth; the only write paths are commit-mutation / add-*).
+These plans are validated and applied **to the vault** via `$CLI commit-mutation <plan.json>` (the vault is the single source of truth; the only write paths are commit-mutation / add-*).
 
 > **About `<system>` in ids**: the `<system>` in the id convention `<typeSlug>:<system>:<slug>` is a namespace label.
 > No edge to express membership is needed (contains was removed in v3.3; membership is carried by the vault's existence and the id convention).

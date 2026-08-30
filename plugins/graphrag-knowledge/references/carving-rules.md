@@ -406,7 +406,7 @@ intentional exclusion).
 
 ## Incremental follow-up (changed / new File)
 
-Respect the `change_status: new|changed|unchanged` of `node graphrag/cli.ts index`:
+Respect the `change_status: new|changed|unchanged` of `$CLI index`:
 
 | change_status | Required action |
 |---|---|
@@ -438,7 +438,7 @@ members.
 
 ## Automated verification command (mechanizes most of the pre-submission carving check)
 
-`node graphrag/cli.ts carving-check --graph <path>` mechanically verifies most of this file's
+`$CLI carving-check --graph <path>` mechanically verifies most of this file's
 rules. ERRORs must be resolved; WARNs require a justification when intentional. It judges the
 following items:
 
@@ -464,7 +464,7 @@ following items:
    no `sets_policy_for` or `documented_by` binding to an implementation file. Knowledge bound
    only via knowhow / plans / design-decisions docs cannot be traced on the graph for "which
    code this decision/insight drives." Fill it in via the flow: mechanically extract candidates
-   with `node graphrag/cli.ts edge-suggest-policy` → LLM confirmation → `sets_policy_for`
+   with `$CLI edge-suggest-policy` → LLM confirmation → `sets_policy_for`
    mutation. **Extension to Constraint (`constraint-binding-missing`)**: a Constraint is WARNed
    if it has not a single `constrains` edge (any target). The judgment for existing D/OK/R is
    unchanged. `add-constraint --constrains <id,...>` requires ≥1, so it is naturally satisfied
@@ -562,11 +562,11 @@ Edit via the `carving-allow` verb (an atomic write sharing the vault-lock; insid
 attempts git add+commit, failure being non-fatal and noted in the output):
 
 ```sh
-node graphrag/cli.ts carving-allow add --path <p> --reason <r>
-node graphrag/cli.ts carving-allow remove --path <p>
-node graphrag/cli.ts carving-allow list
+$CLI carving-allow add --path <p> --reason <r>
+$CLI carving-allow remove --path <p>
+$CLI carving-allow list
 # output graph Files matching the removed old builtin patterns as proposed config entries
-node graphrag/cli.ts carving-allow migrate --graph <path>
+$CLI carving-allow migrate --graph <path>
 ```
 
 **test-linkage rule**: the test (`*.test.ts` / `*.test.tsx`) of an implementation file that is
@@ -580,7 +580,7 @@ escalate to user judgment at step 4 of the "single-file responsibility decision 
 
 ## Pre-submission carving checklist
 
-Before applying a mutation plan with `node graphrag/cli.ts commit-mutation <plan.json>`, confirm
+Before applying a mutation plan with `$CLI commit-mutation <plan.json>`, confirm
 it is not a carving defect (`commit-mutation` writes to the canonical vault via the vault
 writer):
 

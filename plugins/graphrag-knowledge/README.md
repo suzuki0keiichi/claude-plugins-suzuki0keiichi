@@ -1,6 +1,6 @@
 # graphrag-knowledge
 
-プロジェクトの永続知識グラフを vault（Obsidian Markdown）を単一正本として安全に読み書きする Claude Code プラグイン。
+プロジェクトの永続知識グラフを vault（Obsidian Markdown）を単一正本として安全に読み書きする Claude Code / Codex プラグイン。
 
 ## 前提条件
 
@@ -13,10 +13,21 @@
 
 ## インストール
 
+### Claude Code
+
 ```
 /plugin marketplace add suzuki0keiichi/claude-plugins-suzuki0keiichi
 /plugin install graphrag-knowledge@suzuki0keiichi-personal-plugins
 ```
+
+### Codex
+
+```sh
+codex plugin marketplace add suzuki0keiichi/claude-plugins-suzuki0keiichi
+codex plugin add graphrag-knowledge@suzuki0keiichi-personal-plugins
+```
+
+Claude Code と Codex は同じ `skills/` と同じ CLI を使う。Codex では lifecycle hook を読み込まず、既存 vault の `inspect` / `brief` / `ask` と `add-*` / `commit-mutation` / `fsck` による読み書きを中核とする。hook による自動復元や自動レールは Claude Code 側だけで有効。
 
 ## セットアップ（プロジェクト側）
 

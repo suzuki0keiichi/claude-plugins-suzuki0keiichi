@@ -1,10 +1,10 @@
-# Claude Code Plugins (Personal)
+# Claude Code / Codex Plugins (Personal)
 
 ## 日本語
 
 ### このリポジトリについて
 
-このリポジトリは、私個人が日常的に使っている **Claude Code 用のプラグイン**を公開しているものです。  
+このリポジトリは、私個人が日常的に使っている **Claude Code / Codex 用のプラグイン**を公開しているものです。
 主用途は **自分自身と自分の所属する環境で使うこと**ですが、他の方が使うことを妨げる意図はありません。
 
 **自由に使ってください。**
@@ -15,7 +15,7 @@
 
 | プラグイン | 役割 |
 |-----------|------|
-| `graphrag-knowledge` | プロジェクトの永続知識グラフ (採用判断/却下案/制約/目的/リスク/運用知識) を、vault (Obsidian Markdown) を単一正本として安全に読み書きするスキル群 + CLI。設計レビュー・PR レビュー・checkpoint/resume もこのグラフを背骨に行う |
+| `graphrag-knowledge` | Claude Code / Codex 共通のスキル群と CLI で、プロジェクトの永続知識グラフ (採用判断/却下案/制約/目的/リスク/運用知識) を vault (Obsidian Markdown) を単一正本として安全に読み書きする。設計レビュー・PR レビュー・checkpoint/resume もこのグラフを背骨に行う |
 | `ssh-operator` | リモートマシンを SSH 操作するスキル。認証情報はローカルに置いたまま、プロジェクト内のヘルパースクリプトを経由することでパーミッション許可 (Always allow) を安定させる |
 
 ---
@@ -105,7 +105,7 @@
 
 ### About This Repository
 
-This repository contains **Claude Code plugins** that I primarily use for my own work.  
+This repository contains **Claude Code and Codex plugins** that I primarily use for my own work.
 While it is published publicly, its main purpose is **personal use**, not community-driven development.
 
 Anyone is free to use it.
@@ -116,7 +116,7 @@ Anyone is free to use it.
 
 | Plugin | Role |
 |--------|------|
-| `graphrag-knowledge` | A persistent project knowledge graph (decisions / rejected options / constraints / goals / risks / operational knowledge), read and written safely through a vault (Obsidian Markdown) as the single source of truth. Design review, PR review, and checkpoint/resume are built on this graph |
+| `graphrag-knowledge` | Shared Claude Code / Codex skills and CLI for safely reading and writing a persistent project knowledge graph through a vault (Obsidian Markdown) as the single source of truth. Design review, PR review, and checkpoint/resume are built on this graph |
 | `ssh-operator` | Operate remote machines via SSH. Credentials stay local, and routing everything through a project-local helper script keeps permission grants ("Always allow") stable |
 
 ---

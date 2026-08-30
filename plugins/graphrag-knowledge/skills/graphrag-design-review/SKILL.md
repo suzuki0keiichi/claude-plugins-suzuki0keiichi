@@ -1,7 +1,7 @@
 ---
 name: graphrag-design-review
-version: 1.3.1
-description: 設計案や approach を、コードを書く前にグラフ（プロジェクトの永続知識）と照合してレビューする AI 設計レビュー。過去の Decision・Constraint・却下案 (RejectedOption)・運用知識 (OperationalKnowledge)・Risk・Goal・進行中 Investigation の全知見タイプに proposal を尋問する。「実装前にこの方針でいい?」「この設計どう思う」「この approach を見て」と、実装に入る前の設計・計画の是非や、過去判断・制約との整合・roadmap との親和性を確認したい時に使う。実装後の diff レビューは graphrag-pr-review、人間向けの説明資料は graphrag-review-doc。スラッシュ: /graphrag-knowledge:graphrag-design-review
+description: >-
+  設計案や approach を、コードを書く前にグラフ（プロジェクトの永続知識）と照合してレビューする AI 設計レビュー。過去の Decision・Constraint・却下案 (RejectedOption)・運用知識 (OperationalKnowledge)・Risk・Goal・進行中 Investigation の全知見タイプに proposal を尋問する。「実装前にこの方針でいい?」「この設計どう思う」「この approach を見て」と、実装に入る前の設計・計画の是非や、過去判断・制約との整合・roadmap との親和性を確認したい時に使う。実装後の diff レビューは graphrag-pr-review、人間向けの説明資料は graphrag-review-doc。スラッシュ: /graphrag-knowledge:graphrag-design-review
 ---
 
 # Design Review (pre-implementation, knowledge axis)
@@ -10,7 +10,7 @@ High-altitude review at plan/design time. approach soundness, roadmap affinity, 
 and domain boundaries are cruel to "redo" at diff time, so review them here, before implementation.
 
 For the shared foundation, CLI invocation, and invariants (never hard-reject / traceable / no grep, etc.),
-**you must first read `${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md`**. This skill documents only
+**you must first load the sibling `graphrag-knowledge` skill, resolve its provider-neutral `$CLI` and `$REF` bindings, and read `$REF/graph-review-method.md`**. This skill documents only
 the procedure specific to its "knowledge axis (pre-implementation face)". There is no diff yet, so the
 File-anchored steps (method §1.5 / §2 / §2.5) do not apply — retrieval is the area `ask` plus the semantic sweep (§2.3).
 
@@ -22,7 +22,7 @@ The design proposal / approach / plan under review. If `$ARGUMENTS` carries a de
 
 1. **Draw the frame for the area (knowledge axis)**: pull the area the proposal touches with a single `ask`.
    ```sh
-   node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts ask "<proposal area> の Decision / Constraint / Goal / Risk / 却下案" --limit 8
+   $CLI ask "<proposal area> の Decision / Constraint / Goal / Risk / 却下案" --limit 8
    ```
    - Include in the query both the proposal's domain words (natural language) and concrete code identifiers the proposal touches (file / component / function names) — method §1 query discipline. A single-register query narrows the hit surface.
    - Do not fire repeatedly. If needed, deep-dive a specific node's neighborhood with `evidence --request "<node title or path>"` just once or twice (evidence cannot be looked up by id — method §1; confirm the target via direct_evidence's id/type, then read graph_context).

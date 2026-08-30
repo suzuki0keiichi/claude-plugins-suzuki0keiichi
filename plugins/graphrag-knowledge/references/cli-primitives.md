@@ -1,6 +1,6 @@
 # CLI Primitives Reference
 
-Flag details for the primitive verbs invoked via `node graphrag/cli.ts <primitive> [flags]`.
+Flag details for the primitive verbs invoked via `$CLI <primitive> [flags]`.
 Typical operations are fully covered by the **headline** verbs (ask / carve / commit-mutation / add-* / inspect).
 Consult this reference only when you need **per-stage fine-grained control** — e.g. "change the neighbors", "get just the evidence packet on its own", "regenerate only the index".
 
@@ -13,7 +13,7 @@ Every verb reads `.env` once at cli.ts launcher startup, so `GRAPHRAG_*` env is 
 ## brief — summary response (resume / query)
 
 ```sh
-node graphrag/cli.ts brief --mode <resume|query> [--query "<text>"] [--limit N] [--neighbors N] [--call-number N]
+$CLI brief --mode <resume|query> [--query "<text>"] [--limit N] [--neighbors N] [--call-number N]
 ```
 
 - `--mode resume`: returns the active Investigation (for focus continuity, read-only). When the vault holds open Goals (`state: planned|active`), also returns `open_goals` (count + oldest-first headlines, cap 5) — deferred work resurfaces at the moment you are deciding what to continue; absent when there are none ("emit only when there is something" convention)
@@ -36,7 +36,7 @@ Output: `{ generated_by, mode, graph: {...}, active|query: {...}, usage: [...] }
 ## search — ranked neighbor expansion
 
 ```sh
-node graphrag/cli.ts search --query "<text>" [--limit N] [--neighbors N] [--types T1,T2]
+$CLI search --query "<text>" [--limit N] [--neighbors N] [--types T1,T2]
 ```
 
 Ranked match list + neighbor (N-hop expansion) edges. `ask` usually substitutes evidence for this, but call it directly when you want neighbors at 2-3 / to narrow with `--types`. The neighbor-expansion graph_context is truncated at ~10 edges per node (in edge-type priority order) / ~40 overall (same cap as `evidence`).
@@ -44,7 +44,7 @@ Ranked match list + neighbor (N-hop expansion) edges. `ask` usually substitutes 
 ## evidence — provenance-attached answer packet
 
 ```sh
-node graphrag/cli.ts evidence --request "<text>" [--limit N] [--neighbors N] [--types T1,T2]
+$CLI evidence --request "<text>" [--limit N] [--neighbors N] [--types T1,T2]
 ```
 
 direct_evidence (ranked) + graph_context (neighbors) + retrieval_policy + answer_instructions. Called internally as the final escalation stage of `ask`.
@@ -54,7 +54,7 @@ Plan templates for Goal / Constraint / Concern / Layer / Component / Update / De
 ## grep — deterministic full-field match (read-only)
 
 ```sh
-node graphrag/cli.ts grep "<pattern>" [--regex] [--types A,B] [--limit N] [--case-sensitive] [--vault <dir>]
+$CLI grep "<pattern>" [--regex] [--types A,B] [--limit N] [--case-sensitive] [--vault <dir>]
 ```
 
 An enumeration, not a ranking. Matches EVERY string field of every node — including `id`, `type`, `description`, `raw_content`, `path`, nested `display` values — the fields the ranked search deliberately excludes (id/type for rename-migration stability, long bodies to protect scoring). That deliberate exclusion left "find by id fragment / code identifier / body text" with no CLI answer, and field usage showed agents grepping vault `.md` directly at ask-comparable volume. This verb is the sanctioned replacement: default case-insensitive substring, `--regex` for JS regexes (invalid pattern = loud error), `--types` to scope, `--limit` (default 20 — overflow is COUNTED in `hits_total`, never silently truncated). Multi-line fields report per-line hits with line numbers. Read the winners with `show`.
@@ -62,7 +62,7 @@ An enumeration, not a ranking. Matches EVERY string field of every node — incl
 ## show — full node content + incident edges (read-only)
 
 ```sh
-node graphrag/cli.ts show <id> [<id>...] [--vault <dir>]
+$CLI show <id> [<id>...] [--vault <dir>]
 ```
 
 Every frontmatter field verbatim (no whitelist, no summary truncation — `description` and `raw_content` included) plus incident edges (relation / direction / other endpoint id+title). This is the sanctioned replacement for cat-ing vault `.md` files. A missing id is resolved through the tombstone ledger: `deleted-301` names the final successor to follow, `deleted-410` means gone with no successor. Exit 1 when any requested id is not found.
@@ -70,7 +70,7 @@ Every frontmatter field verbatim (no whitelist, no summary truncation — `descr
 ## index — deterministic indexing (git ls-files + role classification + deps)
 
 ```sh
-node graphrag/cli.ts index --root <repo> --system <name> [--vault <dir>] [--previous <path>]
+$CLI index --root <repo> --system <name> [--vault <dir>] [--previous <path>]
 ```
 
 - Generates File nodes + import/dep edges with **no semantic interpretation**. `--system <name>` is the **namespace label** of the id convention `<typeSlug>:<system>:<slug>` (no System node is created; the root node type and contains were removed in v3.3).
@@ -87,7 +87,7 @@ node graphrag/cli.ts index --root <repo> --system <name> [--vault <dir>] [--prev
 ## vector-index — build vector index
 
 ```sh
-node graphrag/cli.ts vector-index [--graph <path>] [--out <path>] [--prefix-policy auto|off]
+$CLI vector-index [--graph <path>] [--out <path>] [--prefix-policy auto|off]
 ```
 
 Embeds the text of File / Decision etc. via the embedding endpoint (`GRAPHRAG_EMBEDDING_ENDPOINT` auto-detected or explicit) and outputs JSON. `commit-mutation` performs the index update (non-fatal) internally after writing to the vault, so you need not run it by hand after a mutation. Call it directly when you want to index the whole vault for the first time.
@@ -97,7 +97,7 @@ Embeds the text of File / Decision etc. via the embedding endpoint (`GRAPHRAG_EM
 ## vault-build — graph.json → Obsidian vault
 
 ```sh
-node graphrag/cli.ts vault-build <graph.json> <vault-dir> [--force]
+$CLI vault-build <graph.json> <vault-dir> [--force]
 ```
 
 Generates a vault from graph.json (indexer output etc.). Not needed for normal knowledge writes, since `commit-mutation` atomically writes directly to the vault without going through graph.json. Use it e.g. when turning indexer output into a vault. Arguments may be omitted if `GRAPHRAG_GRAPH_JSON_PATH` / `GRAPHRAG_VAULT_DIR` are already set.
@@ -107,7 +107,7 @@ Generates a vault from graph.json (indexer output etc.). Not needed for normal k
 ## vault-import — vault → graph.json (round-trip)
 
 ```sh
-node graphrag/cli.ts vault-import <vault-dir> [<out.json>]
+$CLI vault-import <vault-dir> [<out.json>]
 ```
 
 Rebuilds graph.json from the vault. **For round-trip equivalence verification** (edit vault → import → diff against the original graph). Not used in day-to-day operation.
@@ -115,7 +115,7 @@ Rebuilds graph.json from the vault. **For round-trip equivalence verification** 
 ## concern-hint — machine hints for Concerns (embedding proximity clustering)
 
 ```sh
-node graphrag/cli.ts concern-hint --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
+$CLI concern-hint --graph <path> --vector-index <path> [--threshold 0.92] [--knn 1] [--min-cluster 3] [--min-span 2]
 ```
 
 Union-Find-clusters groups of Files that span different Components by embedding distance, and outputs candidate JSON. **Concern discovery is driven primarily by the LLM's conceptual modeling** (`conceptual-pass.md` §2); this command is for blind-spot checking after that modeling. Called inside `carve`. Call it directly only when you want to tune the threshold. (`vein-hint` is a legacy alias from the Vein→Concern rename — same verb.)
@@ -123,8 +123,8 @@ Union-Find-clusters groups of Files that span different Components by embedding 
 ## edge-suggest-policy — batch extraction of binding / relations candidates
 
 ```sh
-node graphrag/cli.ts edge-suggest-policy --graph <path> --vector-index <path> [--missing-only] [--changed-files <list>]
-node graphrag/cli.ts edge-suggest-policy --relations --graph <path> --vector-index <path> [--top-n 50]
+$CLI edge-suggest-policy --graph <path> --vector-index <path> [--missing-only] [--changed-files <list>]
+$CLI edge-suggest-policy --relations --graph <path> --vector-index <path> [--top-n 50]
 ```
 
 The entry point for re-growing suggestions in batch on stock nodes that were created before 3.8 and never received a write-time suggestion.
@@ -136,7 +136,7 @@ Binding mode (default): for each Decision/OK/Risk/Constraint, extracts by embedd
 ## carving-check — automated quality-gate verification
 
 ```sh
-node graphrag/cli.ts carving-check --graph <path> [--vector-index <path>] [--config <path>] [--json]
+$CLI carving-check --graph <path> [--vector-index <path>] [--config <path>] [--json]
 ```
 
 Machine-judges: sequential slugs / Layer contamination / Component completeness / duplicate detection / missing bindings / notation-variant duplicates by embedding distance / knowledge-floor (0 Goals · 0 Constraints) / superseded-premise (a live node has_premise onto a terminal-state node). Exits 1 if there is an ERROR. Automatic as the final stage of `carve`. `commit-mutation` (vault writer) does not embed carving-check, so run it by hand as needed after a mutation involving carving.
@@ -146,10 +146,10 @@ Machine-judges: sequential slugs / Layer contamination / Component completeness 
 ## carving-allow — manage the orphan-exemption config (.graphrag/carving.json)
 
 ```sh
-node graphrag/cli.ts carving-allow add --path <p> --reason <r> [--config <path>]
-node graphrag/cli.ts carving-allow remove --path <p> [--config <path>]
-node graphrag/cli.ts carving-allow list [--config <path>]
-node graphrag/cli.ts carving-allow migrate --graph <path>   # outputs old builtin-matching Files as proposed config entries (no writes)
+$CLI carving-allow add --path <p> --reason <r> [--config <path>]
+$CLI carving-allow remove --path <p> [--config <path>]
+$CLI carving-allow list [--config <path>]
+$CLI carving-allow migrate --graph <path>   # outputs old builtin-matching Files as proposed config entries (no writes)
 ```
 
 Literal paths only (glob/regex characters are an error). `add` / `remove` are atomic writes (tmp+rename) sharing the vault-lock. Inside a git repo they attempt git add+commit; failure is non-fatal and noted in the output. carving.json is a human-owned conceptual layer on par with Layer/Concern/Component — the LLM may only propose; appends require user approval.
@@ -157,7 +157,7 @@ Literal paths only (glob/regex characters are an error). `add` / `remove` are at
 ## harvest-history — deterministic extraction of knowledge candidates from git history
 
 ```sh
-node graphrag/cli.ts harvest-history --root <repo> [--system <name>] [--out <path>]
+$CLI harvest-history --root <repo> [--system <name>] [--out <path>]
 ```
 
 No writes, deterministic extraction only: (1) revert commits → `RejectedOption` candidates (`suggested_slug` / `title` / `commits: [hash, subject, date]` / `note`), (2) comment markers HACK / FIXME / WORKAROUND / XXX → `OperationalKnowledge` / `Risk` candidates (`path` / `line` / `marker` / `text`). Candidate JSON in the same spirit as concern-hint — adoption is judged case by case by the LLM and typed-add'd. Procedure in `references/conceptual-pass.md` under "knowledge-axis seeding".
@@ -165,7 +165,7 @@ No writes, deterministic extraction only: (1) revert commits → `RejectedOption
 ## staleness-check — machine extraction of stale-knowledge candidates
 
 ```sh
-node graphrag/cli.ts staleness-check [--root <repo>] [--vault <dir>] [--threshold-commits N]   # defaults: root=cwd, threshold=5
+$CLI staleness-check [--root <repo>] [--vault <dir>] [--threshold-commits N]   # defaults: root=cwd, threshold=5
 ```
 
 For the Files pointed at by a knowledge node's (Decision/Constraint/Risk/OperationalKnowledge) `documented_by` / `sets_policy_for` / `constrains` / `enforced_by`, counts via git log the commits that touched that path since the node's `generated_at`, and lists those at or above the threshold as candidates (`node_id` / `node_title` / `file_path` / `commits_since` / `last_commit_subject`). Read-only, no semantic judgment — the judgment of whether it is truly stale is left to a human-initiated audit. Vault via `--vault` or `GRAPHRAG_VAULT_DIR`.
@@ -173,7 +173,7 @@ For the Files pointed at by a knowledge node's (Decision/Constraint/Risk/Operati
 ## constraint-check — Constraint enforcement-wiring check (read-only)
 
 ```sh
-node graphrag/cli.ts constraint-check [--vault <dir>] [--root <repo>] [--strict]   # defaults: root=cwd; exit 0 = ok/warn, 1 = error (--strict: warn also 1)
+$CLI constraint-check [--vault <dir>] [--root <repo>] [--strict]   # defaults: root=cwd; exit 0 = ok/warn, 1 = error (--strict: warn also 1)
 ```
 
 Walks every Constraint and cross-verifies its `enforced_by` wiring in **both directions** (registry layer walker — running the enforcers themselves stays CI / pre-commit / pr-review's job):
@@ -187,7 +187,7 @@ Every finding carries `next_step` (what is wrong + concretely how to fix). Summa
 ## frame-check — placement map for new/changed files (read-only)
 
 ```sh
-node graphrag/cli.ts frame-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--threshold-files N] [--strict]
+$CLI frame-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--threshold-files N] [--strict]
 # input default: worktree changes (git diff --name-only HEAD + untracked). exit 0 (--strict: warn → 1)
 ```
 
@@ -203,7 +203,7 @@ This is carving-check #3/#4's norm applied instantly to arbitrary paths without 
 ## delta-check — the read-side of the commit boundary (read-only)
 
 ```sh
-node graphrag/cli.ts delta-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--strict] [--full]
+$CLI delta-check [--files <p,...>] [--diff <base...head>] [--root <repo>] [--vault <dir>] [--strict] [--full]
 # input default: worktree changes (same contract as frame-check). exit 0 (--strict: warn → 1)
 # --full: remove the display caps (connected 20 / echoes 10 / occurrences 5) — REQUIRED for the
 #         post-squash full-range sweep (operating-conditions #5); without it a 195-commit range
@@ -230,7 +230,7 @@ Four sections:
 ## stocktake — Investigation + Goal lifecycle audit (read-only)
 
 ```sh
-node graphrag/cli.ts stocktake [--vault <dir>] [--days N] [--active-goal-days N]
+$CLI stocktake [--vault <dir>] [--days N] [--active-goal-days N]
 # thresholds: 14 days (Investigations, planned Goals) / 90 days (active Goals — roadmap
 # vocabulary legitimately stays open for quarters; a 14d nag would make long-term goals
 # permanent noise). Prompting stops when adjudicated: achieved / abandoned / or a keep
@@ -244,8 +244,8 @@ When the commit lane has recorded echo firings (`cache/echo-log.jsonl`), the out
 ## world-join — join a vault to a world
 
 ```sh
-node graphrag/cli.ts world-join --world <dir>              # vault via GRAPHRAG_VAULT_DIR / auto-discovery
-node graphrag/cli.ts world-join --world <dir> --vault <dir>  # explicit
+$CLI world-join --world <dir>              # vault via GRAPHRAG_VAULT_DIR / auto-discovery
+$CLI world-join --world <dir> --vault <dir>  # explicit
 ```
 
 Deterministic two-step: ① add this vault's path and `vault_slug` to world.json (no-op if already present), ② write `GRAPHRAG_WORLD_DIR=<dir>` to `.graphrag/.env` (overwrites existing value). Creates the world directory and world.json if absent. Warns when VAULT.md is missing; warns when `vault_slug` is not set (cross-vault refs will not resolve to this vault).
@@ -253,7 +253,7 @@ Deterministic two-step: ① add this vault's path and `vault_slug` to world.json
 ## xref-check — diagnose cross-vault refs / parent integrity / code markers (read-only)
 
 ```sh
-node graphrag/cli.ts xref-check [--vault <dir>] [--world <dir>] [--root <repo>]
+$CLI xref-check [--vault <dir>] [--world <dir>] [--root <repo>]
 ```
 
 Scans every edge in the vault for a `vault:`-prefixed `to`, tries to resolve it via world.json (slug lookup), and classifies each reference as `resolved` (both vault and node exist) / `broken` (the vault exists but the node is missing) / `orphan` (the slug's vault does not exist) / `unresolvable` (`GRAPHRAG_WORLD_DIR` unset). It also inspects VAULT.md's `parent` (vault containment) and emits `parent_status` (`none` / `resolved` / `orphan` / `self` / `schema-mismatch` / `cycle` / `unresolvable`) in the summary. Read-only — it changes no vault. When `--vault` is omitted, uses the resolved `GRAPHRAG_VAULT_DIR` (including auto-discovery); when `--world` is omitted, uses `GRAPHRAG_WORLD_DIR`.
@@ -263,7 +263,7 @@ With `--root <repo>`, additionally sweeps the repo's `graphrag:see` / `graphrag:
 ## fsck — vault integrity check (read-only)
 
 ```sh
-node graphrag/cli.ts fsck [--vault <dir>]    # exit 0 = ok/warn, 1 = error
+$CLI fsck [--vault <dir>]    # exit 0 = ok/warn, 1 = error
 ```
 
 Fast read-only integrity sweep over the resolved vault (the detection instrument against silent knowledge corruption). Emits a single JSON `{status: ok|warn|error, checks: [...], counts: {files, nodes, edges, errors, warnings}}`. Checks, by stable id:
@@ -281,7 +281,7 @@ Distinguishes corruption (error) from drift (warn): `error` means the vault need
 ## world-refresh — rebuild the cross-vault world-cache
 
 ```sh
-node graphrag/cli.ts world-refresh [--world <dir>]    # when dir is omitted, GRAPHRAG_WORLD_DIR
+$CLI world-refresh [--world <dir>]    # when dir is omitted, GRAPHRAG_WORLD_DIR
 ```
 
 Rebuilds the copy layer among the three layers of cross-vault retrieval (`canonical: VAULT.md next to the vault` / `address book: world.json` / `copy: world-cache.json`). The output includes each vault's VAULT.md mtime (`profile_mtime`) and node count (`node_count`), and attaches an `intro_hint` to any vault whose mtime is older than 45 days ("VAULT.md unchanged for <N> days; its self-introduction may be stale relative to what has accumulated").

@@ -1,0 +1,20 @@
+{
+  "name": "suzuki0keiichi-personal-plugins",
+  "interface": {
+    "displayName": "suzuki0keiichi Personal Plugins"
+  },
+  "plugins": [
+    {
+      "name": "graphrag-knowledge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/graphrag-knowledge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
