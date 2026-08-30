@@ -57,3 +57,10 @@ test("非実装拡張子・Edit/Write 以外は記録しない", () => {
   runHook({ ...editInput(root, "src/pay.ts"), tool_name: "Read" });
   assert.equal(existsSync(logPath(root)), false);
 });
+
+test("失敗した編集 (tool_response.success=false) と node_modules 配下は記録しない", () => {
+  const root = makeRepo("GRAPHRAG_RAIL_READ=on\n");
+  runHook({ ...editInput(root, "src/pay.ts"), tool_response: { success: false } });
+  runHook(editInput(root, "node_modules/foo/index.js"));
+  assert.equal(existsSync(logPath(root)), false);
+});

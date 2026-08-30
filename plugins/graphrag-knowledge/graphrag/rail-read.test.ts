@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -81,14 +82,76 @@ test("railRead: 注入済みノードは touch レールと共有で再注入し
   });
 });
 
-test("railRead: rail-log.jsonl に rail=read で発火が記録される", () => {
+test("railRead: rail-log.jsonl に rail=read で発火が記録される。file-seen 沈黙も記録される", () => {
   withVault(GRAPH, (cacheDir) => {
     railRead("src/pay.ts", "sessD");
+    railRead("src/pay.ts", "sessD"); // 2回目 = file-seen (hook fast-path と CLI が食い違った兆候の観測点)
     const log = path.join(cacheDir, "rail-log.jsonl");
     assert.ok(existsSync(log));
     const lines = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const fired = lines.find((l) => l.rail === "read" && l.fired === true);
     assert.ok(fired, "fired=true の行がある");
     assert.equal(fired.file, "src/pay.ts");
+    assert.ok(lines.some((l) => l.rail === "read" && l.reason === "file-seen"), "file-seen も記録される");
   });
+});
+
+test("railRead: 自レール内の all-seen — 同一ノードだけ配線の別ファイルは沈黙し read_files には載る", () => {
+  const graph = {
+    nodes: [
+      { id: "file:s:src/a.ts", type: "File", title: "a", path: "src/a.ts", summary: "a" },
+      { id: "file:s:src/b.ts", type: "File", title: "b", path: "src/b.ts", summary: "b" },
+      { id: "decision:s:shared", type: "Decision", title: "共有判断", summary: "a/b 両方に配線" }
+    ],
+    edges: [
+      { id: "e1", type: "documented_by", from: "decision:s:shared", to: "file:s:src/a.ts" },
+      { id: "e2", type: "documented_by", from: "decision:s:shared", to: "file:s:src/b.ts" }
+    ]
+  };
+  withVault(graph, (cacheDir) => {
+    assert.equal(railRead("src/a.ts", "sessE").status, "inject");
+    const r = railRead("src/b.ts", "sessE");
+    assert.equal(r.status, "silent");
+    assert.equal(r.reason, "all-seen");
+    assert.ok(loadRailSeen(cacheDir, "sessE").read_files.includes("src/b.ts"), "沈黙でも再走査抑止に載る");
+  });
+});
+
+test("railRead: セッション総量の上限は無い — 別配線のファイルは何件でも注入される (設計 pin)", () => {
+  const N = 5;
+  const nodes: any[] = [];
+  const edges: any[] = [];
+  for (let i = 0; i < N; i++) {
+    nodes.push({ id: `file:s:src/f${i}.ts`, type: "File", title: `f${i}`, path: `src/f${i}.ts`, summary: "x" });
+    nodes.push({ id: `decision:s:d${i}`, type: "Decision", title: `判断${i}`, summary: `f${i} の判断` });
+    edges.push({ id: `e${i}`, type: "documented_by", from: `decision:s:d${i}`, to: `file:s:src/f${i}.ts` });
+  }
+  withVault({ nodes, edges }, () => {
+    for (let i = 0; i < N; i++) {
+      assert.equal(railRead(`src/f${i}.ts`, "sessF").status, "inject", `f${i} も注入される (総量予算で沈黙しない)`);
+    }
+  });
+});
+
+// ── hook → CLI 統合 (スタブなし・実 spawn): verb 名/引数配線/出力契約の一気通貫 ──
+
+test("read-rail hook 統合: スタブなしで実 CLI を spawn し additionalContext が返る", () => {
+  const { vaultDir } = (() => makeVault(GRAPH))();
+  const root = path.resolve(vaultDir, "..", "..");
+  writeFileSync(path.join(root, ".graphrag", ".env"), "GRAPHRAG_RAIL_READ=on\n");
+  const hook = path.resolve(import.meta.dirname, "..", "hooks", "read-rail.mjs");
+  const input = JSON.stringify({
+    tool_name: "Read",
+    tool_input: { file_path: path.join(root, "src", "pay.ts") },
+    session_id: "sessInteg"
+  });
+  const out = execFileSync(process.execPath, [hook], {
+    input,
+    encoding: "utf8",
+    env: { ...process.env, GRAPHRAG_VAULT_DIR: vaultDir, GRAPHRAG_READ_RAIL_CLI: "" }
+  });
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "PostToolUse");
+  assert.match(parsed.hookSpecificOutput.additionalContext, /graphrag read rail/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /同期 IO|no-sync-io/);
 });

@@ -22,8 +22,8 @@
 import { pathToFileURL } from "node:url";
 import { buildGraphBrief } from "./brief.ts";
 import {
-  appendRailLog, composeRailContext, loadRailSeen, resolveRailCacheDir,
-  sanitizeSessionId, saveRailSeen, RAIL_MAX_ITEMS, type RailItem
+  appendRailLog, appendRailSeen, composeRailContext, loadRailSeen, resolveRailCacheDir,
+  sanitizeSessionId, RAIL_MAX_ITEMS, type RailItem
 } from "./rail-common.ts";
 
 /** brief に渡すクエリの上限 (プロンプト全文は不要 — 冒頭に用件が来る)。 */
@@ -129,8 +129,8 @@ export async function railPrompt(prompt: string, sessionId: string | null): Prom
   }
 
   if (seen && cacheDir && sessionId) {
-    seen.injected_node_ids = [...new Set([...seen.injected_node_ids, ...composed.ids])];
-    saveRailSeen(cacheDir, seen);
+    const ok = appendRailSeen(cacheDir, sessionId, { nodeIds: composed.ids });
+    if (!ok) appendRailLog(cacheDir, { rail: "prompt", reason: "seen-save-error", session: sessionId });
   }
   if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: true, ids: composed.ids, chars: composed.chars });
   return { status: "inject", context: composed.context, ids: composed.ids, chars: composed.chars, confidence };
