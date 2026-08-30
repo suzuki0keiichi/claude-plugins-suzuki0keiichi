@@ -4,13 +4,13 @@
 (read / typed-add / commit-mutation). **Read it whenever you index an unknown repository for the first
 time.**
 
-Everyday use is a single `node graphrag/cli.ts carve --root <repo> --system <name>`. This reference is
+Everyday use is a single `$CLI carve --root <repo> --system <name>`. This reference is
 for what happens inside that, and for when you want to customize.
 
 ## First import / re-index
 
 ```sh
-node graphrag/cli.ts carve --root <repo> --system <name> [--vault <dir>] [--previous <path>]
+$CLI carve --root <repo> --system <name> [--vault <dir>] [--previous <path>]
 ```
 
 `--system <name>` is the **namespace label** of the id convention `<typeSlug>:<system>:<slug>` (no System

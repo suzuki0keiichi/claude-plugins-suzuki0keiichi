@@ -6,7 +6,7 @@ PR は作らない。ブランチ作業は main に直接 merge して push す�
 
 ## バージョン管理
 
-プラグインのバージョンをバンプする際は `.claude-plugin/plugin.json` の `version` フィールドを更新すること。プラグインシステムが参照するのは `plugin.json` のみ。
+プラグインのバージョンをバンプする際は `.claude-plugin/plugin.json` と `.codex-plugin/plugin.json` の `version` フィールドを同じ値へ更新すること。配布バージョンの正本はこの2つのmanifestであり、互換テストで一致を検証する。
 
 バージョンはスキル・フック・CLI など挙動が変わった時に上げる。ドキュメントのみの変更では上げない。
 

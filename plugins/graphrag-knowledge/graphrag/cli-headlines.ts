@@ -972,7 +972,7 @@ async function runCarve(argv: string[]) {
 
   process.stderr.write(`\n[carve] done. next:\n`);
   process.stderr.write(`  1. Review concern-hint + policy edge candidates and assemble a mutation plan (LLM)\n`);
-  process.stderr.write(`  2. Apply to the vault with node graphrag/cli.ts commit-mutation <plan.json> (OCC/validate/index/git commit)\n`);
+  process.stderr.write(`  2. Apply to the vault with the shared launcher: graphrag commit-mutation <plan.json> (OCC/validate/index/git commit)\n`);
   process.stderr.write(`  3. If needed, re-run carve and drive carving-check errors to zero before calling it done\n`);
 }
 

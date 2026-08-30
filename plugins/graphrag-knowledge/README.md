@@ -109,5 +109,5 @@ Claude Code と Codex は同じ `skills/` と同じ CLI を使う。Codex では
 ## テスト
 
 ```bash
-node --experimental-strip-types --test graphrag/*.test.ts claude-hooks/*.test.mjs   # 全部 (= pnpm test)
+node --experimental-strip-types --test graphrag/*.test.ts hooks/*.test.mjs   # 全部 (= pnpm test)
 ```

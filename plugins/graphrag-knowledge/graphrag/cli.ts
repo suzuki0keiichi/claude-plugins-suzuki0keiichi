@@ -136,7 +136,7 @@ export async function runCli(argv: string[]) {
 }
 
 function printHelp() {
-  process.stderr.write(`usage: node graphrag/cli.ts <verb> [args]
+  process.stderr.write(`usage: graphrag <verb> [args]
 
 headline verbs (連鎖、1 コマンドで複数段):
   ${HEADLINE_VERBS.join(" / ")}

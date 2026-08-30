@@ -133,7 +133,7 @@ commit-mutation template is for complex cases). Three questions suffice:
    via `refines` (Goal → Goal), **3–7 total**. Granularity at the unit you can speak of on a roadmap
    (not an enumeration of feature names; §0 prime rule — meaning, not constituents). State
    vocabulary is `"planned" | "active" | "achieved" | "abandoned"` (no state is also legal).
-   - `node graphrag/cli.ts add-goal --system <s> --slug <slug> --title "..." --summary "..."`
+   - `$CLI add-goal --system <s> --slug <slug> --title "..." --summary "..."`
      `[--refines <goal-id>]` (hang off an upper Goal) `[--state planned|active|achieved|abandoned]`
      `[--derived-from <conversation/investigation-id>]` (when grounding in a source
      conversation/investigation). Create the top-level Goal without `--refines`, and hang lower Goals
@@ -142,7 +142,7 @@ commit-mutation template is for complex cases). Three questions suffice:
    targets (Decision|File|OperationalKnowledge) via `constrains`. A crosscut-altitude `constrains` is
    not in the grammar, so when there is no altitude, enumerate the Files + state the scope explicitly
    in the summary (carving-rules.md "No laundering a Constraint as a Decision").
-   - `node graphrag/cli.ts add-constraint --system <s> --slug <slug> --title "..." --summary "..."`
+   - `$CLI add-constraint --system <s> --slug <slug> --title "..." --summary "..."`
      `--constrains <id,...>` (**required ≥1**, target Decision|File|OK). Constraint cannot use
      documented_by and needs no evidence, so it does not take `--evidence`.
 3. **What options did you try in the past and discard** → `RejectedOption` (rejected options are
@@ -186,7 +186,7 @@ flagged, first consider appending to / merging into the existing node.
 
 ## Incremental conceptual-pass (handling changed / new Files)
 
-Follow `change_status: new|changed|unchanged` from `node graphrag/cli.ts index`. Details in
+Follow `change_status: new|changed|unchanged` from `$CLI index`. Details in
 carving-rules.md "Incremental follow-up". Key points:
 
 - `unchanged`: no conceptual-pass needed.
