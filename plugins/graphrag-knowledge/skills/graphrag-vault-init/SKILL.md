@@ -1,6 +1,5 @@
 ---
 name: graphrag-vault-init
-version: 1.2.0
 description: vault (ナレッジグラフ) の初期構築。system vault (コード/プロダクト知識)・project vault (時限イニシアチブ)・principal vault (当事者=法人/常設ユニットの恒久知識) の3種に対応。「vault を作りたい」「初期構築したい」「新しいプロジェクトを管理したい」「リポジトリを索引したい」「全社ルールの置き場がほしい」で発火。
 ---
 
@@ -11,9 +10,9 @@ Creates a new vault and populates initial nodes. Routes to the appropriate flow 
 ## Prerequisites
 
 - Embedding endpoint must be reachable (Ollama / LM Studio with `nomic-embed-text`).
-- CLI launcher: `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts <verb> [args]`
+- Load the sibling `graphrag-knowledge` skill first and reuse its provider-neutral `$CLI`, `$REF`, and `$DOCS` path bindings.
 
-Hereafter `$CLI` = the launcher above, `$REF` = `${CLAUDE_PLUGIN_ROOT}/references`.
+Hereafter `$CLI`, `$REF`, and `$DOCS` mean those bindings from the parent skill.
 
 ## Vault Types — Choose First
 
@@ -50,7 +49,7 @@ vault_slug: <slug>
 ---
 ```
 
-**Close the initial build by presenting the plugin's operating conditions** (`${CLAUDE_PLUGIN_ROOT}/docs/operating-conditions.md`) — the runbook of what the project must keep doing for the tool to stay effective (wire knowledge to files, write enforcers, register "later", commission periodic audits…), each tied to which feature dies without it. A vault that is built once and never wired decays into a diary.
+**Close the initial build by presenting the plugin's operating conditions** (`$DOCS/operating-conditions.md`) — the runbook of what the project must keep doing for the tool to stay effective (wire knowledge to files, write enforcers, register "later", commission periodic audits…), each tied to which feature dies without it. A vault that is built once and never wired decays into a diary.
 
 **The rest of this document covers project vault setup only.** For system vault schema, read `$REF/schema-quickref-system.md`.
 

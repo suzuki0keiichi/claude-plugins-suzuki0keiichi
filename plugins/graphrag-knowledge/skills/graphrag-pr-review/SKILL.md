@@ -1,7 +1,7 @@
 ---
 name: graphrag-pr-review
-version: 1.7.0
-description: PR や diff を、AI 自身がグラフ（プロジェクトの永続知識）と照合して概念レベルでレビューし、所見(findings)を返す。境界 (Layer/Concern/Component) の確認だけでなく、Constraint 違反・却下案 (RejectedOption) の再導入・運用知識 (OperationalKnowledge) の再踏襲・Risk の再開・Goal との整合・進行中 Investigation との衝突まで、全知見タイプに diff を尋問する。「この PR をレビューして」「この差分をグラフ的に見て」「概念が崩れてない?」「方針に反してない?」と、実装後の変更の是非を問われた時に使う（行レベルのバグ探しが主目的ではない）。人間に渡す説明資料(HTML)が欲しい時は graphrag-review-doc、実装前の設計レビューは graphrag-design-review、変更の記録は graphrag-knowledge。スラッシュ: /graphrag-knowledge:graphrag-pr-review
+description: >-
+  PR や diff を、AI 自身がグラフ（プロジェクトの永続知識）と照合して概念レベルでレビューし、所見(findings)を返す。境界 (Layer/Concern/Component) の確認だけでなく、Constraint 違反・却下案 (RejectedOption) の再導入・運用知識 (OperationalKnowledge) の再踏襲・Risk の再開・Goal との整合・進行中 Investigation との衝突まで、全知見タイプに diff を尋問する。「この PR をレビューして」「この差分をグラフ的に見て」「概念が崩れてない?」「方針に反してない?」と、実装後の変更の是非を問われた時に使う（行レベルのバグ探しが主目的ではない）。人間に渡す説明資料(HTML)が欲しい時は graphrag-review-doc、実装前の設計レビューは graphrag-design-review、変更の記録は graphrag-knowledge。スラッシュ: /graphrag-knowledge:graphrag-pr-review
 ---
 
 # PR Review (post-implementation, crosscut + knowledge axes / performed by AI)
@@ -12,7 +12,7 @@ constraints, rejected options, operational burns, open risks, goals, open questi
 Boundary checking alone wastes the vault — every knowledge type gets its interrogation (method §0-6).
 
 For the shared foundation, CLI invocation, the reverse-lookup skeleton, the semantic sweep, the per-type interrogation protocol, and the enforcement level of the 3 tiers,
-**you must first read `${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md`**. This skill is only a summary of the execution procedure.
+**you must first load the sibling `graphrag-knowledge` skill, resolve its provider-neutral `$REF` binding, and read `$REF/graph-review-method.md`**. This skill is only a summary of the execution procedure.
 
 ## Input
 

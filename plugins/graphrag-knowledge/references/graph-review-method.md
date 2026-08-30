@@ -34,12 +34,13 @@ These follow the design recorded in the vault (retrievable via `ask "グラフ�
 
 ## 1. How to invoke the CLI (common to all commands)
 
+Reuse the provider-neutral `$CLI` binding from the parent `graphrag-knowledge` skill:
+
 ```sh
-node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts <verb> [args]
+$CLI <verb> [args]
 ```
 
-In a dev environment where the repo was cloned directly, `${CLAUDE_PLUGIN_ROOT}` does not exist, so from the repo root invoke it relatively as
-`node --experimental-strip-types graphrag/cli.ts <verb>`.
+The parent skill resolves the installed plugin root from the host-provided skill path, so this works independently of the current working directory.
 
 Verbs used:
 - `ask "<question>"` — retrieve concepts / history / traps / policies in one shot (auto-escalation brief→evidence). **Do not repeat-fire.**

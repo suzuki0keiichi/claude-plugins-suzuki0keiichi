@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/proactive-persistence-reminder.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/proactive-persistence-reminder.mjs\"",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/touch-rail.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/touch-rail.mjs\"",
             "timeout": 15
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-rail.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/prompt-rail.mjs\"",
             "timeout": 10
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/frame-map.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/frame-map.mjs\"",
             "timeout": 20
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/read-rail.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/read-rail.mjs\"",
             "timeout": 15
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/edit-observe.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/edit-observe.mjs\"",
             "timeout": 10
           }
         ]
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/clear-restore.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-hooks/clear-restore.mjs\"",
             "timeout": 15
           }
         ]

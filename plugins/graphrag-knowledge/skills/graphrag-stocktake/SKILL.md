@@ -1,12 +1,12 @@
 ---
 name: graphrag-stocktake
-version: 1.3.0
-description: vault の定期棚卸し(ライフサイクル + 配線負債のクリーニング)。①state無しレガシーや決着済みなのに active のままの Investigation を state:closed に、②「あとで」のまま停滞した Goal (planned/active) を続行/achieved/abandoned に、③未ガード Constraint (enforcement debt) と参照腐敗マーカーの返済を、④偽陽性の多い authority echo 指紋 (echo_stats) の引退を、機械検出(stocktake / constraint-check / xref-check --root)+ 裏取り裁定で整える。「棚卸しして」「vault を掃除/クリーニングして」「Investigation を整理して」「active が溜まってる」「enforcement debt を返済して」で発火。resume の stocktake_hint / open_goals や ask の enforcement_debt が出た時にも。削除はしない(閉じる/宣言するだけ)。スラッシュ: /graphrag-knowledge:graphrag-stocktake
+description: >-
+  vault の定期棚卸し(ライフサイクル + 配線負債のクリーニング)。①state無しレガシーや決着済みなのに active のままの Investigation を state:closed に、②「あとで」のまま停滞した Goal (planned/active) を続行/achieved/abandoned に、③未ガード Constraint (enforcement debt) と参照腐敗マーカーの返済を、④偽陽性の多い authority echo 指紋 (echo_stats) の引退を、機械検出(stocktake / constraint-check / xref-check --root)+ 裏取り裁定で整える。「棚卸しして」「vault を掃除/クリーニングして」「Investigation を整理して」「active が溜まってる」「enforcement debt を返済して」で発火。resume の stocktake_hint / open_goals や ask の enforcement_debt が出た時にも。削除はしない(閉じる/宣言するだけ)。スラッシュ: /graphrag-knowledge:graphrag-stocktake
 ---
 
 # Vault stocktake (lifecycle + wiring-debt periodic cleaning)
 
-A periodic sweep that tidies the vault's lifecycle state and wiring debt, via machine detection + corroborated adjudication. For the read/write foundation and CLI details, follow the parent skill `graphrag-knowledge` and `$REF/` (= `${CLAUDE_PLUGIN_ROOT}/references`). `$CLI` = `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts`.
+A periodic sweep that tidies the vault's lifecycle state and wiring debt, via machine detection + corroborated adjudication. For the read/write foundation and CLI details, load the parent skill `graphrag-knowledge` first and reuse its provider-neutral `$CLI` and `$REF` bindings.
 
 ## Scope (what this skill does and does not do)
 

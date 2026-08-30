@@ -1,0 +1,38 @@
+{
+  "name": "graphrag-knowledge",
+  "version": "1.42.0",
+  "description": "Safely read and write persistent project knowledge stored in an Obsidian Markdown vault.",
+  "author": {
+    "name": "suzuki0keiichi",
+    "url": "https://github.com/suzuki0keiichi"
+  },
+  "homepage": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi/tree/main/plugins/graphrag-knowledge",
+  "repository": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi",
+  "license": "Apache-2.0",
+  "keywords": [
+    "graphrag",
+    "knowledge-graph",
+    "vault",
+    "obsidian",
+    "retrieval",
+    "rag"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "GraphRAG Knowledge",
+    "shortDescription": "Read and write durable project knowledge",
+    "longDescription": "Carry project decisions, constraints, risks, goals, and operational knowledge across coding-agent sessions through a shared Markdown vault.",
+    "developerName": "suzuki0keiichi",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi/tree/main/plugins/graphrag-knowledge",
+    "defaultPrompt": [
+      "Resume work using the project's existing GraphRAG vault.",
+      "Check prior decisions before changing this area.",
+      "Record the durable outcome of this change."
+    ]
+  }
+}

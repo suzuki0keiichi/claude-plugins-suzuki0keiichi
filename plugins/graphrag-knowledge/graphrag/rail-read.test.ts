@@ -139,7 +139,7 @@ test("read-rail hook 統合: スタブなしで実 CLI を spawn し additionalC
   const { vaultDir } = (() => makeVault(GRAPH))();
   const root = path.resolve(vaultDir, "..", "..");
   writeFileSync(path.join(root, ".graphrag", ".env"), "GRAPHRAG_RAIL_READ=on\n");
-  const hook = path.resolve(import.meta.dirname, "..", "hooks", "read-rail.mjs");
+  const hook = path.resolve(import.meta.dirname, "..", "claude-hooks", "read-rail.mjs");
   const input = JSON.stringify({
     tool_name: "Read",
     tool_input: { file_path: path.join(root, "src", "pay.ts") },

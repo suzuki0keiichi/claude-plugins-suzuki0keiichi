@@ -1,7 +1,7 @@
 ---
 name: graphrag-review-doc
-version: 1.6.0
-description: 人間が PR レビューするための、概念レベルの説明資料(視覚的な HTML 文書)をグラフ（プロジェクトの永続知識）を背骨に生成する。「この PR のレビュー資料を作って」「概念レベルで説明する文書がほしい」「レビュアー向けに分かりやすく説明して」と、人間レビュアーに渡す資料を求められた時に使う。AI が所見を返すレビュー本体は graphrag-pr-review（本 skill は成果物が HTML 文書である時に選ぶ）、実装前の設計レビューは graphrag-design-review。スラッシュ: /graphrag-knowledge:graphrag-review-doc
+description: >-
+  人間が PR レビューするための、概念レベルの説明資料(視覚的な HTML 文書)をグラフ（プロジェクトの永続知識）を背骨に生成する。「この PR のレビュー資料を作って」「概念レベルで説明する文書がほしい」「レビュアー向けに分かりやすく説明して」と、人間レビュアーに渡す資料を求められた時に使う。AI が所見を返すレビュー本体は graphrag-pr-review（本 skill は成果物が HTML 文書である時に選ぶ）、実装前の設計レビューは graphrag-design-review。スラッシュ: /graphrag-knowledge:graphrag-review-doc
 ---
 
 # Human-facing PR Review Doc (explanation-first / HTML)
@@ -10,7 +10,7 @@ Produce a concept-level explanation doc to hand to human reviewers. **Review wit
 build a "concept-altitude map" with the graph as backbone. The first deliverable is not a violation list but an **explanation** (explanation-first, method §0).
 
 For the shared foundation, the reverse-lookup skeleton, the semantic sweep, and the instruction-text↔schema mapping,
-**you must first read `${CLAUDE_PLUGIN_ROOT}/references/graph-review-method.md`**. The retrieval pipeline is shared with pr-review.
+**you must first load the sibling `graphrag-knowledge` skill, resolve its provider-neutral `$REF` binding, and read `$REF/graph-review-method.md`**. The retrieval pipeline is shared with pr-review.
 
 ## Input
 

@@ -1,12 +1,12 @@
 ---
 name: graphrag-doctrine-wiring
-version: 1.0.0
-description: 利用プロジェクト自身の設計規約・価値観 (CLAUDE.md の設計原則、コーディング規約、レビュー観点、「one authority per meaning」のような原則) を、注意力で守る散文から、このプラグインの器に接続された形 (Constraint+enforcer / 権威 Decision+語彙指紋 / 配置 Component / pre-commit 配線 / レビュー発注チェックリスト) へ変換する対話ガイド。プラグイン自身は設計思想を持たない — 持ち込まれた思想の配線だけを支援し、原則の中身は一切提案しない。「CLAUDE.md に設計ルールを書きたい」「規約を AI に守らせたい/守られない」「設計原則を graphrag に繋ぎたい」「原則を lint に落としたい」「レビュー観点をどこに書けばいい」で発火。スラッシュ: /graphrag-knowledge:graphrag-doctrine-wiring
+description: >-
+  利用プロジェクト自身の設計規約・価値観 (CLAUDE.md の設計原則、コーディング規約、レビュー観点、「one authority per meaning」のような原則) を、注意力で守る散文から、このプラグインの器に接続された形 (Constraint+enforcer / 権威 Decision+語彙指紋 / 配置 Component / pre-commit 配線 / レビュー発注チェックリスト) へ変換する対話ガイド。プラグイン自身は設計思想を持たない — 持ち込まれた思想の配線だけを支援し、原則の中身は一切提案しない。「CLAUDE.md に設計ルールを書きたい」「規約を AI に守らせたい/守られない」「設計原則を graphrag に繋ぎたい」「原則を lint に落としたい」「レビュー観点をどこに書けばいい」で発火。スラッシュ: /graphrag-knowledge:graphrag-doctrine-wiring
 ---
 
 # Doctrine wiring (connect the project's own rules to machines and delivery lanes)
 
-Converts the project's design rules — as the project states them — from prose that holds only through attention into forms that hold through machines and delivery lanes. For the read/write foundation follow the parent skill `graphrag-knowledge`; `$CLI` = `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts`, `$REF` = `${CLAUDE_PLUGIN_ROOT}/references`.
+Converts the project's design rules — as the project states them — from prose that holds only through attention into forms that hold through machines and delivery lanes. For the read/write foundation, load the parent skill `graphrag-knowledge` first and reuse its provider-neutral `$CLI`, `$REF`, and `$DOCS` bindings.
 
 ## The line this skill never crosses
 
@@ -52,7 +52,7 @@ Deferred work ("later" / "Step N") is registered as a Goal (state: planned) wire
 
 ## Plugin-side asks (the ONE thing this skill does bring up on its own)
 
-This skill never proposes doctrine — but it DOES proactively present the plugin's **operating conditions** (`${CLAUDE_PLUGIN_ROOT}/docs/operating-conditions.md`) at the end of a wiring session, as a separate frame from the project's rules: "aside from your doctrine, here is what the tool itself asks of the project, and which feature dies without each." These are not design opinions; they are the tool's care instructions (a refrigerator maker doesn't tell you what to eat, but does say "keep the door closed"), and every entry passes a three-part test — the actor is the project, the requested act is the use of this plugin's own mechanisms (registration / edges / aliases / enforcers / verbs), and the dying feature is named. The doc also carries an "what this plugin does NOT solve" disavowal section (verification-environment contamination, first-time failures, unregistered knowledge) — present both frames, never merged with the project's doctrine. The project decides, informed.
+This skill never proposes doctrine — but it DOES proactively present the plugin's **operating conditions** (`$DOCS/operating-conditions.md`) at the end of a wiring session, as a separate frame from the project's rules: "aside from your doctrine, here is what the tool itself asks of the project, and which feature dies without each." These are not design opinions; they are the tool's care instructions (a refrigerator maker doesn't tell you what to eat, but does say "keep the door closed"), and every entry passes a three-part test — the actor is the project, the requested act is the use of this plugin's own mechanisms (registration / edges / aliases / enforcers / verbs), and the dying feature is named. The doc also carries an "what this plugin does NOT solve" disavowal section (verification-environment contamination, first-time failures, unregistered knowledge) — present both frames, never merged with the project's doctrine. The project decides, informed.
 
 ## What this skill must never do
 

@@ -2,7 +2,7 @@
 // 「1.9.1 時代の実環境を 1.10 の CLI で開いたら一連のセッションが全部通る」を
 // 1 本のリハーサルで検証する。個別 fallback の unit テストは各所にあるが、
 // ここでは *同時に* 全部が積まれた faithful なレイアウトを本物のサブプロセス
-// (node --experimental-strip-types graphrag/cli.ts <verb>) で叩く:
+// (provider-neutral bin/graphrag.mjs <verb>) で叩く:
 //   - .graphrag/vault/ … 小さな正規 vault (JA+EN タイトル)、git commit 済み
 //   - .graphrag/ 直下 (legacy 位置, cache/ でない) … noise_baseline 無しの旧
 //     vector.json / 旧 ask-state.json / stale な vault.seq
@@ -30,6 +30,7 @@ import { buildVaultFiles } from "./build-vault.ts";
 import { vectorTextHash } from "./build-vector-index.ts";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.ts");
+const PORTABLE_LAUNCHER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "graphrag.mjs");
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
 
 /** OpenAI 互換 embedding endpoint のモック。全入力に同一ベクトル [1,0] を返す。
@@ -66,6 +67,26 @@ function startEmbeddingMock(): Promise<{ base: string; close: () => Promise<void
 
 /** 本物の CLI をサブプロセスで叩く (同期 exec はモック endpoint を塞ぐので async)。 */
 function runCli(
+  args: string[],
+  opts: { cwd: string; env: NodeJS.ProcessEnv }
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      "node", [PORTABLE_LAUNCHER, ...args],
+      { cwd: opts.cwd, env: opts.env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        resolve({
+          code: err ? ((err as any).code ?? 1) : 0,
+          stdout: String(stdout),
+          stderr: String(stderr)
+        });
+      }
+    );
+  });
+}
+
+/** Direct entrypoint retained for compatibility checks against the shared vault. */
+function runDirectCli(
   args: string[],
   opts: { cwd: string; env: NodeJS.ProcessEnv }
 ): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -280,6 +301,13 @@ test("upgrade rehearsal: 1.9.1 レイアウトを 1.10 CLI で開いて一連の
         committed.some((file) => file.startsWith(".graphrag/vault/Decision/")),
         "新しい Decision ファイルが commit に入っている"
       );
+    });
+
+    await t.test("direct CLI can read a node written through the provider-neutral launcher", async () => {
+      const r = await runDirectCli(["show", "decision:s:use-jwt"], { cwd: repo, env });
+      assert.equal(r.code, 0, `show exit 0 (stderr: ${r.stderr})`);
+      assert.match(r.stdout, /decision:s:use-jwt/);
+      assert.match(r.stdout, /JWT/);
     });
 
     // ── 4. vector-index: 新 cache/ へ noise_baseline 付きで再構築 → ask も健在 ──

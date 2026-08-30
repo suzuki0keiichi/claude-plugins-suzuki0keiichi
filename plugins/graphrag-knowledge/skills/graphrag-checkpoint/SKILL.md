@@ -1,12 +1,12 @@
 ---
 name: graphrag-checkpoint
-version: 1.5.0
-description: context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、`/clear` で綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。退避後に `/clear` すると SessionStart フックが直前の作業状態を自動で戻す (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
+description: >-
+  context が埋まって消える前に、いま価値あるものを全部グラフへ吐き出す「最終フラッシュ」。長時間セッションで compact の盲目的要約に任せず狙って残し、`/clear` で綺麗に再開できるようにする。「checkpoint 取って」「コンテキスト埋まってきたから状態を保存」「clear する前に退避して」「compact される前に退避して」で発火。人間が余力のある頃合いで手動発火する (自動検出はしない)。退避後に `/clear` すると SessionStart フックが直前の作業状態を自動で戻す (このskillは退避側)。スラッシュ: /graphrag-knowledge:graphrag-checkpoint
 ---
 
 # Compact Checkpoint (flush / final flush)
 
-Fire manually when context is filling up (just before compact, or before a deliberate `/clear`), flushing to the graph with **A (flush of work-state) and B (rescue of un-written-back durable knowledge) as equal partners**. A clean restart is **checkpoint → `/clear`** (§C). For the read/write foundation and CLI details, follow the parent skill `graphrag-knowledge` and `$REF/` (= `${CLAUDE_PLUGIN_ROOT}/references`). `$CLI` = `node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/graphrag/cli.ts`.
+Fire manually when context is filling up (just before compact, or before a deliberate `/clear`), flushing to the graph with **A (flush of work-state) and B (rescue of un-written-back durable knowledge) as equal partners**. A clean restart is **checkpoint → `/clear`** (§C). For the read/write foundation and CLI details, load the parent skill `graphrag-knowledge` first and reuse its provider-neutral `$CLI` and `$REF` bindings.
 
 ## Scope (what this skill does and does not do)
 
