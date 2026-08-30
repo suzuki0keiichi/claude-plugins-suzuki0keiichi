@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -90,6 +90,30 @@ test("on + silent (CLI 判定) は無音、壊れた CLI 出力も無音 (fail-o
   const broken = path.join(root, "stub-broken.mjs");
   writeFileSync(broken, `process.stdout.write("not-json");\n`);
   assert.equal(runHook(readInput(root, "src/pay.ts"), { GRAPHRAG_READ_RAIL_CLI: broken }).trim(), "");
+});
+
+test("session_id 無しは spawn せず無音 (dedup 不能なまま毎 Read 再注入する劣化を避ける)", () => {
+  const root = makeRepo("GRAPHRAG_RAIL_READ=on\n");
+  const input = { tool_name: "Read", tool_input: { file_path: path.join(root, "src/pay.ts") } };
+  assert.equal(runHook(input, { GRAPHRAG_READ_RAIL_CLI: makeStub(root, INJECT) }).trim(), "");
+});
+
+test("node_modules 配下の Read は無音 (依存の中を読む度に vault import を払わない)", () => {
+  const root = makeRepo("GRAPHRAG_RAIL_READ=on\n");
+  const out = runHook(readInput(root, "node_modules/foo/index.js"), { GRAPHRAG_READ_RAIL_CLI: makeStub(root, INJECT) });
+  assert.equal(out.trim(), "");
+});
+
+test("spawn 失敗は rail-log.jsonl に spawn-error として直接記録される", () => {
+  const root = makeRepo("GRAPHRAG_RAIL_READ=on\n");
+  const broken = path.join(root, "stub-throws.mjs");
+  writeFileSync(broken, "process.exit(3);\n");
+  assert.equal(runHook(readInput(root, "src/pay.ts"), { GRAPHRAG_READ_RAIL_CLI: broken }).trim(), "");
+  const log = path.join(root, ".graphrag", "cache", "rail-log.jsonl");
+  const lines = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const err = lines.find((l) => l.rail === "read" && typeof l.reason === "string" && l.reason.startsWith("spawn-error"));
+  assert.ok(err, "spawn-error 行がある");
+  assert.equal(err.file, "src/pay.ts");
 });
 
 test("anchor 無し (非 graphrag リポジトリ) は無音", () => {

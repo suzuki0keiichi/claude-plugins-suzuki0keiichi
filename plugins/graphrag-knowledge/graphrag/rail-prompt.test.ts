@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { filterPromptText, pickInjectable, railPrompt } from "./rail-prompt.ts";
 import {
-  composeRailContext, loadRailSeen, saveRailSeen, sanitizeSessionId,
+  appendRailSeen, composeRailContext, loadRailSeen, sanitizeSessionId,
   RAIL_MAX_ITEMS, RAIL_TOTAL_BUDGET_CHARS
 } from "./rail-common.ts";
 
@@ -62,13 +62,40 @@ test("composeRailContext: 空なら null (沈黙)", () => {
 
 // ── seen-set: セッション別ファイルの roundtrip ────────────────────────────────
 
-test("rail-seen: セッション別ファイルに保存・読込でき、別セッションと混ざらない", () => {
+test("rail-seen: セッション別ファイルに追記・読込でき、別セッションと混ざらない", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "grag-rail-seen-"));
-  saveRailSeen(dir, { session_id: "sess1", updated_at: 0, injected_node_ids: ["n1"], touched_files: ["f1.ts"] });
-  saveRailSeen(dir, { session_id: "sess2", updated_at: 0, injected_node_ids: ["n2"], touched_files: [] });
+  appendRailSeen(dir, "sess1", { nodeIds: ["n1"], list: "touch", files: ["f1.ts"] });
+  appendRailSeen(dir, "sess2", { nodeIds: ["n2"] });
   assert.deepEqual(loadRailSeen(dir, "sess1").injected_node_ids, ["n1"]);
+  assert.deepEqual(loadRailSeen(dir, "sess1").touched_files, ["f1.ts"]);
   assert.deepEqual(loadRailSeen(dir, "sess2").injected_node_ids, ["n2"]);
   assert.deepEqual(loadRailSeen(dir, "sess3").injected_node_ids, []);
+});
+
+test("rail-seen: append-only なので交互の load→append で更新が消えない (並列 Read 相当)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "grag-rail-seen-race-"));
+  // 旧実装 (read-modify-write) では A/B が同時に load した後の save で last-writer-wins に
+  // なり片方の記録が消えた。append-only では両方残る。
+  loadRailSeen(dir, "sess"); // A が load (空)
+  loadRailSeen(dir, "sess"); // B が load (空)
+  appendRailSeen(dir, "sess", { list: "read", files: ["a.ts"], nodeIds: ["nA"] }); // A が書く
+  appendRailSeen(dir, "sess", { list: "read", files: ["b.ts"], nodeIds: ["nB"] }); // B が書く
+  const merged = loadRailSeen(dir, "sess");
+  assert.deepEqual(merged.read_files.sort(), ["a.ts", "b.ts"]);
+  assert.deepEqual(merged.injected_node_ids.sort(), ["nA", "nB"]);
+});
+
+test("rail-seen: 旧形式 .json (v1.41.0 以前) も読み側で合流する (アップグレード互換)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "grag-rail-seen-legacy-"));
+  writeFileSync(
+    path.join(dir, "rail-seen-old.json"),
+    JSON.stringify({ injected_node_ids: ["legacy-node"], touched_files: ["t.ts"], read_files: ["r.ts"] })
+  );
+  appendRailSeen(dir, "old", { nodeIds: ["new-node"] });
+  const seen = loadRailSeen(dir, "old");
+  assert.deepEqual(seen.injected_node_ids.sort(), ["legacy-node", "new-node"]);
+  assert.deepEqual(seen.touched_files, ["t.ts"]);
+  assert.deepEqual(seen.read_files, ["r.ts"]);
 });
 
 test("sanitizeSessionId: ファイル名安全な形に落とし、空は null", () => {

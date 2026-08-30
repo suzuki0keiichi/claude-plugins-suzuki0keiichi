@@ -29,12 +29,19 @@ export const EVIDENCE_STALE_FILE = "evidence-stale.jsonl";
 /** 1行1 JSON 追記。サイズ超過で .1 へローテーション。失敗は無音 (導線を落とさない)。 */
 export function appendJsonlLog(cacheDir: string, filename: string, entries: Record<string, unknown>[], now: number = Date.now()): void {
   if (entries.length === 0) return;
+  const fp = path.join(cacheDir, filename);
+  // ローテーションと追記の try は分離する: rename が恒常的に失敗する環境 (置換不能な
+  // .1、ディレクトリ権限) で追記まで永久に死ぬと、測定ログが「それらしく見えるまま
+  // 更新停止」する — 無制限成長の方がデータ喪失より軽い。
   try {
-    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-    const fp = path.join(cacheDir, filename);
     if (existsSync(fp) && statSync(fp).size > LOG_ROTATE_BYTES) {
       renameSync(fp, `${fp}.1`);
     }
+  } catch {
+    // ローテーション失敗でも追記は続行
+  }
+  try {
+    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
     const ts = new Date(now).toISOString();
     appendFileSync(fp, entries.map((e) => JSON.stringify({ ts, ...e })).join("\n") + "\n");
   } catch {
