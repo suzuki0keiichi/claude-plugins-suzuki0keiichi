@@ -16,6 +16,7 @@
 | プラグイン | 役割 |
 |-----------|------|
 | `graphrag-knowledge` | Claude Code / Codex 共通のスキル群と CLI で、プロジェクトの永続知識グラフ (採用判断/却下案/制約/目的/リスク/運用知識) を vault (Obsidian Markdown) を単一正本として安全に読み書きする。設計レビュー・PR レビュー・checkpoint/resume もこのグラフを背骨に行う |
+| `chat-relay` | 同一マシン上の Claude Code / Codex セッション同士が、共有チャットルームを介して人間の中継なしに直接メッセージを交換する |
 | `ssh-operator` | リモートマシンを SSH 操作するスキル。認証情報はローカルに置いたまま、プロジェクト内のヘルパースクリプトを経由することでパーミッション許可 (Always allow) を安定させる |
 
 ---
@@ -81,9 +82,10 @@
 
 と書いていましたが、実際にその通りになったため、2026-07 に削除しました。モデル自身の判断力と公式機能（コードレビュー、コンテキスト管理、マルチエージェント）がその役割を吸収しています。
 
-残している 2 つは、モデルが賢くなっても残る構造的な隙間を埋めるものです。
+残している 3 つは、モデルが賢くなっても残る構造的な隙間を埋めるものです。
 
 - **graphrag-knowledge**: セッションのコンテキストは揮発する。採用判断・却下した選択肢・運用で踏んだ地雷をセッションを跨いで持ち越すには、外部の永続知識が要る
+- **chat-relay**: 別セッションのエージェント同士が直接会話するには、双方から到達できるローカルの通信路が要る
 - **ssh-operator**: `ssh <host> <任意コマンド>` の常時許可は危険。プロジェクト内の固定パスのヘルパーを経由することで、安全に常時許可できるようにする
 
 ---
@@ -117,6 +119,7 @@ Anyone is free to use it.
 | Plugin | Role |
 |--------|------|
 | `graphrag-knowledge` | Shared Claude Code / Codex skills and CLI for safely reading and writing a persistent project knowledge graph through a vault (Obsidian Markdown) as the single source of truth. Design review, PR review, and checkpoint/resume are built on this graph |
+| `chat-relay` | Let local Claude Code and Codex sessions exchange messages directly through shared chat rooms without a human relay |
 | `ssh-operator` | Operate remote machines via SSH. Credentials stay local, and routing everything through a project-local helper script keeps permission grants ("Always allow") stable |
 
 ---
@@ -178,9 +181,10 @@ From the beginning, this README said:
 
 That is exactly what happened, so they were removed in 2026-07. Model judgment and official features (code review, context management, multi-agent orchestration) have absorbed their roles.
 
-The two remaining plugins fill structural gaps that model intelligence alone does not solve:
+The three remaining plugins fill structural gaps that model intelligence alone does not solve:
 
 - **graphrag-knowledge**: Session context is volatile. Carrying decisions, rejected options, and operational landmines across sessions requires external persistent knowledge.
+- **chat-relay**: Separate agent sessions need a shared local transport before they can talk to each other directly.
 - **ssh-operator**: Blanket permission for `ssh <host> <any command>` is dangerous. Routing through a fixed project-local helper makes "Always allow" safe.
 
 ---

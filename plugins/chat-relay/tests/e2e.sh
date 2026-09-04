@@ -32,6 +32,12 @@ run_as() {
   CHAT_SESSION="$key" "$CCHAT" "$@"
 }
 
+run_as_codex() {
+  local thread_id="$1"; shift
+  env -u CHAT_SESSION -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID \
+    CODEX_THREAD_ID="$thread_id" "$CCHAT" "$@"
+}
+
 echo "== chat-relay e2e (port=$CHAT_PORT, tmp=$TMPROOT) =="
 
 # 1. server starts on demand
@@ -40,6 +46,13 @@ run_as bob   name bob   > /dev/null
 [ "$(CHAT_SESSION=alice "$CCHAT" whoami)" = "alice" ] || fail "alice identity"
 [ "$(CHAT_SESSION=bob   "$CCHAT" whoami)" = "bob"   ] || fail "bob identity"
 pass "identities set per session"
+
+# 1b. Codex threads get stable, distinct identities without CHAT_SESSION.
+run_as_codex codex-thread-a name codex-a > /dev/null
+run_as_codex codex-thread-b name codex-b > /dev/null
+[ "$(run_as_codex codex-thread-a whoami)" = "codex-a" ] || fail "Codex thread A identity"
+[ "$(run_as_codex codex-thread-b whoami)" = "codex-b" ] || fail "Codex thread B identity"
+pass "identities persist per Codex thread"
 
 # 2. send triggers auto-start; status then reports up
 run_as alice send "$ROOM" "hello from alice"

@@ -1,21 +1,21 @@
 # chat-relay 設計
 
-複数の Claude Code セッション間で、人間を経由せず直接メッセージをやり取りするための仲介システム。
+複数の Claude Code / Codex セッション間で、人間を経由せず直接メッセージをやり取りするための仲介システム。
 
 ## 全体像
 
 ```
 [Claude Code A] ──┐
                   │   HTTP (long polling) on 127.0.0.1:7777
-[Claude Code B] ──┼──────────────► chat-server (Node.js)
+[Codex B] ────────┼──────────────► chat-server (Node.js)
                   │                       │
-[Claude Code C] ──┘                       └─ ~/.chat/rooms/<room>.jsonl
+[Codex C] ────────┘                       └─ ~/.chat/rooms/<room>.jsonl
 ```
 
 二つの成果物:
 
 1. **chat-server** — Node.js 製のチャットサーバー。long polling を吸収する。
-2. **chat-relay スキル** — Claude Code が叩く薄い Node CLI (`cchat`) + SKILL.md。
+2. **chat-relay スキル** — Claude Code / Codex が叩く薄い Node CLI (`cchat`) + SKILL.md。
 
 ## 決定事項
 
@@ -30,7 +30,7 @@
 ## 識別子 (from)
 
 エージェント自身が名前を決める。`cchat name <名前>` を最初に1回だけ呼ぶ。
-名前は **セッション単位** で保存され、同じ Claude Code セッション中はずっと有効。
+名前は **セッション単位** で保存され、同じ Claude Code / Codex セッション中はずっと有効。
 
 ```
 ~/.cache/chat/identity/<session-key>.txt
@@ -39,13 +39,15 @@
 session-key の組み立て (フォールバック順):
 
 1. `CHAT_SESSION` (明示的な上書き)
-2. `cc-<CLAUDE_CODE_SESSION_ID からハイフンを除いた先頭12字>` ← Claude Code が常に環境変数で提供
-3. `ppid-<ppid>`
-4. `pid-<pid>`
+2. `cx-<CODEX_THREAD_ID を英数字化した先頭24字>`
+3. `cx-<CODEX_SESSION_ID を英数字化した先頭24字>`
+4. `cc-<CLAUDE_CODE_SESSION_ID からハイフンを除いた先頭12字>`
+5. `ppid-<ppid>`
+6. `pid-<pid>`
 
-Claude Code は `CLAUDE_CODE_SESSION_ID` を全 Bash ツール呼び出しに対して安定して渡すので、通常はこれが使われる。`PPID` は Bash ツール経由では不安定 (呼び出しごとに変わることがある) なので最終フォールバックに留める。
+Codex はタスクを識別する `CODEX_THREAD_ID`（なければ `CODEX_SESSION_ID`）、Claude Code は `CLAUDE_CODE_SESSION_ID` をツール呼び出しに渡すので、通常はホストに対応する値が使われる。`PPID` はシェルツール経由では不安定 (呼び出しごとに変わることがある) なので最終フォールバックに留める。
 
-これにより、ユーザーは2つの Claude Code セッションそれぞれで「`cchat name` でアイデンティティを決めてからチャットしろ」と一度指示するだけで済む。
+これにより、ユーザーは2つの Claude Code / Codex セッションそれぞれで「`cchat name` でアイデンティティを決めてからチャットしろ」と一度指示するだけで済む。
 
 ## サーバー API
 
@@ -76,7 +78,7 @@ body: { "room": "general", "from": "alice", "body": "hi" }
 ## スキル CLI
 
 `cchat` という単一コマンド + サブコマンド。**Node.js 一本で実装** (シェル非依存)。
-- エージェントからの標準呼び出しは `node "${CLAUDE_PLUGIN_ROOT}/bin/cchat" <sub> ...`。node を明示的に起動するので、PATH 登録も shebang サポートも要らず OS を問わない。
+- エージェントからの標準呼び出しは `node "<PLUGIN_ROOT>/bin/cchat" <sub> ...`。Claude Code は `${CLAUDE_PLUGIN_ROOT}`、Codex は読み込んだ `SKILL.md` の絶対パスから `<PLUGIN_ROOT>` を解決する。node を明示的に起動するので、PATH 登録も shebang サポートも要らず OS を問わない。
 - *nix で人間が直接叩く場合は `#!/usr/bin/env node` の shebang で実行できる
 - Windows で人間が PATH 経由で叩く場合は `bin/cchat.cmd` ラッパー (`node "%~dp0cchat" %*`)
 (macOS には `/usr/sbin/chat` (PPP daemon) があるので名前衝突を避けるため `cchat` に。)
@@ -126,6 +128,7 @@ SKILL.md は **50行以内** を目標。詳細は別ファイル (`HELP.md`) �
 - wait タイムアウト → exit 124、stderr に "timeout"
 - identity 未設定 → exit 2、stderr に "run: cchat name <your-name>"
 - ネットワークエラー → リトライせず stderr に理由を出して exit 1 (再送はエージェントの判断に委ねる)
+- Codex sandbox の `EACCES` / `EPERM` → ローカル共有領域への書き込みまたは loopback bind の承認を取り、同じコマンドを再実行する。参加者ごとに別のポートや保存先へ逃がさない
 
 ## テスト
 
@@ -133,11 +136,12 @@ SKILL.md は **50行以内** を目標。詳細は別ファイル (`HELP.md`) �
 
 ## ファイル配置
 
-Claude Code プラグインとして配布する。marketplace 経由で install すると、以下のツリーがそのまま `${CLAUDE_PLUGIN_ROOT}` 配下に展開される。
+Claude Code / Codex 共通プラグインとして配布する。marketplace 経由で install すると、以下のツリーがそのままプラグインルート配下に展開される。
 
 ```
 plugins/chat-relay/
 ├── .claude-plugin/plugin.json    # プラグインマニフェスト
+├── .codex-plugin/plugin.json     # Codex プラグインマニフェスト
 ├── skills/chat-relay/SKILL.md    # スキル定義 (自動検出される場所)
 ├── skills/chat-relay/HELP.md     # 詳細説明 (オンデマンド)
 ├── skills/chat-relay/ETIQUETTE.md# 議論用途のお作法 (合意ルール / 分担ルール)
@@ -148,9 +152,9 @@ plugins/chat-relay/
 └── docs/design.md                # 本ドキュメント
 ```
 
-インストーラスクリプトは持たない。展開先の絶対パスはプラグインシステムが `${CLAUDE_PLUGIN_ROOT}` として渡すので、
+インストーラスクリプトは持たない。展開先の絶対パスはホストごとのスキル規約で解決するので、
 
-- エージェントは SKILL.md の規約どおり `node "${CLAUDE_PLUGIN_ROOT}/bin/cchat" ...` で叩く
+- エージェントは SKILL.md の規約どおり `node "<PLUGIN_ROOT>/bin/cchat" ...` で叩く
 - `bin/cchat` はサーバーを **自分の実体パスからの相対** (`../server/server.js`) で解決する
 
 の2点だけで配線が閉じる。`CHAT_SERVER` は展開が壊れた場合の避難用に残す。

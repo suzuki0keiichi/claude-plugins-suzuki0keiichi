@@ -1,0 +1,37 @@
+{
+  "name": "chat-relay",
+  "version": "1.1.0",
+  "description": "Exchange messages directly between local Claude Code and Codex sessions through shared chat rooms.",
+  "author": {
+    "name": "suzuki0keiichi",
+    "url": "https://github.com/suzuki0keiichi"
+  },
+  "homepage": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi/tree/main/plugins/chat-relay",
+  "repository": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi",
+  "license": "Apache-2.0",
+  "keywords": [
+    "chat",
+    "multi-session",
+    "long-polling",
+    "agent-to-agent",
+    "collaboration"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Chat Relay",
+    "shortDescription": "Chat between local coding-agent sessions",
+    "longDescription": "Let Claude Code and Codex sessions on the same machine exchange messages directly through shared local chat rooms.",
+    "developerName": "suzuki0keiichi",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi/tree/main/plugins/chat-relay",
+    "defaultPrompt": [
+      "Talk with another local coding-agent session in a shared room.",
+      "Wait for a reply from another session without polling.",
+      "Use chat-relay to discuss this design with another session."
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: chat-relay
-description: Use when the user wants this Claude Code session to talk to another Claude Code session directly via a shared chat room, without acting as a human relay. Provides a `cchat` CLI for send/wait/say between sessions.
+description: Use when the user wants this Claude Code or Codex session to talk to another local coding-agent session directly via a shared chat room, without acting as a human relay. Provides a `cchat` CLI for send/wait/say between sessions.
 ---
 
 # chat-relay
@@ -10,10 +10,16 @@ Direct session-to-session messaging via a local chat server. Avoids polling
 
 ## How to call
 
-All subcommands go through a single launcher:
+Resolve `<PLUGIN_ROOT>` once before running commands:
+
+- In Claude Code, use the plugin installation directory exposed as `${CLAUDE_PLUGIN_ROOT}`.
+- In Codex, derive the absolute plugin root by walking two directories up from the directory containing this `SKILL.md`; Codex includes this file's path when it loads the skill.
+- Substitute the resolved absolute path for `<PLUGIN_ROOT>`; never pass the angle-bracket token literally or infer the plugin root from the working directory.
+
+All subcommands go through the provider-neutral launcher:
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/bin/cchat" <subcommand> [args]
+node "<PLUGIN_ROOT>/bin/cchat" <subcommand> [args]
 ```
 
 Hereafter `$CCHAT` = the launcher above. Invoking `node` directly means it works
@@ -25,7 +31,7 @@ unchanged on Windows too (no PATH entry, no shebang needed).
 $CCHAT name <short-handle>    # e.g. $CCHAT name refactor-frontend
 ```
 
-Pick a handle that fits this session's role. One word, no spaces. Only required once per Claude Code session (identity is keyed by `CLAUDE_CODE_SESSION_ID`).
+Pick a handle that fits this session's role. One word, no spaces. Only required once per agent session. Identity is keyed by `CODEX_THREAD_ID` / `CODEX_SESSION_ID` in Codex and `CLAUDE_CODE_SESSION_ID` in Claude Code. `CHAT_SESSION` remains an explicit override.
 
 ## Core commands
 
@@ -37,6 +43,7 @@ Pick a handle that fits this session's role. One word, no spaces. Only required 
 | `$CCHAT tail <room> [-n N] [-f]` | Peek at recent history without advancing your cursor. `-f` follows live (Ctrl+C to stop). |
 
 The server auto-starts on first call. Data lives in `~/.chat/`.
+In Codex, the local sandbox may require approval to write shared state there or bind `127.0.0.1`; on `EACCES` / `EPERM`, request approval and rerun the exact `$CCHAT` command.
 
 ## Rules of engagement
 
@@ -44,6 +51,7 @@ The server auto-starts on first call. Data lives in `~/.chat/`.
 2. Prefer `$CCHAT say` when you expect a reply; it costs one tool call instead of two.
 3. `wait` exits 124 on timeout — that means no message arrived; decide whether to retry or report back to the user.
 4. Room names are free-form `[A-Za-z0-9_.-]`. Agree on one with the other session (the user usually picks it).
+5. Keep `CHAT_HOST`, `CHAT_PORT`, and `CHAT_HOME` identical across participants.
 
 ## If this is a design discussion / negotiation
 

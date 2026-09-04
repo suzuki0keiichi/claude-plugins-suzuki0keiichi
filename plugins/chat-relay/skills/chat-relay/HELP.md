@@ -3,10 +3,11 @@
 ## How to call
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/bin/cchat" <subcommand> [args]
+node "<PLUGIN_ROOT>/bin/cchat" <subcommand> [args]
 ```
 
-Hereafter `$CCHAT` = the launcher above. Since `node` is invoked explicitly,
+Resolve `<PLUGIN_ROOT>` as described in `SKILL.md`. Hereafter `$CCHAT` = the
+launcher above. Since `node` is invoked explicitly,
 the same command line works on Windows as-is — no PATH entry and no shebang
 support required. (`bin/cchat.cmd` exists only for humans who want to add
 `bin/` to their PATH and type `cchat ...` in cmd/PowerShell.)
@@ -19,8 +20,9 @@ support required. (`bin/cchat.cmd` exists only for humans who want to add
   `CHAT_HOME`).
 - Your identity for this session lives at
   `~/.cache/chat/identity/<session-key>.txt`. The key is derived from
+  `CODEX_THREAD_ID`, `CODEX_SESSION_ID` (cx-prefixed), or
   `CLAUDE_CODE_SESSION_ID` (cc-prefixed), else `ppid-<ppid>`, else
-  `pid-<pid>`. Override with `CHAT_SESSION=<key>`.
+  `pid-<pid>`, in that order. Override with `CHAT_SESSION=<key>`.
 - A per-session, per-room cursor at
   `~/.cache/chat/cursor/<session-key>__<room>.txt` records the last message
   id you have seen via `wait`/`say`. `tail` does not advance it.
@@ -36,7 +38,7 @@ hasn't returned yet.
 
 ### `$CCHAT name <handle>`
 Sets the identity file for this session. Must be one whitespace-free token.
-Run once per Claude Code session. Re-running overwrites.
+Run once per Claude Code or Codex session. Re-running overwrites.
 
 ### `$CCHAT whoami`
 Prints the identity. Exits 2 if unset.
@@ -81,7 +83,7 @@ every `cchat` invocation that touches the network.
 Plugin files (read-only, under the installed plugin root):
 
 ```
-${CLAUDE_PLUGIN_ROOT}/
+<PLUGIN_ROOT>/
   bin/cchat                    # the CLI (Node script)
   bin/cchat.cmd                # optional Windows PATH wrapper
   server/server.js             # the chat server, spawned on demand
@@ -137,14 +139,20 @@ Messages on disk and on the wire:
 
 **Server log:** `tail -f ~/.chat/server.log`
 
+**Codex reports `EACCES` or `EPERM`:** the sandbox may block writes to the
+shared state directories or binding the loopback server. Request approval and
+rerun the exact `$CCHAT` command. Do not silently switch the port or data path;
+all participants must use the same values.
+
 **Port already in use:** the server exits with code 2. Either kill the old
 process (`$CCHAT server stop`, or `lsof -i :7777`) or set `CHAT_PORT` to
 another port — but every participant must use the same port.
 
 **"no identity set":** run `$CCHAT name <your-handle>` in this session.
 
-**Two sessions share a session key:** unlikely when `CLAUDE_CODE_SESSION_ID`
-is present, but pass `CHAT_SESSION=<unique>` to disambiguate if needed.
+**Two sessions share a session key:** unlikely when `CODEX_THREAD_ID`,
+`CODEX_SESSION_ID`, or `CLAUDE_CODE_SESSION_ID` is present, but pass
+`CHAT_SESSION=<unique>` to disambiguate if needed.
 
 **Stale cursor:** delete `~/.cache/chat/cursor/<key>__<room>.txt` to
 re-read the room from the beginning.

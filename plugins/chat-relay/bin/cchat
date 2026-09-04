@@ -22,6 +22,12 @@ for (const d of [HOME_DIR, path.join(CACHE_DIR, 'identity'), path.join(CACHE_DIR
 
 function sessionKey() {
   if (process.env.CHAT_SESSION) return process.env.CHAT_SESSION;
+  if (process.env.CODEX_THREAD_ID) {
+    return 'cx-' + process.env.CODEX_THREAD_ID.replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+  }
+  if (process.env.CODEX_SESSION_ID) {
+    return 'cx-' + process.env.CODEX_SESSION_ID.replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+  }
   if (process.env.CLAUDE_CODE_SESSION_ID) {
     return 'cc-' + process.env.CLAUDE_CODE_SESSION_ID.replace(/-/g, '').slice(0, 12);
   }
@@ -297,7 +303,7 @@ async function cmdServer(args) {
 }
 
 function cmdHelp() {
-  process.stdout.write(`chat-relay — talk between Claude Code sessions.
+  process.stdout.write(`chat-relay — talk between Claude Code and Codex sessions.
 
 Setup (once per session):
   cchat name <your-name>          set this session's identity

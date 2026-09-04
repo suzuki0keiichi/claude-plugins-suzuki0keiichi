@@ -16,7 +16,7 @@
     },
     {
       "name": "chat-relay",
-      "description": "複数の Claude Code セッション間で人間を経由せず直接メッセージを交換するローカルチャット (long polling サーバー + cchat CLI)。",
+      "description": "複数の Claude Code / Codex セッション間で人間を経由せず直接メッセージを交換するローカルチャット (long polling サーバー + cchat CLI)。",
       "source": "./plugins/chat-relay"
     }
   ]
