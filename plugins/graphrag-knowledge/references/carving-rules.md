@@ -30,6 +30,20 @@ Component / Concern / Layer is the LLM's judgment. Without a judgment axis:
 Even if found after the fact, these cannot be fixed without re-carving. Passing them through a
 quality gate at the carving stage is the cheapest.
 
+## Authoring structural summaries
+
+For Component / Layer / Concern, make `summary` express the registered responsibility,
+boundary, or shared meaning that helps a reader judge a change. Aim for about 200 Japanese
+characters as an authoring guideline, not a mandatory limit or a mechanical quality gate.
+Preserve necessary boundary conditions and exceptions even when that takes more space.
+Put detailed constituent lists and supporting explanation in `description`; do not replace
+the aggregate's meaning with a file inventory. These are instructions for expressing the
+project's own intent, not for inventing responsibilities or dependency rules.
+
+When revising existing authored summaries, compare against the original and retain its
+meaning. Do not bulk-rewrite a vault just to meet the length guideline. Neither length nor
+separator density alone establishes semantic quality.
+
 ## Component carving
 
 ### Same-directory principle (default)

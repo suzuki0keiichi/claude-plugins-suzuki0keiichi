@@ -16,9 +16,11 @@ Computed from the **final stage**'s result (if brief sufficed, brief's; if it du
 
 Rides along on **every** ask (computed from the hit set: matched Files + Files located by matched knowledge nodes' `documented_by`/`sets_policy_for`/`constrains`/`enforced_by`/`risks_in` edges). This is the design-time reference the crosscut layer exists for — **consult it before choosing where new code lives**; do not fire an extra ask for it.
 
-- `crosscuts[]` — Component/Layer/Concern covering the area: `{id, type, title, files_in_scope, files_total, matched_directly?}`, sorted by relevance, capped at 8. `matched_directly` marks structure nodes that themselves matched the query.
+- `crosscuts[]` — Component/Layer/Concern covering the area: `{id, type, title, summary, generated_at?, files_in_scope, files_total, matched_directly?}`, sorted by relevance, capped at 8. `summary` is the full registered intent, including any final conditions; JSON and `--format md` carry the same structural summaries. `matched_directly` marks structure nodes that themselves matched the query. A direct structure match does not expand scope to all its members.
+- `crosscuts_overflow` — how many additional structures were omitted by the 8-node cap. For a complete concrete file scope, use `delta-check --files <paths> --full`.
+- `summary_provisional: true` marks an indexer scaffold, not authored intent. The raw summary stays visible with that flag (and a provisional label in markdown); do not treat it as a norm. An empty summary is also unavailable intent, not an omitted body that another lookup can recover.
 - `unframed_files[]` — scope Files belonging to no crosscut (capped; `unframed_overflow` counts the rest). **Not a verdict** — small clusters legitimately have no Component.
-- `note` — how to read the map. When `crosscuts` is empty the area genuinely has no registered structure (also legitimate).
+- `note` — how to read the map. Empty `crosscuts` means none was reached from this search scope, not that the whole change has no structure. Missing/old summaries are not a clean bill of health: compare the actual change with the registered intent, and distinguish unverified scope from conformance.
 - Placement rules of thumb: new code that belongs to a listed frame goes inside it (wire via `evidenced_by`); a genuinely new concept deserves its own registration instead of squatting. Per-path claimant lookup and paste-ready wiring fragments: `frame-check`.
 
 ## `enforcement_debt` (only when > 0, system vaults)

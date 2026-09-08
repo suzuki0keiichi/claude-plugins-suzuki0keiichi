@@ -7,7 +7,7 @@ import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
 import { railRead } from "./rail-read.ts";
 import { railTouch } from "./rail-touch.ts";
-import { loadRailSeen } from "./rail-common.ts";
+import { loadRailSeen, appendRailSeen, RAIL_COMBINED_BUDGET_CHARS } from "./rail-common.ts";
 
 // rail-touch.test と同じ経路忠実主義: 合成 graph → 本物の vault ファイル経由。
 function makeVault(graph: Record<string, unknown>): { vaultDir: string; cacheDir: string } {
@@ -31,6 +31,18 @@ const GRAPH = {
   edges: [
     { id: "e1", type: "constrains", from: "constraint:s:no-sync-io", to: "file:s:src/pay.ts" },
     { id: "e2", type: "documented_by", from: "decision:s:retry-policy", to: "file:s:src/pay.ts" }
+  ]
+};
+
+const STRUCTURE = {
+  id: "component:s:pay", type: "Component", title: "Payment",
+  summary: "Payment responsibility. ".repeat(10) + "Never duplicate settlement authority."
+};
+const WITH_STRUCTURE = {
+  nodes: [...GRAPH.nodes, STRUCTURE],
+  edges: [...GRAPH.edges,
+    { id: "s1", type: "evidenced_by", from: STRUCTURE.id, to: "file:s:src/pay.ts" },
+    { id: "s2", type: "evidenced_by", from: STRUCTURE.id, to: "file:s:src/free.ts" }
   ]
 };
 
@@ -60,6 +72,85 @@ test("railRead: 配線ありで注入 + read_files に記録、同一ファイ�
 
     const r2 = railRead("src/pay.ts", "sessA");
     assert.deepEqual(r2, { status: "silent", reason: "file-seen" });
+  });
+});
+
+test("structure body delivery is independent of a previously injected prompt headline", () => {
+  withVault(WITH_STRUCTURE, (cacheDir) => {
+    appendRailSeen(cacheDir, "struct", { nodeIds: [STRUCTURE.id] });
+    const result = railRead("src/pay.ts", "struct");
+    assert.equal(result.status, "inject");
+    assert.ok(result.context!.includes(STRUCTURE.summary));
+    assert.deepEqual(result.structure_ids, [STRUCTURE.id]);
+    assert.deepEqual(loadRailSeen(cacheDir, "struct").delivered_structure_ids, [STRUCTURE.id]);
+    assert.deepEqual(railRead("src/pay.ts", "struct"), { status: "silent", reason: "file-seen" });
+    assert.deepEqual(railRead("src/free.ts", "struct"), { status: "silent", reason: "all-seen" });
+    assert.ok(railRead("src/free.ts", "another").context!.includes(STRUCTURE.summary), "new session gets the norm");
+  });
+});
+
+test("structure output does not displace any existing knowledge and combined context is bounded", () => {
+  let original = "";
+  withVault(GRAPH, () => { original = railRead("src/pay.ts", "baseline").context!; });
+  withVault(WITH_STRUCTURE, (cacheDir) => {
+    const result = railRead("src/pay.ts", "combined");
+    assert.ok(result.context!.includes(original), "the old complete knowledge block survives unchanged");
+    assert.ok(result.context!.startsWith(original), "knowledge and its Constraints stay first");
+    assert.ok(result.chars! <= RAIL_COMBINED_BUDGET_CHARS);
+    const entry = JSON.parse(readFileSync(path.join(cacheDir, "rail-log.jsonl"), "utf8").trim());
+    assert.equal(entry.knowledge_chars, original.length);
+    assert.ok(entry.structure_chars <= 1000);
+    assert.equal(entry.structure_bodies, 1);
+    assert.equal(entry.chars, result.context!.length);
+  });
+});
+
+test("three Constraints do not starve structure delivery or lose knowledge items", () => {
+  const constraints = Array.from({ length: 3 }, (_, i) => ({ id: `constraint:s:c${i}`, type: "Constraint", title: "Constraint " + "t".repeat(100), summary: "c".repeat(150) }));
+  const graph = {
+    nodes: [...WITH_STRUCTURE.nodes, ...constraints],
+    edges: [...WITH_STRUCTURE.edges, ...constraints.map((n, i) => ({ id: `c${i}`, type: "constrains", from: n.id, to: "file:s:src/pay.ts" }))]
+  };
+  let baseline = "";
+  withVault({ nodes: graph.nodes, edges: graph.edges.filter((e) => e.type !== "evidenced_by") }, () => { baseline = railRead("src/pay.ts", "b").context!; });
+  withVault(graph, () => {
+    const result = railRead("src/pay.ts", "saturated");
+    assert.ok(result.context!.includes(baseline));
+    assert.ok(result.context!.includes(STRUCTURE.summary));
+    assert.ok(result.chars! <= 1700);
+  });
+});
+
+test("references to an oversized body do not mark its summary as delivered", () => {
+  const graph = { ...WITH_STRUCTURE, nodes: WITH_STRUCTURE.nodes.map((n) => n.id === STRUCTURE.id ? { ...n, summary: "x".repeat(1200) } : n) };
+  withVault(graph, (cacheDir) => {
+    const first = railRead("src/pay.ts", "oversized");
+    assert.deepEqual(first.structure_ids, []);
+    assert.deepEqual(first.structure_omitted_ids, [STRUCTURE.id]);
+    assert.deepEqual(loadRailSeen(cacheDir, "oversized").delivered_structure_ids, []);
+    const second = railRead("src/free.ts", "oversized");
+    assert.equal(second.status, "inject");
+    assert.deepEqual(second.structure_omitted_ids, [STRUCTURE.id]);
+  });
+});
+
+test("provisional and missing summaries stay un-authored across the stateful delivery path", () => {
+  const graph = {
+    ...WITH_STRUCTURE,
+    nodes: [...WITH_STRUCTURE.nodes.map((n) => n.id === STRUCTURE.id ? { ...n, summary_provisional: true } : n),
+      { id: "layer:s:empty", type: "Layer", title: "Empty", summary: "" }],
+    edges: [...WITH_STRUCTURE.edges, { id: "empty", type: "evidenced_by", from: "layer:s:empty", to: "file:s:src/free.ts" }]
+  };
+  withVault(graph, (cacheDir) => {
+    const result = railRead("src/free.ts", "provisional");
+    assert.deepEqual(result.structure_ids, []);
+    assert.deepEqual(result.structure_omitted_ids, []);
+    assert.deepEqual(result.structure_unavailable_ids, [STRUCTURE.id, "layer:s:empty"]);
+    assert.deepEqual(loadRailSeen(cacheDir, "provisional").delivered_structure_ids, []);
+    assert.ok(!result.context!.includes(STRUCTURE.summary));
+    const log = JSON.parse(readFileSync(path.join(cacheDir, "rail-log.jsonl"), "utf8").trim());
+    assert.equal(log.structure_unavailable, 2);
+    assert.equal(log.structure_omitted, 0);
   });
 });
 

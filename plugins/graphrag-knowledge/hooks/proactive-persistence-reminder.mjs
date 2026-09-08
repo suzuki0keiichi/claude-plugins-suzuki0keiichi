@@ -5,8 +5,11 @@
 // 2つの成分:
 //   (1) 書き戻し促し (従来): 採用判断/却下案/リスク/運用ハマりの write-back チェック。常に出す。
 //   (2) 読みの導線 (delta-check 同乗): いま commit しようとしている変更ファイルに エッジで
-//       繋がる登記済み知識の見出しと、マーカー/配置の所見。**見せる価値がある時だけ**
-//       (clean なら成分ゼロ = 従来文言のみ)。知識が正本側に在っても破る側の作業経路上に
+//       繋がる登記済み知識の見出しと、所属構造の地図、マーカー/配置の所見。**見せる価値が
+//       ある時だけ** (clean なら成分ゼロ = 従来文言のみ)。同一セッションで既に見せた見出し
+//       (知識 / 構造) は「既知 N 件・変化なし」の 1 行に畳む (novelty damping、同一判定は表示内容の
+//       ハッシュ、記録は consumer 側 root/.graphrag/cache の rail-seen-<session>.jsonl に k:commit +
+//       vault identity)。所見・echo・scope の隙間・overflow は diff ごとの事実なので畳まない。知識が正本側に在っても破る側の作業経路上に
 //       届かない、という VDU/MOT の実測ギャップへの手当て — commit の瞬間は、その diff に
 //       繋がる知識を読む最後で最良のタイミング。
 //
@@ -17,6 +20,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  appendCommitShown, appendRailLogDirect, consumerCacheDir, hash32, loadCommitShown, resolveVaultDir, sanitizeSessionId, vaultKey
+} from "./rail-shared.mjs";
 
 // 引用符内 (コミットメッセージ等) の "git commit" に誤爆しないよう、
 // 判定前にクォート文字列を潰す。完璧なシェル解析は不要 (単語境界程度の堅さでよい)。
@@ -87,23 +93,97 @@ const runDeltaCheck = (root) => {
 
 const HEADLINE_LINES_CAP = 10;
 
-// 見せる価値がある時だけ非 null (clean なら null = 従来文言のみ)。
-export const composeDeltaInjection = (result) => {
-  if (!result || result.status === "clean") return null;
+const clip = (v, max) => {
+  const text = String(v).replace(/\s+/g, " ").trim();
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+};
+
+// novelty damping (goal:hook-novelty-damping): 同一セッションで既に見せた見出しは畳む。
+// 「同一」= id + 表示内容のハッシュ (前回結果のハッシュ比較)。知識は type/state/title/headline/via、
+// 構造は type/title/件数/provisional — 表示が変われば (state が変わっても title が直っても) 再表示。
+// 畳むのは見出し (connected_knowledge / structure) だけ — marker/placement の所見、authority echo、
+// scope の隙間 (unregistered / unframed) と overflow の案内は「この diff の事実」なので畳まない。
+// delta-check verb は無状態のまま (CI / pre-commit で使う時に状態が混ざらない)。畳むのは
+// この表示層だけで、記録は「実際に表示した見出し」のみ (cap で隠れたものは記録しない)。
+const knowledgeLine = (k) => {
+  const state = k.state ? ` [${k.state}]` : "";
+  const via = Array.isArray(k.via) && k.via.length > 0 ? ` (${k.via[0].edge} ${k.via[0].path})` : "";
+  return `- ${k.type}${state} ${k.id}: ${k.title}${k.headline ? ` — ${k.headline}` : ""}${via}`;
+};
+const structureLine = (s) =>
+  `- ${s.type} ${clip(s.title ?? s.id, 60)} (${s.files_in_scope}/${s.files_total} files)` +
+  (s.summary_provisional ? " (provisional — intent not authored)" : !s.summary?.trim() ? " (intent missing)" : "");
+const knowledgeKey = (k) => hash32(knowledgeLine(k));
+const structureKey = (s) => hash32(structureLine(s));
+const isShown = (shown, id, key) => shown.has(id) && shown.get(id) === key;
+
+const idsPreview = (ids) => (ids.length <= 3 ? ids.join(", ") : `${ids.slice(0, 3).join(", ")}, +${ids.length - 3}`);
+
+/**
+ * 見せる価値がある時だけ context 非 null。shown = このセッションで既に見せた id → 状態キー。
+ * 返り値の shownNow は今回「実際に表示した」見出し (= 次回畳む対象として記録すべきもの)。
+ */
+export const composeDeltaInjectionWithSeen = (result, shown = new Map()) => {
+  const empty = { context: null, shownNow: [], damped: { knowledge: 0, structures: 0 } };
+  if (!result || result.status === "clean") return empty;
   const lines = [];
+  const shownNow = [];
+  const damped = { knowledge: 0, structures: 0 };
+
+  const structures = Array.isArray(result.structure_summary) ? result.structure_summary : [];
+  if (structures.length > 0) {
+    const fresh = structures.filter((s) => !isShown(shown, s.id, structureKey(s)));
+    const known = structures.filter((s) => isShown(shown, s.id, structureKey(s)));
+    damped.structures = known.length;
+    // Names/counts orient the commit review; complete intent lives in the CLI
+    // packet. Do not clip a summary into an apparently complete norm here.
+    const displayed = [];
+    for (const type of ["Component", "Layer", "Concern"]) {
+      displayed.push(...fresh.filter((s) => s.type === type).slice(0, 2));
+    }
+    if (displayed.length > 0) {
+      lines.push("Registered structure (overlapping memberships; counts are not additive):");
+      for (const s of displayed) {
+        lines.push(structureLine(s));
+        shownNow.push({ id: s.id, s: structureKey(s) });
+      }
+    }
+    // overflow と scope の隙間は diff ごとの事実 — 見出しが全て既知でも毎回出す (畳まない)。
+    const hidden = fresh.length - displayed.length + (result.counts?.structures_overflow ?? 0);
+    if (hidden > 0) lines.push(`(+${hidden} more structures)`);
+    const coverage = result.structure_coverage;
+    if (coverage && (coverage.unregistered_count > 0 || coverage.unframed_count > 0)) {
+      lines.push(`Scope gaps: ${coverage.unregistered_count} unregistered, ${coverage.unframed_count} registered without structure (not violations).`);
+    }
+    if (displayed.length > 0) {
+      lines.push("Compare the change with the registered summaries (delta-check --full). This map does not show those bodies; report the main structural effect once at completion, or say what remains unchecked.");
+    }
+    if (known.length > 0) {
+      lines.push(`${known.length} structure(s) already shown earlier in this session, unchanged (${idsPreview(known.map((s) => s.id))}).`);
+    }
+  }
 
   const connected = Array.isArray(result.connected_knowledge) ? result.connected_knowledge : [];
   if (connected.length > 0) {
-    lines.push(
-      `${connected.length} registered knowledge node(s) are wired to the files you are committing — read before you commit:`
-    );
-    for (const k of connected.slice(0, HEADLINE_LINES_CAP)) {
-      const state = k.state ? ` [${k.state}]` : "";
-      const via = Array.isArray(k.via) && k.via.length > 0 ? ` (${k.via[0].edge} ${k.via[0].path})` : "";
-      lines.push(`- ${k.type}${state} ${k.id}: ${k.title}${k.headline ? ` — ${k.headline}` : ""}${via}`);
+    const fresh = connected.filter((k) => !isShown(shown, k.id, knowledgeKey(k)));
+    const known = connected.filter((k) => isShown(shown, k.id, knowledgeKey(k)));
+    damped.knowledge = known.length;
+    if (fresh.length > 0) {
+      lines.push(
+        `${fresh.length} registered knowledge node(s) are wired to the files you are committing — read before you commit:`
+      );
+      for (const k of fresh.slice(0, HEADLINE_LINES_CAP)) {
+        lines.push(knowledgeLine(k));
+        shownNow.push({ id: k.id, s: knowledgeKey(k) });
+      }
     }
-    const hidden = connected.length - Math.min(connected.length, HEADLINE_LINES_CAP) + (result.counts?.connected_overflow ?? 0);
-    if (hidden > 0) lines.push(`(+${hidden} more — run delta-check for the full list)`);
+    // 未表示の存在 (表示 cap 超過 + delta-check 側の CONNECTED_CAP 超過) は diff の事実 — 見出しが
+    // 全て既知でも毎回出す。畳むと「一度も表示されていない知識」が無いように見える。
+    const hidden = fresh.length - Math.min(fresh.length, HEADLINE_LINES_CAP) + (result.counts?.connected_overflow ?? 0);
+    if (hidden > 0) lines.push(`(+${hidden} more knowledge node(s) not shown here — run delta-check for the full list)`);
+    if (known.length > 0) {
+      lines.push(`${known.length} knowledge headline(s) already shown earlier in this session, unchanged (${idsPreview(known.map((k) => k.id))}). Any change to the headline (state, title, wiring) would resurface them.`);
+    }
   }
 
   const echoes = Array.isArray(result.authority_echoes) ? result.authority_echoes : [];
@@ -132,9 +212,16 @@ export const composeDeltaInjection = (result) => {
     lines.push("(run `delta-check` for per-finding next_step prescriptions)");
   }
 
-  if (lines.length === 0) return null;
-  return `<graphrag delta check, knowledge wired to this diff>\n${lines.join("\n")}\n</graphrag delta check>`;
+  if (lines.length === 0) return empty;
+  return {
+    context: `<graphrag delta check, knowledge wired to this diff>\n${lines.join("\n")}\n</graphrag delta check>`,
+    shownNow,
+    damped
+  };
 };
+
+// 後方互換の薄い皮 (seen 無し = 全件表示)。
+export const composeDeltaInjection = (result) => composeDeltaInjectionWithSeen(result).context;
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
@@ -151,7 +238,31 @@ const main = async () => {
     if (!commitsOutsideCwd(input?.tool_input?.command)) {
       const startDir = typeof input?.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd();
       const root = findRepoRoot(path.resolve(startDir));
-      if (root) deltaText = composeDeltaInjection(runDeltaCheck(root));
+      if (root) {
+        const result = runDeltaCheck(root);
+        // novelty damping: session id が取れる時だけ「既に見せた見出し」を畳む
+        // (取れない時は従来どおり全件 — dedup 不能で沈黙するより見せる側に倒す)。
+        // 記録と計測ログは consumer 側 (root/.graphrag/cache) に置き、vault identity で名前空間を分ける
+        // (外部 vault を共有する複数 worktree が互いの表示を畳まない / readonly vault 側へ書かない)。
+        const sessionId = sanitizeSessionId(input?.session_id);
+        const cacheDir = consumerCacheDir(root);
+        const vkey = vaultKey(resolveVaultDir(root));
+        const shown = sessionId ? loadCommitShown(cacheDir, sessionId, vkey) : new Map();
+        const composed = composeDeltaInjectionWithSeen(result, shown);
+        deltaText = composed.context;
+        if (sessionId && composed.shownNow.length > 0) appendCommitShown(cacheDir, sessionId, vkey, composed.shownNow);
+        appendRailLogDirect(cacheDir, {
+          rail: "commit",
+          session: sessionId,
+          vault: vkey,
+          fired: composed.context !== null,
+          status: result?.status ?? null,
+          shown: composed.shownNow.length,
+          damped_knowledge: composed.damped.knowledge,
+          damped_structures: composed.damped.structures,
+          chars: composed.context?.length ?? 0
+        });
+      }
     }
   } catch {
     // 読みの導線は完全にベストエフォート — 失敗は無音で書き戻し促しだけ出す

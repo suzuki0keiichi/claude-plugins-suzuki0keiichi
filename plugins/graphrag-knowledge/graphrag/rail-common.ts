@@ -5,8 +5,9 @@
  * 修正が片方のミラーにだけ当たる事故を構造的に防ぐ。
  *
  * レールの契約 (ノイズ予算が最優先の設計制約):
- *   - 注入はコンテキストに直接載るため、上限を固定する: 最大 RAIL_MAX_ITEMS 件・
- *     合計 RAIL_TOTAL_BUDGET_CHARS 字 (超過は件数を削って収める)。沈黙時はゼロ。
+ *   - 知識は最大 RAIL_MAX_ITEMS 件・RAIL_TOTAL_BUDGET_CHARS 字。ファイル系レールは
+ *     登録構造の全文を独立の最大2件/1000字枠で届ける (知識を押し出さない)。
+ *     合算は区切り込み RAIL_COMBINED_BUDGET_CHARS 字以内。沈黙時はゼロ。
  *   - セッション内 seen-set (rail-seen-<session>.jsonl) で同一ノードの再注入と
  *     同一ファイルへの再走査を抑止する。ストアは append-only JSONL —
  *     read-modify-write は並列 Read (1ターン複数 Read は最頻出パターン) で
@@ -25,10 +26,12 @@ import { cacheDirForVault } from "./cli-env.ts";
 import { appendJsonlLog } from "./lane-log.ts";
 import { importVault } from "./import-vault.ts";
 import { canonicalType } from "./schema.ts";
-import { KNOWLEDGE_TO_FILE_EDGES } from "./crosscut-map.ts";
+import { KNOWLEDGE_TO_FILE_EDGES, buildCrosscutIndex, structureForPaths } from "./crosscut-map.ts";
+import { composeStructureContext, STRUCTURE_BUDGET_CHARS } from "./rail-structure.ts";
 
 export const RAIL_MAX_ITEMS = 3;
 export const RAIL_TOTAL_BUDGET_CHARS = 700;
+export const RAIL_COMBINED_BUDGET_CHARS = RAIL_TOTAL_BUDGET_CHARS + STRUCTURE_BUDGET_CHARS;
 export const RAIL_TITLE_CLIP = 90;
 export const RAIL_HEADLINE_CLIP = 90;
 
@@ -45,6 +48,8 @@ export interface RailItem {
 export interface RailSeen {
   session_id: string;
   injected_node_ids: string[];
+  /** A generic/prompt headline is not delivery of the full registered intent. */
+  delivered_structure_ids: string[];
   touched_files: string[];
   read_files: string[];
 }
@@ -72,8 +77,9 @@ function legacySeenPath(cacheDir: string, sessionId: string): string {
 
 /** 読み = 全行の和集合。壊れた行は捨てる。旧形式 .json も合流 (fail-open)。 */
 export function loadRailSeen(cacheDir: string, sessionId: string): RailSeen {
-  const seen: RailSeen = { session_id: sessionId, injected_node_ids: [], touched_files: [], read_files: [] };
+  const seen: RailSeen = { session_id: sessionId, injected_node_ids: [], delivered_structure_ids: [], touched_files: [], read_files: [] };
   const nodeIds = new Set<string>();
+  const structureIds = new Set<string>();
   const touched = new Set<string>();
   const read = new Set<string>();
   try {
@@ -95,6 +101,7 @@ export function loadRailSeen(cacheDir: string, sessionId: string): RailSeen {
         try {
           const e = JSON.parse(line);
           if (e?.k === "node" && typeof e.id === "string") nodeIds.add(e.id);
+          else if (e?.k === "struct" && typeof e.id === "string") structureIds.add(e.id);
           else if (e?.k === "file" && typeof e.f === "string") {
             if (e.l === "read") read.add(e.f);
             else if (e.l === "touch") touched.add(e.f);
@@ -108,6 +115,7 @@ export function loadRailSeen(cacheDir: string, sessionId: string): RailSeen {
     // 読めなければ空から (fail-open)
   }
   seen.injected_node_ids = [...nodeIds];
+  seen.delivered_structure_ids = [...structureIds];
   seen.touched_files = [...touched];
   seen.read_files = [...read];
   return seen;
@@ -117,6 +125,7 @@ export interface RailSeenDelta {
   list?: "read" | "touch";
   files?: string[];
   nodeIds?: string[];
+  structureIds?: string[];
 }
 
 /**
@@ -128,6 +137,7 @@ export function appendRailSeen(cacheDir: string, sessionId: string, delta: RailS
   const lines: string[] = [];
   for (const f of delta.files ?? []) lines.push(JSON.stringify({ k: "file", l: delta.list ?? "read", f }));
   for (const id of delta.nodeIds ?? []) lines.push(JSON.stringify({ k: "node", id }));
+  for (const id of delta.structureIds ?? []) lines.push(JSON.stringify({ k: "struct", id }));
   let ok = true;
   if (lines.length > 0) {
     try {
@@ -244,6 +254,9 @@ export interface RailFileLaneResult {
   context?: string;
   ids?: string[];
   chars?: number;
+  structure_ids?: string[];
+  structure_omitted_ids?: string[];
+  structure_unavailable_ids?: string[];
 }
 
 export interface RailFileLaneSpec {
@@ -282,6 +295,15 @@ export function railFileLane(spec: RailFileLaneSpec, relPath: string, sessionId:
   const all = reverseLookupFile(graph, relPath);
   const items = all.filter((i) => !seenIds.has(i.id)).slice(0, RAIL_MAX_ITEMS);
   const composed = composeRailContext(spec.tag, spec.header(relPath), items);
+  const structureScope = structureForPaths(buildCrosscutIndex(graph), [relPath]);
+  const structure = composeStructureContext(
+    relPath, structureScope.structures, new Set(seen?.delivered_structure_ids ?? []),
+    Math.min(STRUCTURE_BUDGET_CHARS, RAIL_COMBINED_BUDGET_CHARS - (composed?.chars ?? 0) - (composed ? 1 : 0))
+  );
+  // Keep the existing Constraint-first knowledge block first. Full structure
+  // delivery also suppresses a later generic prompt headline, but never vice versa.
+  const context = [composed?.context, structure?.context].filter(Boolean).join("\n");
+  const ids = [...(composed?.ids ?? []), ...(structure?.bodyIds ?? [])];
 
   // ヒットの有無に関わらずこのファイルは既読へ (配線ゼロのファイルに毎回 spawn しない)。
   // 追記失敗はレールを殺さず、ログに残す (fail-open の劣化 = 再注入があり得る、まで)。
@@ -289,16 +311,31 @@ export function railFileLane(spec: RailFileLaneSpec, relPath: string, sessionId:
     const ok = appendRailSeen(cacheDir, sessionId, {
       list: spec.rail,
       files: [relPath],
-      nodeIds: composed ? composed.ids : []
+      nodeIds: ids,
+      structureIds: structure?.bodyIds ?? []
     });
     if (!ok) appendRailLog(cacheDir, { rail: spec.rail, file: relPath, reason: "seen-save-error", session: sessionId });
   }
 
-  const logBase = { rail: spec.rail, file: relPath, wired: all.length, session: sessionId };
-  if (!composed) {
-    if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: false, reason: all.length === 0 ? "unwired" : "all-seen" });
-    return { status: "silent", reason: all.length === 0 ? "unwired" : "all-seen" };
+  const logBase = {
+    rail: spec.rail, file: relPath, wired: all.length, session: sessionId,
+    structures_wired: structureScope.structures.length,
+    structure_bodies: structure?.bodyIds.length ?? 0,
+    structure_omitted: structure?.omittedIds.length ?? 0,
+    structure_unavailable: structure?.unavailableIds.length ?? 0,
+    knowledge_chars: composed?.chars ?? 0, structure_chars: structure?.chars ?? 0
+  };
+  if (!context) {
+    const reason = all.length === 0 && structureScope.structures.length === 0 ? "unwired" : "all-seen";
+    if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: false, reason });
+    return { status: "silent", reason };
   }
-  if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: true, ids: composed.ids, chars: composed.chars });
-  return { status: "inject", context: composed.context, ids: composed.ids, chars: composed.chars };
+  if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: true, ids, chars: context.length });
+  return {
+    status: "inject", context, ids, chars: context.length,
+    ...(structure ? {
+      structure_ids: structure.bodyIds, structure_omitted_ids: structure.omittedIds,
+      structure_unavailable_ids: structure.unavailableIds
+    } : {})
+  };
 }

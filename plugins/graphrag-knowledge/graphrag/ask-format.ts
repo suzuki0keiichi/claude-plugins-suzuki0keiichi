@@ -88,9 +88,15 @@ export function formatAskMarkdown(payload: any): string {
     out.push(
       "## area_map\n" +
         crosscuts
-          .map((c: any) => `- [${c.type}] ${c.title} \`${c.id}\` (files ${c.files_in_scope}/${c.files_total})`)
+          .map((c: any) => `- [${c.type}] ${c.title} \`${c.id}\` (files ${c.files_in_scope}/${c.files_total})` +
+            (c.summary_provisional ? " (provisional — intent not authored)" : "") +
+            (c.generated_at ? ` (registered ${c.generated_at})` : "") +
+            `\n  ${c.summary || "(registered summary missing — intent not available)"}`)
           .join("\n")
     );
+    if (payload.area_map.crosscuts_overflow > 0) {
+      out.push(`(${payload.area_map.crosscuts_overflow} more structures omitted; retrieve the specific file scope with delta-check --files <paths> --full.)`);
+    }
   }
 
   if (payload.enforcement_debt) {

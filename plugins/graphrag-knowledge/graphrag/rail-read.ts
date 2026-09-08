@@ -14,6 +14,9 @@
  *     尽きてレールを殺すだけ。主抑制は per-file-once + node-dedup。
  *   - 配線ゼロのファイルは沈黙 (登記の逆引きであり検索ではない — 推測しない)。
  *   - Constraint 最優先 (TYPE_PRIORITY は rail-common の逆引きに集約)。
+ *   - 知識ブロックの後に所属構造の著述済み summary 全文を独立枠 (2件/1000字) で
+ *     届ける。合算1700字以内。構造の本文配信は専用 seen、仮summary/未著述/省略は
+ *     配信済みにしない (表示は照合済みを意味しない)。
  *
  * 実装の正本は rail-common の railFileLane (touch/read 共通)。seen 判定の正本も
  * そこ — hook 側 (hooks/read-rail.mjs) の fast-path は spawn 節約であって正しさの

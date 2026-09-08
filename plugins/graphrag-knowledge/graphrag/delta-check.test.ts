@@ -381,3 +381,66 @@ test("evidence_paths: 知識に配線されていない変更ファイルは含�
   const { result } = run(["src/ui/table.tsx", "src/unwired/other.ts"]);
   assert.deepEqual(result.evidence_paths, ["src/ui/table.tsx"]);
 });
+
+test("structure-only scope is info, without polluting knowledge, authority homes or evidence paths", () => {
+  const summary = "Registered responsibility. ".repeat(20) + "Never publish partial output.";
+  const graph = {
+    nodes: [
+      { id: "file:s:a.ts", type: "File", title: "a", path: "a.ts", summary: "file" },
+      { id: "component:s:writer", type: "Component", title: "Writer", summary, aliases: ["WRITER_TOKEN"] }
+    ],
+    edges: [{ id: "e1", type: "evidenced_by", from: "component:s:writer", to: "file:s:a.ts" }]
+  };
+  const { result } = run(["a.ts", "elsewhere/unregistered.ts"], graph, { fileExists: () => true, readFile: () => "const WRITER_TOKEN = 1;" });
+  assert.equal(result.status, "info");
+  assert.deepEqual(result.connected_knowledge, []);
+  assert.deepEqual(result.authority_echoes, []);
+  assert.deepEqual(result.evidence_paths, []);
+  assert.equal(result.structure_summary[0].summary, summary);
+  assert.deepEqual(result.structure_summary[0].paths, ["a.ts"]);
+  assert.equal(result.counts.structures, 1);
+  assert.equal(result.structure_coverage.registered_files, 1);
+  assert.deepEqual(result.structure_coverage.unregistered_paths, ["elsewhere/unregistered.ts"]);
+});
+
+test("structure cap and path samples are display-only; --full recovers the complete scope", () => {
+  const nodes: any[] = Array.from({ length: 5 }, (_, i) => ({ id: `file:s:f${i}.ts`, type: "File", title: `f${i}`, path: `f${i}.ts`, summary: "file" }));
+  nodes.push({ id: "file:s:free.ts", type: "File", title: "free", path: "free.ts", summary: "no structure" });
+  const edges: any[] = [];
+  for (const type of ["Component", "Layer", "Concern"]) {
+    for (let i = 0; i < 6; i++) {
+      const id = `${type.toLowerCase()}:s:c${i}`;
+      nodes.push({ id, type, title: id, summary: `Intent ${id}` });
+      for (let f = 0; f < 5; f++) edges.push({ id: `${id}-${f}`, type: "evidenced_by", from: id, to: `file:s:f${f}.ts` });
+    }
+  }
+  const vault = writeVaultFromGraph({ nodes, edges });
+  const options = { vaultDir: vault, root: "/repo", inputSource: "files" as const, paths: [...Array.from({ length: 5 }, (_, i) => `f${i}.ts`), "f0.ts", "free.ts", ...Array.from({ length: 5 }, (_, i) => `unknown${i}.ts`)] };
+  const deps = { gitTrackedFiles: () => [], fileExists: () => false };
+  const capped = deltaCheck(options, deps);
+  const full = deltaCheck({ ...options, full: true }, deps);
+  assert.equal(capped.counts.structures, 15);
+  assert.equal(capped.counts.structures_overflow, 3);
+  assert.equal(full.counts.structures, 18);
+  assert.equal(full.counts.structures_overflow, 0);
+  assert.equal(capped.structure_summary[0].files_in_scope, 5);
+  assert.equal(capped.structure_summary[0].files_total, 5);
+  assert.equal(capped.structure_summary[0].paths.length, 3);
+  assert.equal(capped.structure_summary[0].paths_overflow, 2);
+  assert.equal(full.structure_summary[0].paths.length, 5);
+  assert.equal(full.structure_summary[0].paths_overflow, undefined);
+  assert.equal(capped.structure_coverage.unregistered_count, 5);
+  assert.equal(capped.structure_coverage.unregistered_overflow, 2);
+  assert.equal(full.structure_coverage.unregistered_paths.length, 5);
+  assert.equal(full.structure_coverage.unregistered_overflow, 0);
+  assert.deepEqual(capped.structure_coverage.unframed_paths, ["free.ts"]);
+  assert.deepEqual(capped.evidence_paths, full.evidence_paths);
+  assert.deepEqual(capped.connected_knowledge, full.connected_knowledge);
+});
+
+test("delta-check keeps provisional intent explicitly labeled", () => {
+  const graph = { ...GRAPH, nodes: GRAPH.nodes.map((n) => n.type === "Component" ? { ...n, summary_provisional: true } : n) };
+  const { result } = run(["src/upload/pack.ts"], graph);
+  assert.equal(result.structure_summary[0].summary_provisional, true);
+  assert.equal(result.structure_summary[0].summary, "s");
+});

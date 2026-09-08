@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildCrosscutIndex, buildAreaMap, claimantsForPath, isImplPath } from "./crosscut-map.ts";
+import { buildCrosscutIndex, buildAreaMap, claimantsForPath, isImplPath, structureForPaths } from "./crosscut-map.ts";
 
 // 2 Component (checkout: src/pay/ に2件 / auth: src/auth/ に2件) + Layer + Concern。
 // src/pay/shared.ts は checkout と concern:billing の両方に属する。
@@ -98,4 +98,54 @@ test("isImplPath: 実装拡張子のみ true、.d.ts と拡張子なしは false
   assert.equal(isImplPath("src/vite-env.d.ts"), false);
   assert.equal(isImplPath("README.md"), false);
   assert.equal(isImplPath("Makefile"), false);
+});
+
+test("structureForPaths: exact scope, overlapping memberships, no sibling or directory expansion", () => {
+  const index = buildCrosscutIndex(GRAPH);
+  const scope = structureForPaths(index, ["src/pay/cart.ts", "src/pay/cart.ts", "src/pay/new.ts", "src/lonely/one.ts"]);
+  assert.deepEqual(scope.structures.map((s) => s.id), ["component:s:checkout", "layer:s:domain"]);
+  assert.deepEqual(scope.structures[0].paths, ["src/pay/cart.ts"]);
+  assert.equal(scope.structures[0].files_in_scope, 1);
+  assert.equal(scope.structures[0].files_total, 2);
+  assert.equal(scope.structures[0].summary, "s");
+  assert.deepEqual(scope.unregistered_paths, ["src/pay/new.ts"]);
+  assert.deepEqual(scope.unframed_paths, ["src/lonely/one.ts"]);
+});
+
+test("structureForPaths counts unique files even with repeated evidenced_by edges", () => {
+  const graph = { ...GRAPH, edges: [...GRAPH.edges, { ...GRAPH.edges[0], id: "duplicate" }] };
+  const scope = structureForPaths(buildCrosscutIndex(graph), ["src/pay/cart.ts", "src/pay/shared.ts"]);
+  const c = scope.structures.find((s) => s.type === "Component")!;
+  assert.equal(c.files_in_scope, 2);
+  assert.equal(c.files_total, 2);
+  assert.deepEqual(c.paths, ["src/pay/cart.ts", "src/pay/shared.ts"]);
+});
+
+test("area_map carries full intent without expanding directly matched structures into sibling files", () => {
+  const summary = "Registered intent. ".repeat(30) + "Do not write here.";
+  const graph = { ...GRAPH, nodes: GRAPH.nodes.map((n) => n.id === "component:s:checkout" ? { ...n, summary, generated_at: "2026-07-01T00:00:00Z" } : n) };
+  const map = buildAreaMap(graph, ["component:s:checkout"]);
+  assert.equal(map.crosscuts.length, 1);
+  assert.equal(map.crosscuts[0].summary, summary);
+  assert.equal(map.crosscuts[0].generated_at, "2026-07-01T00:00:00Z");
+  assert.equal(map.crosscuts[0].files_in_scope, 0);
+  assert.equal(map.crosscuts[0].files_total, 2);
+  assert.equal(map.crosscuts_overflow, 0);
+});
+
+test("area_map keeps the existing eight-structure cap and reports omitted structures", () => {
+  const nodes = Array.from({ length: 10 }, (_, i) => ({ id: `component:s:c${i}`, type: "Component", title: `C${i}`, summary: `Full intent ${i}` }));
+  const map = buildAreaMap({ nodes, edges: [] }, nodes.map((n) => n.id));
+  assert.equal(map.crosscuts.length, 8);
+  assert.equal(map.crosscuts_overflow, 2);
+  for (const c of map.crosscuts) assert.equal(c.summary, nodes.find((n) => n.id === c.id)!.summary);
+});
+
+test("structure projection preserves the provisional flag in both map and exact-file packet", () => {
+  const graph = { ...GRAPH, nodes: GRAPH.nodes.map((n) => n.id === "component:s:checkout" ? { ...n, summary_provisional: true } : n) };
+  const map = buildAreaMap(graph, ["file:s:src/pay/cart.ts"]);
+  assert.equal(map.crosscuts.find((s) => s.type === "Component")!.summary_provisional, true);
+  const scope = structureForPaths(buildCrosscutIndex(graph), ["src/pay/cart.ts"]);
+  assert.equal(scope.structures.find((s) => s.type === "Component")!.summary_provisional, true);
+  assert.equal(scope.structures.find((s) => s.type === "Layer")!.summary_provisional, undefined);
 });

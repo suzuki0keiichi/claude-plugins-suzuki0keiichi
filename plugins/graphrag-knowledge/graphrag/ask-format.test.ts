@@ -101,3 +101,24 @@ test("formatAskMarkdown: 欠損だらけの payload でも throw しない", () 
   assert.match(md, /# ask: q/);
   assert.match(md, /\(none\)/);
 });
+
+test("markdown area_map preserves all delivered summaries and reports structure overflow", () => {
+  const p: any = payload();
+  p.area_map.crosscuts = Array.from({ length: 8 }, (_, i) => ({
+    id: `concern:s:r${i}`, type: "Concern", title: `R${i}`, files_in_scope: 1, files_total: 9,
+    summary: `Norm ${i}. ` + "x".repeat(300) + " Do not drop the final condition."
+  }));
+  p.area_map.crosscuts_overflow = 2;
+  const md = formatAskMarkdown(p);
+  for (const s of p.area_map.crosscuts) assert.ok(md.includes(s.summary));
+  assert.ok(md.includes("2 more structures omitted"));
+});
+
+test("markdown labels provisional summaries as not authored intent", () => {
+  const p: any = payload();
+  p.area_map.crosscuts[0].summary = "Machine grouping scaffold";
+  p.area_map.crosscuts[0].summary_provisional = true;
+  const md = formatAskMarkdown(p);
+  assert.ok(md.includes("provisional — intent not authored"));
+  assert.ok(md.includes("Machine grouping scaffold"));
+});

@@ -13,6 +13,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.ts");
+// 「embedder に到達できない」を決定的に再現する endpoint (port 9 = discard、接続拒否)。
+// 索引欠如・重複ゲート skip を検証するテストは、開発機に Ollama 等が居ても結果が変わらないよう
+// これを明示する (env 未設定 = auto-detect が走る、なので「未設定」は隔離にならない)。
+const NO_EMBEDDER_ENDPOINT = "http://127.0.0.1:9/v1";
 
 // 回帰 (CRITICAL): carve ヘッドラインの index 段は、単独 index verb と同じく正本 vault から
 // 本物 File summary を継ぐ。以前 runCarve は resolvePreviousGraph を通らず vault を無視し、
@@ -79,10 +83,14 @@ test("runAsk passes --vault through to the read path (index-missing, not vault-m
   }
   const prevVault = process.env.GRAPHRAG_VAULT_DIR;
   const prevState = process.env.GRAPHRAG_STATE_DIR;
+  const prevEndpoint = process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
   delete process.env.GRAPHRAG_VAULT_DIR;
   process.env.GRAPHRAG_STATE_DIR = path.join(root, "state");
+  // 索引欠如を検証するテストなので auto-build が成立してはならない。embedder を到達不能に固定
+  // (未設定だと auto-detect が開発機の Ollama を拾って索引を建て、期待エラーが消える)。
+  process.env.GRAPHRAG_EMBEDDING_ENDPOINT = NO_EMBEDDER_ENDPOINT;
   try {
-    // env を設定せず --vault のみ。vault が伝わっていれば索引欠如エラー
+    // vault env を設定せず --vault のみ。vault が伝わっていれば索引欠如エラー
     // (vault 未伝播なら "vault directory not specified" になる)。
     await assert.rejects(
       () => runAsk(["X", "--vault", vaultDir]),
@@ -93,6 +101,8 @@ test("runAsk passes --vault through to the read path (index-missing, not vault-m
     else process.env.GRAPHRAG_VAULT_DIR = prevVault;
     if (prevState === undefined) delete process.env.GRAPHRAG_STATE_DIR;
     else process.env.GRAPHRAG_STATE_DIR = prevState;
+    if (prevEndpoint === undefined) delete process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
+    else process.env.GRAPHRAG_EMBEDDING_ENDPOINT = prevEndpoint;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -256,10 +266,12 @@ async function withVaultEnv<T>(vault: string, stateDir: string, fn: () => Promis
   writeFileSync(envPath, "GRAPHRAG_VAULT_MODE=direct\n");
   const prevCwd = process.cwd();
   process.chdir(repo);
-  // embedding endpoint は設定しない: 索引ビルドは非致命なので mutation は commit される。
+  // embedder は「到達不能」に固定する: 索引ビルドは非致命なので mutation は commit される。
+  // env を削除するだけだと auto-detect が開発機の Ollama (localhost:11434) を拾い、実 embedding で
+  // 索引が建ってしまう (「調査A」「調査B」が cosine 0.93 で重複ゲートに掛かる等、結果が環境依存になる)。
   const prevEndpoint = process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
   const prevProvider = process.env.GRAPHRAG_VECTOR_PROVIDER;
-  delete process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
+  process.env.GRAPHRAG_EMBEDDING_ENDPOINT = NO_EMBEDDER_ENDPOINT;
   delete process.env.GRAPHRAG_VECTOR_PROVIDER;
   try {
     return await fn();

@@ -28,6 +28,14 @@ export interface CrosscutRef {
   title: string;
 }
 
+export interface CrosscutDefinition extends CrosscutRef {
+  /** Registered intent, verbatim. Membership is evidence, not a judgment of compliance. */
+  summary: string;
+  /** Indexer scaffold, not authored intent; consumers must not treat it as a norm. */
+  summary_provisional?: boolean;
+  generated_at?: string;
+}
+
 export interface CrosscutIndex {
   /** File ノード id → 所属する横断構造 (evidenced_by: crosscut → File の逆引き) */
   membershipByFileId: Map<string, CrosscutRef[]>;
@@ -37,6 +45,8 @@ export interface CrosscutIndex {
   pathByFileId: Map<string, string>;
   /** Component id → 縄張り: dir → そのdir内メンバー数。memberCount は総メンバー数 */
   componentFootprints: Map<string, { ref: CrosscutRef; dirs: Map<string, number>; memberCount: number }>;
+  definitionsById: Map<string, CrosscutDefinition>;
+  memberFileIdsById: Map<string, Set<string>>;
 }
 
 const CROSSCUT_TYPES = new Set(["Component", "Layer", "Concern"]);
@@ -67,12 +77,22 @@ export function buildCrosscutIndex(graph: GraphLike): CrosscutIndex {
   const fileIdByPath = new Map<string, string>();
   const pathByFileId = new Map<string, string>();
   const componentFootprints = new Map<string, { ref: CrosscutRef; dirs: Map<string, number>; memberCount: number }>();
+  const definitionsById = new Map<string, CrosscutDefinition>();
+  const memberFileIdsById = new Map<string, Set<string>>();
 
   for (const n of graph.nodes) {
     if (typeof n.id !== "string") continue;
     if (canonicalType(n.type as string) === "File" && typeof n.path === "string") {
       fileIdByPath.set(n.path as string, n.id);
       pathByFileId.set(n.id, n.path as string);
+    }
+    if (CROSSCUT_TYPES.has(canonicalType(n.type as string) ?? "")) {
+      definitionsById.set(n.id, {
+        ...refOf(n),
+        summary: typeof n.summary === "string" ? n.summary : "",
+        ...(n.summary_provisional === true ? { summary_provisional: true } : {}),
+        ...(typeof n.generated_at === "string" ? { generated_at: n.generated_at } : {})
+      });
     }
   }
 
@@ -85,6 +105,12 @@ export function buildCrosscutIndex(graph: GraphLike): CrosscutIndex {
     const ref = refOf(from);
     if (!membershipByFileId.has(e.to)) membershipByFileId.set(e.to, []);
     membershipByFileId.get(e.to)!.push(ref);
+    // Only registered File destinations count as actual members. Sets also avoid
+    // counting repeated edges as extra files in the reading packet.
+    if (pathByFileId.has(e.to)) {
+      if (!memberFileIdsById.has(e.from)) memberFileIdsById.set(e.from, new Set());
+      memberFileIdsById.get(e.from)!.add(e.to);
+    }
 
     if (fromType === "Component") {
       const p = pathByFileId.get(e.to);
@@ -100,12 +126,61 @@ export function buildCrosscutIndex(graph: GraphLike): CrosscutIndex {
     }
   }
 
-  return { membershipByFileId, fileIdByPath, pathByFileId, componentFootprints };
+  return { membershipByFileId, fileIdByPath, pathByFileId, componentFootprints, definitionsById, memberFileIdsById };
+}
+
+export interface StructureSummary extends CrosscutDefinition {
+  files_in_scope: number;
+  files_total: number;
+  paths: string[];
+  paths_overflow?: number;
+}
+
+export interface StructureScope {
+  structures: StructureSummary[];
+  unregistered_paths: string[];
+  unframed_paths: string[];
+}
+
+export const STRUCTURE_TYPE_ORDER: Readonly<Record<string, number>> = { Component: 0, Layer: 1, Concern: 2 };
+
+/** Exact File → membership lookup. No directory inference, sibling expansion,
+ * knowledge edges, or freshness bookkeeping. Callers own display budgets. */
+export function structureForPaths(index: CrosscutIndex, paths: Iterable<string>): StructureScope {
+  const scoped = new Map<string, Set<string>>();
+  const unregistered: string[] = [];
+  const unframed: string[] = [];
+  for (const p of [...new Set(paths)].sort()) {
+    const fid = index.fileIdByPath.get(p);
+    if (!fid) {
+      unregistered.push(p);
+      continue;
+    }
+    const memberships = index.membershipByFileId.get(fid) ?? [];
+    if (memberships.length === 0) unframed.push(p);
+    for (const ref of memberships) {
+      if (!scoped.has(ref.id)) scoped.set(ref.id, new Set());
+      scoped.get(ref.id)!.add(p);
+    }
+  }
+  const structures: StructureSummary[] = [];
+  for (const [id, files] of scoped) {
+    const definition = index.definitionsById.get(id);
+    if (!definition) continue;
+    structures.push({
+      ...definition, files_in_scope: files.size,
+      files_total: index.memberFileIdsById.get(id)?.size ?? 0,
+      paths: [...files].sort()
+    });
+  }
+  structures.sort((a, b) => STRUCTURE_TYPE_ORDER[a.type] - STRUCTURE_TYPE_ORDER[b.type] ||
+    b.files_in_scope - a.files_in_scope || a.id.localeCompare(b.id));
+  return { structures, unregistered_paths: unregistered, unframed_paths: unframed };
 }
 
 // ── ① ask 同乗用: area map ────────────────────────────────────────────────────
 
-export interface AreaMapCrosscut extends CrosscutRef {
+export interface AreaMapCrosscut extends CrosscutDefinition {
   files_in_scope: number;
   files_total: number;
   matched_directly?: boolean; // 横断構造ノード自体が検索にヒットした
@@ -113,6 +188,7 @@ export interface AreaMapCrosscut extends CrosscutRef {
 
 export interface AreaMap {
   crosscuts: AreaMapCrosscut[];
+  crosscuts_overflow: number;
   /** scope 内で、どの横断構造にも属さない File (無所属は正当 — 情報として出すだけ) */
   unframed_files: { id: string; path: string | null }[];
   unframed_overflow: number;
@@ -172,10 +248,10 @@ export function buildAreaMap(graph: GraphLike, scopeNodeIds: Iterable<string>): 
 
   const crosscuts: AreaMapCrosscut[] = [];
   for (const { ref, count } of inScope.values()) {
-    crosscuts.push({ ...ref, files_in_scope: count, files_total: totals.get(ref.id) ?? count, ...(directCrosscuts.has(ref.id) ? { matched_directly: true } : {}) });
+    crosscuts.push({ ...index.definitionsById.get(ref.id)!, files_in_scope: count, files_total: totals.get(ref.id) ?? count, ...(directCrosscuts.has(ref.id) ? { matched_directly: true } : {}) });
   }
-  for (const [id, ref] of directCrosscuts) {
-    if (!inScope.has(id)) crosscuts.push({ ...ref, files_in_scope: 0, files_total: totals.get(id) ?? 0, matched_directly: true });
+  for (const id of directCrosscuts.keys()) {
+    if (!inScope.has(id)) crosscuts.push({ ...index.definitionsById.get(id)!, files_in_scope: 0, files_total: totals.get(id) ?? 0, matched_directly: true });
   }
   crosscuts.sort((a, b) => (b.matched_directly ? 1 : 0) - (a.matched_directly ? 1 : 0) || b.files_in_scope - a.files_in_scope || a.id.localeCompare(b.id));
 
@@ -183,6 +259,7 @@ export function buildAreaMap(graph: GraphLike, scopeNodeIds: Iterable<string>): 
   const cappedUnframed = unframed.slice(0, AREA_MAP_CAP);
   return {
     crosscuts: cappedCrosscuts,
+    crosscuts_overflow: Math.max(0, crosscuts.length - cappedCrosscuts.length),
     unframed_files: cappedUnframed,
     unframed_overflow: Math.max(0, unframed.length - cappedUnframed.length),
     note:

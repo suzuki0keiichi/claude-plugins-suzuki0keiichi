@@ -42,7 +42,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
 import { canonicalType } from "./schema.ts";
-import { KNOWLEDGE_TO_FILE_EDGES } from "./crosscut-map.ts";
+import { KNOWLEDGE_TO_FILE_EDGES, buildCrosscutIndex, structureForPaths, type StructureSummary } from "./crosscut-map.ts";
 import {
   frameCheck,
   defaultGitDiffPaths,
@@ -57,6 +57,7 @@ import { recordEchoFirings, recordEvidenceChanges } from "./lane-log.ts";
 const CONNECTED_CAP = 20;
 const VIA_CAP = 3;
 const HEADLINE_CHARS = 160;
+const STRUCTURES_PER_TYPE_CAP = 5;
 
 /** 見出しの型優先度: 破ってはならないもの → 判断 → 記録。同格は via 数降順。 */
 const TYPE_PRIORITY: Record<string, number> = {
@@ -88,6 +89,17 @@ export interface DeltaCheckResult {
   status: "clean" | "info" | "warn";
   summary: string;
   connected_knowledge: ConnectedKnowledge[];
+  /** Exact membership and full registered intent, separate from knowledge evidence. */
+  structure_summary: StructureSummary[];
+  structure_coverage: {
+    registered_files: number;
+    unregistered_count: number;
+    unregistered_paths: string[];
+    unregistered_overflow: number;
+    unframed_count: number;
+    unframed_paths: string[];
+    unframed_overflow: number;
+  };
   /** diff 内で ≥1 の知識ノードの evidence に配線されている path 群 (cap 前全量)。 */
   evidence_paths: string[];
   authority_echoes: AuthorityEcho[];
@@ -97,6 +109,8 @@ export interface DeltaCheckResult {
     inputs: number;
     connected: number;
     connected_overflow: number;
+    structures: number;
+    structures_overflow: number;
     authority_echoes: number;
     marker_findings: number;
     placement_findings: number;
@@ -234,6 +248,26 @@ export function deltaCheck(
   const graph = importVault(options.vaultDir);
   const paths = [...new Set(options.paths.map((p) => toPosix(p).replace(/^\.\//, "")))];
   const pathSet = new Set(paths);
+  const structureScope = structureForPaths(buildCrosscutIndex(graph), paths);
+  const typeCounts = new Map<string, number>();
+  const structureSummary = structureScope.structures.filter((s) => {
+    const n = (typeCounts.get(s.type) ?? 0) + 1;
+    typeCounts.set(s.type, n);
+    return options.full || n <= STRUCTURES_PER_TYPE_CAP;
+  }).map((s) => options.full ? s : {
+    ...s, paths: s.paths.slice(0, VIA_CAP),
+    ...(s.paths.length > VIA_CAP ? { paths_overflow: s.paths.length - VIA_CAP } : {})
+  });
+  const pathCap = options.full ? Number.POSITIVE_INFINITY : VIA_CAP;
+  const structureCoverage = {
+    registered_files: paths.length - structureScope.unregistered_paths.length,
+    unregistered_count: structureScope.unregistered_paths.length,
+    unregistered_paths: structureScope.unregistered_paths.slice(0, pathCap),
+    unregistered_overflow: Math.max(0, structureScope.unregistered_paths.length - pathCap),
+    unframed_count: structureScope.unframed_paths.length,
+    unframed_paths: structureScope.unframed_paths.slice(0, pathCap),
+    unframed_overflow: Math.max(0, structureScope.unframed_paths.length - pathCap)
+  };
 
   const nodesById = new Map<string, any>();
   for (const n of graph.nodes ?? []) {
@@ -397,10 +431,11 @@ export function deltaCheck(
   const placementFindings = frame.findings;
 
   const warn = markerFindings.length + placementFindings.length;
-  const hasInfo = connected.length > 0 || authorityEchoes.length > 0;
+  const hasInfo = connected.length > 0 || authorityEchoes.length > 0 || structureSummary.length > 0;
   const status: DeltaCheckResult["status"] = warn > 0 ? "warn" : hasInfo ? "info" : "clean";
   const infoParts = [
     ...(connected.length > 0 ? [`${connected.length} knowledge node(s) wired to this diff`] : []),
+    ...(structureSummary.length > 0 ? [`${structureScope.structures.length} registered structure(s) cover this diff`] : []),
     ...(authorityEchoes.length > 0 ? [`${authorityEchoes.length} authority echo(es) — registered vocabulary added outside its home`] : [])
   ];
   const summary =
@@ -419,6 +454,8 @@ export function deltaCheck(
     status,
     summary,
     connected_knowledge: connected,
+    structure_summary: structureSummary,
+    structure_coverage: structureCoverage,
     evidence_paths: evidencePaths,
     authority_echoes: authorityEchoes,
     marker_findings: markerFindings,
@@ -427,6 +464,8 @@ export function deltaCheck(
       inputs: paths.length,
       connected: connected.length,
       connected_overflow: connectedOverflow,
+      structures: structureSummary.length,
+      structures_overflow: structureScope.structures.length - structureSummary.length,
       authority_echoes: authorityEchoes.length,
       marker_findings: markerFindings.length,
       placement_findings: placementFindings.length
@@ -438,7 +477,10 @@ export function deltaCheck(
       "a legitimate import and a re-implementation both trigger it; the added line is attached so you can tell " +
       "which one you just wrote. 'clean' means no registered knowledge is WIRED to this diff, not that the " +
       "diff is safe: knowledge without edges cannot appear here. Wiring the checks themselves is " +
-      "constraint-check's territory; the per-file placement map is frame-check's."
+      "constraint-check's territory; the per-file placement map is frame-check's. " +
+      "structure_summary carries registered intent, not a diagnosis. A file may count in multiple " +
+      "structures; counts are not additive. Unregistered or unframed paths are information gaps, " +
+      "not violations. A mismatch may mean the record is stale. --full returns all scoped structures and paths."
   };
 }
 

@@ -110,6 +110,66 @@ export const seenListIncludes = (vaultDir, sessionId, list, relPath) => {
   return false;
 };
 
+// ── commit 境界 hook の novelty damping (見せた見出しのセッション内記録) ─────────────
+// 置き場所は **consumer 側** (repo root の .graphrag/cache) — vault 側の cache ではない。
+// 外部 vault を複数 worktree が読む構成で、vault 側に置くと (a) worktree 同士が同じ
+// seen を共有して互いの表示を畳み、(b) readonly 宣言の vault 側へ書く新経路になる
+// (concern:vault-isolation)。記録は {k:"commit", v, id, s}: v = vault identity (解決済み
+// 絶対パスのハッシュ) で名前空間を分け、vault を切り替えても既読を継承しない。
+// s = 「表示した内容」のハッシュ (id 以外の表示要素: title/headline/state/via、構造なら
+// type/title/件数/provisional) — 表示が 1 字でも変われば別物として再表示する
+// (goal:hook-novelty-damping の「前回結果のハッシュ比較」)。
+// 読み側は他 kind (node/struct/file) と同じファイルを共有するが互いに干渉しない
+// (CLI 側 loadRailSeen は未知 kind を無視する)。読めない/壊れている = 未表示扱い (fail-open)。
+
+/** 文字列 → 32bit FNV-1a (8 桁 hex)。表示内容の同一性判定用で、原文は保持しない。 */
+export const hash32 = (str) => {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+};
+
+/** consumer 側の cache dir (repo root/.graphrag/cache)。vault の所在とは独立。 */
+export const consumerCacheDir = (root) => path.join(root, ".graphrag", "cache");
+
+/** vault identity: 解決済み絶対パスのハッシュ (記録の名前空間)。 */
+export const vaultKey = (vaultDir) => hash32(path.resolve(vaultDir));
+
+export const loadCommitShown = (cacheDir, sessionId, vkey) => {
+  const shown = new Map();
+  try {
+    const fp = path.join(cacheDir, `rail-seen-${sessionId}.jsonl`);
+    if (!existsSync(fp)) return shown;
+    for (const line of readFileSync(fp, "utf8").split("\n")) {
+      if (!line.includes('"commit"')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (e?.k === "commit" && e.v === vkey && typeof e.id === "string") shown.set(e.id, typeof e.s === "string" ? e.s : "");
+      } catch {
+        /* 壊れた行は捨てる */
+      }
+    }
+  } catch {
+    /* 読めない = 未表示扱い */
+  }
+  return shown;
+};
+
+export const appendCommitShown = (cacheDir, sessionId, vkey, items) => {
+  if (!Array.isArray(items) || items.length === 0) return true;
+  try {
+    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
+    const lines = items.map((it) => JSON.stringify({ k: "commit", v: vkey, id: it.id, s: it.s ?? "" }));
+    appendFileSync(path.join(cacheDir, `rail-seen-${sessionId}.jsonl`), lines.join("\n") + "\n");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const LOG_ROTATE_BYTES = 2 * 1024 * 1024;
 
 // rail-log.jsonl への直接追記 (spawn なし)。CLI 側 appendJsonlLog と同じ流儀:

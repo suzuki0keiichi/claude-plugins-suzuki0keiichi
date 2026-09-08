@@ -16,12 +16,18 @@ test("query brief errors when the vector index is absent (semantic required)", a
     mkdirSync(path.dirname(abs), { recursive: true });
     writeFileSync(abs, f.content);
   }
+  // 索引欠如を検証するテストなので auto-build が成立してはならない。embedder を到達不能に固定
+  // (未設定だと auto-detect が開発機の Ollama (localhost:11434) を拾って索引を建て、期待エラーが消える)。
+  const prevEndpoint = process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
+  process.env.GRAPHRAG_EMBEDDING_ENDPOINT = "http://127.0.0.1:9/v1";
   try {
     await assert.rejects(
       () => buildGraphBrief({ mode: "query", query: "X", graph: vaultDir }),
       /vector index not found/
     );
   } finally {
+    if (prevEndpoint === undefined) delete process.env.GRAPHRAG_EMBEDDING_ENDPOINT;
+    else process.env.GRAPHRAG_EMBEDDING_ENDPOINT = prevEndpoint;
     rmSync(root, { recursive: true, force: true });
   }
 });
