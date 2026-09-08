@@ -1,0 +1,16 @@
+{
+  "name": "lightaskd",
+  "description": "AI エージェントから明示的に呼び出したときだけ使う、ローカル SQLite のタスク台帳 (CLI + 明示呼び出し専用スキル)。常駐デーモン・通知・自動実行なし。GraphRAG へは一方向の参照文字列だけを保持し、検索・更新・起動要求はしない。",
+  "version": "0.1.0",
+  "author": {
+    "name": "suzuki0keiichi"
+  },
+  "repository": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi",
+  "keywords": [
+    "task-ledger",
+    "local-first",
+    "sqlite",
+    "explicit-invocation",
+    "ai-agent"
+  ]
+}

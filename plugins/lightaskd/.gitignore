@@ -1,0 +1,19 @@
+node_modules/
+/dist/
+
+# Local task stores and SQLite sidecars
+/private-tasks/
+/private-tasks-snapshot/
+/.taskbox/
+taskbox.json
+*.db
+*.db-wal
+*.db-shm
+
+# Local credentials and editor/patch artifacts
+.env
+.env.*
+!.env.example
+*.orig
+*.rej
+.DS_Store

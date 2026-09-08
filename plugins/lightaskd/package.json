@@ -1,0 +1,36 @@
+{
+  "name": "explicit-taskbox",
+  "version": "0.0.0-prototype.2",
+  "description": "Explicit-invocation-only local task ledger for AI agents",
+  "type": "module",
+  "bin": {
+    "lightaskd": "bin/lightaskd.mjs",
+    "taskbox": "bin/taskbox.mjs"
+  },
+  "files": [
+    "bin/",
+    "skills/",
+    "src/",
+    "scripts/require-pnpm.mjs",
+    "README.md",
+    "DESIGN.md"
+  ],
+  "scripts": {
+    "preinstall": "node scripts/require-pnpm.mjs",
+    "check": "node --check bin/lightaskd.mjs && node --check bin/taskbox.mjs && node --check src/cli.mjs && node --check src/store.mjs",
+    "test": "node --test",
+    "prepack": "pnpm check && pnpm test"
+  },
+  "packageManager": "pnpm@10.18.2",
+  "engines": {
+    "node": ">=22.13.0",
+    "pnpm": ">=10.0.0"
+  },
+  "keywords": [
+    "local-first",
+    "task-ledger",
+    "sqlite",
+    "ai-agent"
+  ],
+  "license": "UNLICENSED"
+}

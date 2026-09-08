@@ -18,6 +18,11 @@
       "name": "chat-relay",
       "description": "複数の Claude Code / Codex セッション間で人間を経由せず直接メッセージを交換するローカルチャット (long polling サーバー + cchat CLI)。",
       "source": "./plugins/chat-relay"
+    },
+    {
+      "name": "lightaskd",
+      "description": "AI エージェントから明示的に呼び出したときだけ使う、ローカル SQLite のタスク台帳 (CLI + 明示呼び出し専用スキル)。常駐デーモン・通知・自動実行なし。",
+      "source": "./plugins/lightaskd"
     }
   ]
 }

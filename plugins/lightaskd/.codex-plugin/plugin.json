@@ -1,0 +1,37 @@
+{
+  "name": "lightaskd",
+  "version": "0.1.0",
+  "description": "Explicit-invocation-only local SQLite task ledger for AI agents.",
+  "author": {
+    "name": "suzuki0keiichi",
+    "url": "https://github.com/suzuki0keiichi"
+  },
+  "homepage": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi/tree/main/plugins/lightaskd",
+  "repository": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi",
+  "license": "Apache-2.0",
+  "keywords": [
+    "task-ledger",
+    "local-first",
+    "sqlite",
+    "explicit-invocation",
+    "ai-agent"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "lightaskd",
+    "shortDescription": "Explicit-only local task ledger",
+    "longDescription": "Register, find, and update personal tasks in a local SQLite ledger, only when the user explicitly invokes the skill. No daemon, no notifications, no automatic execution.",
+    "developerName": "suzuki0keiichi",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/suzuki0keiichi/claude-plugins-suzuki0keiichi/tree/main/plugins/lightaskd",
+    "defaultPrompt": [
+      "$lightaskd register this Slack thread as a task in ./private-tasks with a Friday deadline.",
+      "$lightaskd find open tasks about authentication in ./private-tasks.",
+      "$lightaskd mark task TASK_ID done in ./private-tasks."
+    ]
+  }
+}
