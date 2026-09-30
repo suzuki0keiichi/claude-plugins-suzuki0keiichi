@@ -11,6 +11,7 @@
  * - inspect: env / artifacts status check
  */
 import { nodeAliases, canonicalType } from "./schema.ts";
+import { stripTypeWords, typeWordsIn } from "./type-words.ts";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -550,6 +551,53 @@ function parseAskTypes(raw: unknown, vaultDir: string): string[] {
   });
 }
 
+/**
+ * question が型名を含む時だけ、型名を除いた版の brief と top1 を比べる (issue #36)。
+ * 型名が無い / 一致 → null (出力も挙動も従来通り)。不一致 → diverged、比較不能 → unavailable。
+ */
+export async function detectTypeWordDivergence(args: {
+  question: string;
+  typeNames: readonly string[];
+  explicitTypes: string[];
+  originalTopId: string | undefined;
+  runBrief: (strippedQuery: string) => Promise<any>;
+}): Promise<any | null> {
+  const stripped = stripTypeWords(args.question, args.typeNames);
+  if (stripped === null) return null;
+  const typeWords = typeWordsIn(args.question, args.typeNames);
+  // 明示 types がある時はそれを保つ (上書きを勧めない)。無ければ question に現れた型名を正規名で。
+  const suggestedTypes = args.explicitTypes.length > 0 ? args.explicitTypes : typeWords;
+  const rerun = `ask ${JSON.stringify(stripped)} --types ${suggestedTypes.join(",")}`;
+  let aux: any;
+  try {
+    aux = await args.runBrief(stripped);
+  } catch (error) {
+    return {
+      status: "unavailable",
+      reason: error instanceof Error ? error.message : String(error),
+      type_words: typeWords,
+      next_action:
+        `The question contains node-type names (${typeWords.join(", ")}) that can distort ranking, and the check against ` +
+        `the type-word-free question could not run, so confidence is capped below high. If the type names express a filter, ` +
+        `re-run: ${rerun}. If the question is about the types themselves, read the matches above.`
+    };
+  }
+  const auxMatches: any[] = aux?.query?.matches ?? [];
+  const auxTopId = auxMatches[0]?.node?.id;
+  if (typeof args.originalTopId === "string" && args.originalTopId === auxTopId) return null;
+  return {
+    status: "diverged",
+    type_words: typeWords,
+    stripped_query: stripped,
+    stripped_top: auxMatches.slice(0, 3).map((m) => ({ id: m.node.id, type: m.node.type, title: m.node.title })),
+    next_action:
+      `The top match changes when the node-type names (${typeWords.join(", ")}) are removed from the question, so this ` +
+      `result is unstable and confidence is capped below high. Choose by what the question means: if the type names are a ` +
+      `filter ("the Decision about X"), re-run: ${rerun} (candidates it surfaces are in type_word_divergence.stripped_top). ` +
+      `If the question is about the types themselves ("Risk vs Decision"), read the matches above. Neither is chosen automatically.`
+  };
+}
+
 export async function runAsk(argv: string[]) {
   const f = parseFlagsArgv(argv);
   // --lexical-only は値を取らない boolean フラグだが、parseFlagsArgv は「次の非フラグ
@@ -678,6 +726,47 @@ export async function runAsk(argv: string[]) {
     // ask-trail 記録は非致命。失敗しても brief 出力はそのまま返す。
   }
 
+  // issue #36: question に混ざった型名は lexical と embedding の両方を汚染し、無関係な node を high で
+  // 1 位に押し上げる (evidence へ段上げしても同じ query で掘るので回復しない)。型名を除いた版を
+  // 同条件 (types / gist / lexical-only) で 1 回だけ引き、top1 が食い違えば high を low に上限し、
+  // 両方の候補と 2 択の next_action を読み手に渡す。どちらが正しいかは推測しない。
+  const typeWordDivergence = await detectTypeWordDivergence({
+    question,
+    typeNames: resolveSchema(vaultDir).nodeTypes,
+    explicitTypes: types,
+    originalTopId: briefOut?.query?.matches?.[0]?.node?.id,
+    runBrief: async (strippedQuery: string) => {
+      let queryVector: number[] | undefined;
+      let queryVectors: number[][] | undefined;
+      if (!lexicalOnly) {
+        if (!sharedVectorIndex) throw new Error("vector index unavailable for the type-word comparison");
+        const qv = (await prepareVectorSearch(strippedQuery, { vectorIndex: sharedVectorIndex })).queryVector;
+        if (!qv) throw new Error("could not embed the type-word-stripped question");
+        // --gist は両方で同じ gist vector を保持し、question の embedding だけを差し替える
+        if (sharedQueryVectors && sharedQueryVectors.length > 1) queryVectors = [qv, ...sharedQueryVectors.slice(1)];
+        else queryVector = qv;
+      }
+      return buildGraphBrief({
+        mode: "query",
+        query: strippedQuery,
+        graph: vaultDir,
+        graphData,
+        limit,
+        lexicalIndex: sharedLexicalIndex,
+        vectorIndex: sharedVectorIndex ?? undefined,
+        queryVector,
+        queryVectors,
+        graphRerank,
+        types,
+        ...(lexicalOnly ? { useVector: false } : {})
+      });
+    }
+  });
+  // 元が high で、不一致 (または比較不能) だけを理由に low へ落ちた時は evidence へ段上げしない
+  // (同じ汚染 query で掘るだけ)。元から low/none/空なら既存の段上げを維持する。
+  const cappedByDivergence = typeWordDivergence !== null && briefOut?.query?.match_confidence === "high";
+  if (cappedByDivergence) briefOut.query.match_confidence = "low";
+
   const briefOutcome = {
     match_confidence: briefOut?.query?.match_confidence,
     result_count: (briefOut?.query?.matches ?? []).length
@@ -687,7 +776,7 @@ export async function runAsk(argv: string[]) {
   // (brief 既定の 3 より広く掘る)。
   const evidenceLimit = typeof f.limit === "string" ? Number(f.limit) : 8;
   let evidenceOut: any = null;
-  if (shouldEscalate(briefOutcome)) {
+  if (!cappedByDivergence && shouldEscalate(briefOutcome)) {
     // Stage 2: evidence (内部で search も走る = retrieval ladder の "search" は
     // evidence に包含される)。evidence packet は direct_evidence (=ranked search
     // matches) と graph_context (=neighbors expansion) の両方を返す。
@@ -708,6 +797,8 @@ export async function runAsk(argv: string[]) {
       queryVectors: sharedQueryVectors ?? (sharedQueryVector ? [sharedQueryVector] : undefined),
       ...(lexicalOnly ? { useVector: false } : {})
     });
+    // 不一致を観測した query の最終結果は、段上げ後も high へ戻さない
+    if (typeWordDivergence !== null && evidenceOut?.match_confidence === "high") evidenceOut.match_confidence = "low";
     stages.push({ stage: "evidence", output: evidenceOut });
   }
 
@@ -857,7 +948,10 @@ export async function runAsk(argv: string[]) {
       : {}),
     area_map: areaMap,
     ...(enforcementDebtOut !== undefined ? { enforcement_debt: enforcementDebtOut } : {}),
-    next_action_hint: shouldEscalate(lastOutcome)
+    ...(typeWordDivergence !== null ? { type_word_divergence: typeWordDivergence } : {}),
+    next_action_hint: typeWordDivergence !== null
+      ? typeWordDivergence.next_action
+      : shouldEscalate(lastOutcome)
       ? "Try one different keyword → if still empty, switch to reading code/docs directly (the launcher increments --call-number structurally — do not over-trust the excessive signal)"
       : `${finalStage} result is sufficient — proceed to judgment from here`,
     ...(askSchema?.llmReference ? { schema_summary: { id: askSchema.id, reference: askSchema.llmReference } } : {}),

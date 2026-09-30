@@ -103,6 +103,18 @@ export function formatAskMarkdown(payload: any): string {
     out.push(`## enforcement_debt\n${payload.enforcement_debt.hint ?? JSON.stringify(payload.enforcement_debt)}`);
   }
 
+  const div = payload.type_word_divergence;
+  if (div) {
+    const top = (div.stripped_top ?? []).map((m: any) => `- [${m.type}] ${m.title} \`${m.id}\``).join("\n");
+    out.push(
+      `## type_word_divergence (${div.status})\n` +
+        `type words: ${(div.type_words ?? []).join(", ")}` +
+        (div.stripped_query ? `\nwithout them: "${div.stripped_query}"` : "") +
+        (div.reason ? `\nreason: ${div.reason}` : "") +
+        (top ? `\n${top}` : "")
+    );
+  }
+
   if (payload.next_action_hint) {
     out.push(`## next_action\n${payload.next_action_hint}`);
   }

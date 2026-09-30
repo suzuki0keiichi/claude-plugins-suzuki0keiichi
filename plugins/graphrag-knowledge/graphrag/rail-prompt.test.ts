@@ -126,7 +126,8 @@ test("railPrompt: フィルタ対象は brief を呼ぶ前に沈黙する", asyn
 // ── issue #36: 型名入り prompt の gate (元 query と型名除去 query の top1 一致時のみ注入) ──
 // graphrag:enforces constraint:graphrag-skill-dev:rail-type-word-disagree-silent — 元 query と型名除去 query の top1 が食い違えば注入しない
 
-import { stripTypeWords, typeWordGateAgrees } from "./rail-prompt.ts";
+import { typeWordGateAgrees } from "./rail-prompt.ts";
+import { stripTypeWords, typeWordsIn } from "./type-words.ts";
 import { searchGraph } from "./retrieval.ts";
 import { DEFAULT_SCHEMA } from "./schema.ts";
 import { mkdirSync } from "node:fs";
@@ -139,6 +140,7 @@ test("stripTypeWords: 型名を単語境界 (和文直結も含む) で除き、
   assert.equal(stripTypeWords("decisions の一覧", TYPES), null); // 部分一致はしない
   assert.equal(stripTypeWords("checkpoint の復元", TYPES), null);
   assert.equal(stripTypeWords("Decision", TYPES), null); // 型名だけなら比較不能
+  assert.deepEqual(typeWordsIn("embedding 障害の decision と RejectedOption と Decision", TYPES), ["Decision", "RejectedOption"]);
 });
 
 test("typeWordGateAgrees: top1 完全一致のみ一致。補助側の欠落は不一致", () => {

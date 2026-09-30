@@ -22,6 +22,7 @@
 import { pathToFileURL } from "node:url";
 import { buildGraphBrief } from "./brief.ts";
 import { resolveSchema } from "./schema-registry.ts";
+import { stripTypeWords } from "./type-words.ts";
 import {
   appendRailLog, appendRailSeen, composeRailContext, loadRailSeen, resolveRailCacheDir,
   sanitizeSessionId, RAIL_MAX_ITEMS, type RailItem
@@ -68,19 +69,6 @@ export function pickInjectable(
     if (items.length >= RAIL_MAX_ITEMS) break;
   }
   return items;
-}
-
-/**
- * prompt から schema の型名 (単語境界・大小文字無視) を除いた補助 query。型名を含まなければ null。
- * 除いた結果が空なら null (型名だけの prompt は比較のしようがない)。
- */
-export function stripTypeWords(query: string, typeNames: readonly string[]): string | null {
-  if (typeNames.length === 0) return null;
-  // 境界は ASCII 英数字のみで判定する (「Decisionを」のように和文へ直結する書き方を拾う)。
-  const re = new RegExp(`(?<![A-Za-z0-9])(?:${typeNames.join("|")})(?![A-Za-z0-9])`, "gi");
-  if (!new RegExp(re.source, "i").test(query)) return null;
-  const stripped = query.replace(re, " ").replace(/\s+/g, " ").trim();
-  return stripped.length > 0 ? stripped : null;
 }
 
 /**

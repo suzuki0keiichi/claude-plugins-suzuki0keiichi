@@ -41,6 +41,15 @@ The same relative judgment as world_hints, applied to the local vault's matches 
 - `state`: `clear` = top1 stands out from the other candidates (relative gap ≥ 0.30; if not high, it has been promoted one level) / `none` = level pegging / `single` = one or fewer candidates, no relative judgment
 - `gap_above_next`: (top1 − top2) / top1, the relative gap (the basis)
 
+## `type_word_divergence` (only when the question contains node-type names)
+
+When the question contains node-type names (`Decision`, `Constraint`, ...), `ask` also runs the question with those words removed (same `--types` / `--gist` / `--lexical-only`) and compares the top match. Type names are scored as ordinary words in both lexical and semantic matching, so they can push up nodes that merely mention the type.
+
+- Absent = no type names, or both versions agree on the top match (output unchanged).
+- `status: "diverged"` — the top match changed. Confidence is capped below `high`, and a `high` brief is not escalated to evidence (evidence would dig with the same distorted question). `stripped_top` lists the type-word-free candidates. Decide by meaning: if the type names are a filter ("the Decision about X"), follow `next_action_hint` and re-run `ask "<stripped_query>" --types <types>`; if the question is about the types themselves ("Risk vs Decision"), read the original matches. Neither is chosen automatically.
+- `status: "unavailable"` + `reason` — the comparison could not run; confidence is capped the same way.
+- Agreement is not proof of correctness: both versions can agree on the same wrong node.
+
 ## `stages[*].output.query.repeat.repeat_state`
 
 - `excessive` (call_number ≥ 3) → **stop graph search and move to reading code / docs directly**. `--call-number` is auto-incremented by the launcher, so no LLM self-reporting is needed.
