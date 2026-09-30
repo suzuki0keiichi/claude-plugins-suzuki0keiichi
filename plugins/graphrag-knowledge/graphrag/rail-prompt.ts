@@ -21,6 +21,7 @@
 
 import { pathToFileURL } from "node:url";
 import { buildGraphBrief } from "./brief.ts";
+import { resolveSchema } from "./schema-registry.ts";
 import {
   appendRailLog, appendRailSeen, composeRailContext, loadRailSeen, resolveRailCacheDir,
   sanitizeSessionId, RAIL_MAX_ITEMS, type RailItem
@@ -69,6 +70,39 @@ export function pickInjectable(
   return items;
 }
 
+/**
+ * prompt から schema の型名 (単語境界・大小文字無視) を除いた補助 query。型名を含まなければ null。
+ * 除いた結果が空なら null (型名だけの prompt は比較のしようがない)。
+ */
+export function stripTypeWords(query: string, typeNames: readonly string[]): string | null {
+  if (typeNames.length === 0) return null;
+  // 境界は ASCII 英数字のみで判定する (「Decisionを」のように和文へ直結する書き方を拾う)。
+  const re = new RegExp(`(?<![A-Za-z0-9])(?:${typeNames.join("|")})(?![A-Za-z0-9])`, "gi");
+  if (!new RegExp(re.source, "i").test(query)) return null;
+  const stripped = query.replace(re, " ").replace(/\s+/g, " ").trim();
+  return stripped.length > 0 ? stripped : null;
+}
+
+/**
+ * issue #36: 型名入りの自然文は型名が通常語として採点・埋め込みされ、無関係な node が high で
+ * 1 位になる。型名を除いた補助 query の top1 と一致した時だけ元の結果を注入し、食い違えば黙る。
+ * これは query 摂動への不安定性を検知して誤注入を抑止するだけで、正解を補助 query 側に置き換えない
+ * (型名そのものを問う prompt では補助 query 側が壊れるため)。補助検索の失敗・空結果は不一致扱い。
+ */
+export function typeWordGateAgrees(originalTopId: string | undefined, auxTopId: string | undefined): boolean {
+  return typeof originalTopId === "string" && originalTopId === auxTopId;
+}
+
+function activeTypeNames(): readonly string[] {
+  const vaultDir = process.env.GRAPHRAG_VAULT_DIR;
+  if (!vaultDir) return [];
+  try {
+    return resolveSchema(vaultDir).nodeTypes;
+  } catch {
+    return [];
+  }
+}
+
 const HEADER =
   "Registered project knowledge related to this request (auto-surfaced; read before choosing an approach — deepen only if relevant via `ask`):";
 
@@ -88,19 +122,24 @@ interface RailPromptResult {
   confidence?: string;
 }
 
-export async function railPrompt(prompt: string, sessionId: string | null): Promise<RailPromptResult> {
+export interface RailPromptDeps {
+  /** テスト用: brief の差し替え (既定 buildGraphBrief)。 */
+  brief?: (options: any) => Promise<any>;
+  /** テスト用: 型名の差し替え (既定 active schema の nodeTypes)。 */
+  typeNames?: readonly string[];
+}
+
+export async function railPrompt(prompt: string, sessionId: string | null, deps: RailPromptDeps = {}): Promise<RailPromptResult> {
+  const brief_ = deps.brief ?? buildGraphBrief;
   const filtered = filterPromptText(prompt);
   if (filtered) return { status: "silent", reason: filtered };
 
   const cacheDir = resolveRailCacheDir();
 
+  const query = prompt.trim().replace(/\s+/g, " ").slice(0, QUERY_CLIP_CHARS);
   let brief: any;
   try {
-    brief = await buildGraphBrief({
-      mode: "query",
-      query: prompt.trim().replace(/\s+/g, " ").slice(0, QUERY_CLIP_CHARS),
-      limit: SEARCH_LIMIT
-    });
+    brief = await brief_({ mode: "query", query, limit: SEARCH_LIMIT });
   } catch (e: any) {
     if (cacheDir) appendRailLog(cacheDir, { rail: "prompt", fired: false, reason: `brief-error: ${String(e?.message ?? e).slice(0, 120)}` });
     return { status: "silent", reason: "brief-error" };
@@ -117,6 +156,21 @@ export async function railPrompt(prompt: string, sessionId: string | null): Prom
   if (confidence !== "high") {
     if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: false, reason: "low-confidence" });
     return { status: "silent", reason: "low-confidence", confidence };
+  }
+
+  const auxQuery = stripTypeWords(query, deps.typeNames ?? activeTypeNames());
+  if (auxQuery !== null) {
+    let auxTop: string | undefined;
+    try {
+      const aux = await brief_({ mode: "query", query: auxQuery, limit: SEARCH_LIMIT });
+      auxTop = aux?.query?.matches?.[0]?.node?.id;
+    } catch {
+      auxTop = undefined;
+    }
+    if (!typeWordGateAgrees(brief?.query?.matches?.[0]?.node?.id, auxTop)) {
+      if (cacheDir) appendRailLog(cacheDir, { ...logBase, fired: false, reason: "type-word-disagree" });
+      return { status: "silent", reason: "type-word-disagree", confidence };
+    }
   }
 
   const seen = cacheDir && sessionId ? loadRailSeen(cacheDir, sessionId) : null;

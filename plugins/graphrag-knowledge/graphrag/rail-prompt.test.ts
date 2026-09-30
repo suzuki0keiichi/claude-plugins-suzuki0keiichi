@@ -122,3 +122,122 @@ test("railPrompt: フィルタ対象は brief を呼ぶ前に沈黙する", asyn
   const r = await railPrompt("/graphrag-knowledge:graphrag-checkpoint を実行して", null);
   assert.deepEqual(r, { status: "silent", reason: "slash-command" });
 });
+
+// ── issue #36: 型名入り prompt の gate (元 query と型名除去 query の top1 一致時のみ注入) ──
+
+import { stripTypeWords, typeWordGateAgrees } from "./rail-prompt.ts";
+import { searchGraph } from "./retrieval.ts";
+import { DEFAULT_SCHEMA } from "./schema.ts";
+import { mkdirSync } from "node:fs";
+
+const TYPES = DEFAULT_SCHEMA.nodeTypes;
+
+test("stripTypeWords: 型名を単語境界 (和文直結も含む) で除き、型名が無ければ null", () => {
+  assert.equal(stripTypeWords("vault フラグの Decision を見直したい", TYPES), "vault フラグの を見直したい");
+  assert.equal(stripTypeWords("Decisionを見直す", TYPES), "を見直す");
+  assert.equal(stripTypeWords("decisions の一覧", TYPES), null); // 部分一致はしない
+  assert.equal(stripTypeWords("checkpoint の復元", TYPES), null);
+  assert.equal(stripTypeWords("Decision", TYPES), null); // 型名だけなら比較不能
+});
+
+test("typeWordGateAgrees: top1 完全一致のみ一致。補助側の欠落は不一致", () => {
+  assert.equal(typeWordGateAgrees("a", "a"), true);
+  assert.equal(typeWordGateAgrees("a", "b"), false);
+  assert.equal(typeWordGateAgrees("a", undefined), false);
+  assert.equal(typeWordGateAgrees(undefined, undefined), false);
+});
+
+/** searchGraph を brief 相当に包む fake (全 query 同一 vector、node ごとの vector で semantic を与える)。 */
+function fakeBrief(nodes: any[], vectors: Record<string, number[]>, calls: string[]) {
+  const graph = { nodes, edges: [] };
+  const vectorIndex = { rows: nodes.map((n) => ({ node_id: n.id, vector: vectors[n.id] ?? [1, 0] })) };
+  return async (opts: any) => {
+    calls.push(opts.query);
+    const matches = searchGraph(graph, opts.query, { vectorIndex, queryVector: [1, 0], lexicalIndex: null, limit: 5 });
+    return { query: { match_confidence: "high", matches } };
+  };
+}
+
+test("gate: issue 再現 (EN/JA) — 元 query の誤 top1 は補助 query と食い違うので注入しない", async () => {
+  const nodes = [
+    { id: "decision:s:target", type: "Decision", title: "Embedding outage handling", summary: "ask output JSON processing issue 24 ask-format lexical-only 埋め込み障害の扱い" },
+    { id: "operationalknowledge:s:distractor", type: "OperationalKnowledge", title: "Classification rules", summary: "Decision OperationalKnowledge Constraint classification rules" }
+  ];
+  for (const q of ["ask-format lexical-only OperationalKnowledge Decision の確認をしたい", "埋め込み障害の扱い ask-format lexical-only OperationalKnowledge Decision"]) {
+    const r = await railPrompt(q, null, { brief: fakeBrief(nodes, {}, []), typeNames: TYPES });
+    assert.deepEqual([r.status, r.reason], ["silent", "type-word-disagree"], q);
+  }
+});
+
+test("gate: 型を問う prompt で補助 query が別分野に当たっても誤注入しない (Risk と Decision の使い分け + REST)", async () => {
+  const nodes = [
+    { id: "decision:s:distinction", type: "Decision", title: "Risk vs Decision distinction", summary: "when to record a Risk versus a Decision" },
+    { id: "decision:s:api", type: "Decision", title: "REST と GraphQL の使い分け", summary: "API design guidelines" }
+  ];
+  const vectors = { "decision:s:distinction": [0.9, Math.sqrt(0.19)], "decision:s:api": [0.8, 0.6] };
+  const r = await railPrompt("Risk と Decision の使い分けを整理したい", null, { brief: fakeBrief(nodes, vectors, []), typeNames: TYPES });
+  assert.equal(r.status, "silent");
+  assert.equal(r.reason, "type-word-disagree");
+});
+
+test("gate: Risk assessment / Cost assessment — 補助 query が区別できなければ黙る (誤注入より沈黙)", async () => {
+  const nodes = [
+    { id: "decision:s:cost", type: "Decision", title: "Cost assessment", summary: "assessment process" },
+    { id: "decision:s:risk", type: "Decision", title: "Risk assessment", summary: "assessment process" }
+  ];
+  const r = await railPrompt("Risk assessment のやり方を確認したい", null, { brief: fakeBrief(nodes, {}, []), typeNames: TYPES });
+  assert.notEqual(r.ids?.[0], "decision:s:cost");
+});
+
+test("gate: 両 query の top1 が一致すれば従来通り注入する (正解維持の対照)", async () => {
+  const nodes = [
+    { id: "decision:s:enforce", type: "Decision", title: "enforcement contract for constraints", summary: "enforced_by wiring is required" },
+    { id: "decision:s:other", type: "Decision", title: "unrelated topic", summary: "something else" }
+  ];
+  const r = await railPrompt("Constraint の enforcement contract を変えたい", null, { brief: fakeBrief(nodes, {}, []), typeNames: TYPES });
+  assert.equal(r.status, "inject");
+  assert.equal(r.ids?.[0], "decision:s:enforce");
+});
+
+test("gate の限界: 両 query が同じ誤 top1 に一致すると抑止できない (既知の制約)", async () => {
+  const nodes = [
+    { id: "operationalknowledge:s:wrong", type: "OperationalKnowledge", title: "vault flag history notes", summary: "vault flag history" }
+  ];
+  const r = await railPrompt("vault flag の Decision を見直したい", null, { brief: fakeBrief(nodes, {}, []), typeNames: TYPES });
+  assert.equal(r.status, "inject");
+  assert.equal(r.ids?.[0], "operationalknowledge:s:wrong");
+});
+
+test("gate: 型名を含まない prompt は追加検索しない / 補助検索の失敗は不一致扱い", async () => {
+  const nodes = [{ id: "decision:s:a", type: "Decision", title: "checkpoint restore", summary: "checkpoint restore flow" }];
+  const calls: string[] = [];
+  const r = await railPrompt("checkpoint の restore を確認したい", null, { brief: fakeBrief(nodes, {}, calls), typeNames: TYPES });
+  assert.equal(r.status, "inject");
+  assert.equal(calls.length, 1);
+
+  let n = 0;
+  const flaky = async (opts: any) => {
+    n += 1;
+    if (n === 2) throw new Error("aux timeout");
+    return fakeBrief(nodes, {}, [])(opts);
+  };
+  const r2 = await railPrompt("checkpoint restore の Decision を確認したい", null, { brief: flaky, typeNames: TYPES });
+  assert.deepEqual([r2.status, r2.reason], ["silent", "type-word-disagree"]);
+});
+
+test("gate: 型名は active schema から取る (project preset の Stakeholder も補助 query で除く)", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "railschema-"));
+  mkdirSync(path.join(root, "vault"));
+  writeFileSync(path.join(root, "VAULT.md"), "---\nschema: project\n---\n");
+  const prev = process.env.GRAPHRAG_VAULT_DIR;
+  process.env.GRAPHRAG_VAULT_DIR = path.join(root, "vault");
+  try {
+    const nodes = [{ id: "stakeholder:s:a", type: "Stakeholder", title: "vendor contact", summary: "vendor contact owner" }];
+    const calls: string[] = [];
+    await railPrompt("vendor contact の Stakeholder を確認したい", null, { brief: fakeBrief(nodes, {}, calls) });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].includes("Stakeholder"), false);
+  } finally {
+    if (prev === undefined) delete process.env.GRAPHRAG_VAULT_DIR; else process.env.GRAPHRAG_VAULT_DIR = prev;
+  }
+});
