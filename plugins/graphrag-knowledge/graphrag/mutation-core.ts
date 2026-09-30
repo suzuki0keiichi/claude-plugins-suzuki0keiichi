@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
-import { validateGraph, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
+import { validateGraph, canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
 import { parseCrossVaultRef } from "./xref-resolver.ts";
 
 export async function loadMutationPlan(planPath) {
@@ -217,14 +217,15 @@ export interface AttributeWarning {
   message: string;
 }
 
-function knownNodeAttributes(schema?: SchemaDefinition): Set<string> {
+function knownNodeAttributes(schema: SchemaDefinition | undefined, nodeType: unknown): Set<string> {
   const known = new Set(MUTATION_NODE_ATTRIBUTES);
-  // preset 固有の必須フィールド (project の certainty 等) は schema 定義から導出する。
-  // preset を足した時にこの警告語彙を別途保守しなくて済むようにするため。
+  // 型固有の必須/任意フィールド (project の certainty / Source の url 等) は schema 定義から
+  // 対象 node の型についてだけ導出する — 別型の属性の迷い込みも typo と同様に気付けるように。
   const s = schema ?? DEFAULT_SCHEMA;
-  for (const fields of Object.values(s.requiredFields)) {
-    for (const rf of fields ?? []) known.add(rf.field);
-  }
+  const type = canonicalType(nodeType as string, s);
+  if (typeof type !== "string") return known;
+  for (const rf of s.requiredFields[type] ?? []) known.add(rf.field);
+  for (const f of s.optionalFields?.[type] ?? []) known.add(f);
   return known;
 }
 
@@ -296,7 +297,6 @@ export function unknownAttributeWarnings(args: {
   schema?: SchemaDefinition;
 }): AttributeWarning[] {
   const { currentGraph, plan, schema } = args;
-  const knownNode = knownNodeAttributes(schema);
   const nodesById = new Map<string, any>((currentGraph.nodes ?? []).map((n: any) => [n.id, n]));
   const edgesById = new Map<string, any>((currentGraph.edges ?? []).map((e: any) => [e.id, e]));
   const warnings: AttributeWarning[] = [];
@@ -329,7 +329,8 @@ export function unknownAttributeWarnings(args: {
   const knownEdge = new Set(MUTATION_EDGE_ATTRIBUTES);
   for (const node of plan.nodes ?? []) {
     if (mutationOp(node) === "delete") continue;
-    check("node", node, knownNode, nodesById.get(node.id));
+    const current = nodesById.get(node.id);
+    check("node", node, knownNodeAttributes(schema, current?.type ?? node.type), current);
   }
   for (const edge of plan.edges ?? []) {
     if (mutationOp(edge) === "delete") continue;

@@ -357,11 +357,10 @@ Typical initial setup for a project vault. Note: `Assumption` requires `certaint
     { "op": "create", "id": "task:<sys>:key-work", "type": "Task",
       "title": "...", "summary": "...", "state": "planned" },
     { "op": "create", "id": "resource:<sys>:shared-infra", "type": "Resource",
-      "title": "...", "summary": "...",
-      "description": "category: asset" },
+      "title": "...", "summary": "...", "category": "asset" },
     { "op": "create", "id": "source:<sys>:meeting-notes", "type": "Source",
       "title": "...", "summary": "...",
-      "description": "url: https://...\nfetched_at: 2026-06-18\nsource_kind: document" }
+      "source_kind": "document", "url": "https://...", "fetched_at": "2026-06-18" }
   ],
   "edges": [
     { "op": "create", "id": "edge:goal-targets-milestone",

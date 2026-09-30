@@ -188,6 +188,12 @@ const REQUIRED_FIELDS: Partial<Record<ProjectNodeType, readonly RequiredField[]>
   ],
 };
 
+// 型固有の任意属性。schema-quickref-project.md の Attributes 記述と typed-add が書く属性の正本。
+const OPTIONAL_FIELDS: Partial<Record<ProjectNodeType, readonly string[]>> = {
+  Source: ["source_kind", "url", "fetched_at", "refresh_method", "staleness_threshold"],
+  Resource: ["category"],
+};
+
 export const PROJECT_SCHEMA: SchemaDefinition = {
   id: "project",
   nodeTypes: PROJECT_NODE_TYPES as unknown as readonly string[],
@@ -195,6 +201,7 @@ export const PROJECT_SCHEMA: SchemaDefinition = {
   edgeTypeRules: EDGE_TYPE_RULES as Record<string, [string | readonly string[], string | readonly string[]][]>,
   stateVocabulary: STATE_VOCABULARY as Partial<Record<string, readonly string[]>>,
   requiredFields: REQUIRED_FIELDS as Partial<Record<string, readonly RequiredField[]>>,
+  optionalFields: OPTIONAL_FIELDS as Partial<Record<string, readonly string[]>>,
   aliases: {
     OK: "OperationalKnowledge",
   },

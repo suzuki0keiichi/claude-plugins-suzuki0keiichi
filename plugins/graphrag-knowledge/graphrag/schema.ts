@@ -7,6 +7,8 @@ export interface SchemaDefinition {
   edgeTypeRules: Record<string, TypeRule[]>;
   stateVocabulary: Partial<Record<string, readonly string[]>>;
   requiredFields: Partial<Record<string, readonly RequiredField[]>>;
+  // 型固有の任意属性 (書いてよいが必須ではない)。attribute_check の既知語彙に入る (issue #45)。
+  optionalFields?: Partial<Record<string, readonly string[]>>;
   aliases: Record<string, string>;
   categories: {
     knowledge: readonly string[];

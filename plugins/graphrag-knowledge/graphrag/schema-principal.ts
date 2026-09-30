@@ -54,6 +54,10 @@ for (const [type, vocab] of Object.entries(PROJECT_SCHEMA.stateVocabulary)) {
   if (!REMOVED_TYPES.has(type) && vocab) stateVocabulary[type] = vocab;
 }
 
+const optionalFields: Partial<Record<string, readonly string[]>> = {};
+for (const [type, fields] of Object.entries(PROJECT_SCHEMA.optionalFields ?? {})) {
+  if (!REMOVED_TYPES.has(type) && fields) optionalFields[type] = fields;
+}
 const requiredFields: Partial<Record<string, readonly RequiredField[]>> = {};
 for (const [type, fields] of Object.entries(PROJECT_SCHEMA.requiredFields)) {
   if (!REMOVED_TYPES.has(type) && fields) requiredFields[type] = fields;
@@ -66,6 +70,7 @@ export const PRINCIPAL_SCHEMA: SchemaDefinition = {
   edgeTypeRules: edgeTypeRules as Record<string, [string | readonly string[], string | readonly string[]][]>,
   stateVocabulary,
   requiredFields,
+  optionalFields,
   aliases: { ...PROJECT_SCHEMA.aliases },
   categories: {
     knowledge: pruneList(PROJECT_SCHEMA.categories.knowledge),
