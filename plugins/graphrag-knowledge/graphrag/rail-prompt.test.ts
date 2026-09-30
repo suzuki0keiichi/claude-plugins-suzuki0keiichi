@@ -124,6 +124,7 @@ test("railPrompt: フィルタ対象は brief を呼ぶ前に沈黙する", asyn
 });
 
 // ── issue #36: 型名入り prompt の gate (元 query と型名除去 query の top1 一致時のみ注入) ──
+// graphrag:enforces constraint:graphrag-skill-dev:rail-type-word-disagree-silent — 元 query と型名除去 query の top1 が食い違えば注入しない
 
 import { stripTypeWords, typeWordGateAgrees } from "./rail-prompt.ts";
 import { searchGraph } from "./retrieval.ts";
