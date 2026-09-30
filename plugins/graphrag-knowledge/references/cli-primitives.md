@@ -8,6 +8,8 @@ Consult this reference only when you need **per-stage fine-grained control** —
 
 Every verb reads `.env` once at cli.ts launcher startup, so `GRAPHRAG_*` env is seen identically from any primitive.
 
+`--vault <dir>` (or `--vault=<dir>`) is resolved once by the launcher for **every** verb (headline and primitive, including `commit-mutation` / `add-*` / `brief` / `inspect`) and takes precedence over `GRAPHRAG_VAULT_DIR`. A missing value or a repeated `--vault` exits 2. Other unknown flags are silently ignored, so check the `[graphrag] vault:` line on writes.
+
 ---
 
 ## brief — summary response (resume / query)

@@ -408,6 +408,52 @@ export function getVaultDirSource(): VaultDirSource | null {
   return vaultDirSource;
 }
 
+/**
+ * argv から `--vault <dir>` / `--vault=<dir>` を読む (argv は変更しない)。値欠落・値位置に
+ * 別 flag・重複指定は曖昧なので error を返す (呼び出し側が exit 2 にする)。相対 path は
+ * cwd 基準で絶対化する。
+ */
+export function parseVaultFlag(
+  argv: string[],
+  cwd: string = process.cwd()
+): { vaultDir?: string; error?: string } {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--vault") {
+      const next = argv[i + 1];
+      if (next === undefined || next === "" || next.startsWith("--")) {
+        return { error: "--vault requires a directory value" };
+      }
+      values.push(next);
+      i++;
+    } else if (arg.startsWith("--vault=")) {
+      const v = arg.slice("--vault=".length);
+      if (v === "") return { error: "--vault requires a directory value" };
+      values.push(v);
+    }
+  }
+  if (values.length > 1) return { error: "--vault must be given at most once" };
+  if (values.length === 0) return {};
+  return { vaultDir: path.resolve(cwd, values[0]) };
+}
+
+/**
+ * `--vault` を全 verb 共通で最優先 (shell env より上) に焼く。runCli が env 読み込み前に
+ * 呼び、戻り値の restore を finally で呼ぶ (同一 process で runCli を再度呼んでも漏れない)。
+ */
+export function bindCliVaultDir(vaultDir: string): () => void {
+  const prevEnv = process.env.GRAPHRAG_VAULT_DIR;
+  const prevSource = vaultDirSource;
+  process.env.GRAPHRAG_VAULT_DIR = vaultDir;
+  vaultDirSource = "cli-arg";
+  return () => {
+    if (prevEnv === undefined) delete process.env.GRAPHRAG_VAULT_DIR;
+    else process.env.GRAPHRAG_VAULT_DIR = prevEnv;
+    vaultDirSource = prevSource;
+  };
+}
+
 /** テスト用: 記録をリセットする (module state のため)。 */
 export function resetVaultDirSourceForTest(): void {
   vaultDirSource = null;

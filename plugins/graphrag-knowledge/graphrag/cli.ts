@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import {
   discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir, loadHomeGraphragEnv,
-  bindClosestVaultDir, noteVaultDirSource
+  bindClosestVaultDir, noteVaultDirSource, parseVaultFlag, bindCliVaultDir
 } from "./cli-env.ts";
 import { pathToFileURL } from "node:url";
 
@@ -91,8 +91,25 @@ async function dispatchHeadline(verb: HeadlineVerb, argv: string[]) {
 }
 
 export async function runCli(argv: string[]) {
+  // `--vault` は verb を問わず dispatch 前にここで一度だけ解決し、最優先で焼く
+  // (verb ごとの読み漏れで既定 vault へ黙って書く事故 = issue #44 を構造的に塞ぐ)。
+  // argv はそのまま渡すので、自前で --vault を読む verb の挙動は変わらない。
+  const vaultFlag = parseVaultFlag(argv.slice(1));
+  if (vaultFlag.error) {
+    process.stderr.write(`${vaultFlag.error}\n`);
+    process.exit(2);
+  }
+  const restoreVault = vaultFlag.vaultDir ? bindCliVaultDir(vaultFlag.vaultDir) : null;
+  try {
+    await runCliWithEnv(argv);
+  } finally {
+    restoreVault?.();
+  }
+}
+
+async function runCliWithEnv(argv: string[]) {
   // 共通 init: env を 1 度読む (verb 個別の env 上書きは CLI flag のみ)。
-  // 優先順位 (high→low): shell env > .graphrag/.env (walk-up) > cwd .env
+  // 優先順位 (high→low): --vault > shell env > .graphrag/.env (walk-up) > cwd .env
   //   > .graphrag/vault auto-discovery > ~/.graphrag/.env (環境ごとのグローバル fallback)。
   // applyDotEnv は first-wins なので、ローカル→グローバルの順で読むとローカルが勝つ。
   // .graphrag/.env は worktree・サブディレクトリからでも親を拾えるよう walk-up する。

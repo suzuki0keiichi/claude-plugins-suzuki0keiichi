@@ -1,4 +1,6 @@
+import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseVaultFlag } from "./cli-env.ts";
 import { confidenceMessage, gradeConfidence, judgeMatchConfidence } from "./confidence.ts";
 import { edgePriority, loadGraph, loadRequiredVectorIndex, prepareVectorSearch, searchGraph } from "./retrieval.ts";
 import { loadLexicalIndex } from "./lexical-index.ts";
@@ -471,7 +473,14 @@ function parseArgs(argv) {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)) {
-  const brief = await buildGraphBrief(parseArgs(argv));
+  const args = parseArgs(argv);
+  // --graph は vault dir の旧 alias。--vault (runCli が env へ焼く) と食い違う指定は曖昧なので拒否する。
+  const vaultDir = parseVaultFlag(argv).vaultDir;
+  if (args.graph && vaultDir && path.resolve(args.graph) !== vaultDir) {
+    process.stderr.write(`brief: --graph (${path.resolve(args.graph)}) and --vault (${vaultDir}) point to different vaults\n`);
+    process.exit(2);
+  }
+  const brief = await buildGraphBrief(args);
   console.log(JSON.stringify(brief, null, 2));
 }
 
