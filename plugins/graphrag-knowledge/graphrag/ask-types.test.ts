@@ -46,6 +46,7 @@ test("ask --types は brief と evidence の両段に同じ filter を渡し、�
 });
 
 // ── issue #36: ask の型名摂動チェック (type_word_divergence) ─────────────────────
+// graphrag:enforces constraint:graphrag-skill-dev:ask-type-word-divergence-no-false-high — 型名除去版と食い違う question を high で返さない
 
 import { detectTypeWordDivergence } from "./cli-headlines.ts";
 import { DEFAULT_SCHEMA } from "./schema.ts";
