@@ -1,4 +1,5 @@
 // issue #43: aliases が string[] でない node で ask が落ちず、fsck/書き込みは不正形を拒否する。
+// graphrag:enforces constraint:graphrag-skill-dev:aliases-string-array — aliases は string[] 契約
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nodeAliases, validateGraph } from "./schema.ts";

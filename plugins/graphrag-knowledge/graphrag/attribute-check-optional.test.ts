@@ -1,5 +1,6 @@
 // issue #45: 型固有の任意属性 (Source の source_kind/url/fetched_at 等) は attribute_check で
 // unknown 扱いにならない。既知語彙は対象 node の型ごとに決まる。
+// graphrag:enforces constraint:graphrag-skill-dev:typed-add-attributes-known — typed-add / 文書化済みの型固有属性は unknown にならない
 import assert from "node:assert/strict";
 import test from "node:test";
 import { unknownAttributeWarnings } from "./mutation-core.ts";

@@ -1,4 +1,5 @@
 // issue #44: --vault は verb を問わず runCli で一度だけ解決され、既定 vault に黙って書かない。
+// graphrag:enforces constraint:graphrag-skill-dev:vault-flag-single-interpretation — --vault は全 verb で launcher と同じ1つの vault を指す
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync, execFileSync } from "node:child_process";
