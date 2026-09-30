@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseVaultFlag, bindCliVaultDir, getVaultDirSource, resetVaultDirSourceForTest } from "./cli-env.ts";
+import { parseVaultFlag, normalizeVaultArgv, bindCliVaultDir, getVaultDirSource, resetVaultDirSourceForTest } from "./cli-env.ts";
 import { buildVaultFiles } from "./build-vault.ts";
 import { importVault } from "./import-vault.ts";
 
@@ -143,6 +143,26 @@ test("--vault の値欠落は verb 実行前に exit 2", () => {
     const r = s.run(["commit-mutation", s.planPath, "--vault"]);
     assert.equal(r.status, 2);
     assert.equal(head(s.repoA), headA);
+  } finally {
+    rmSync(s.tmp, { recursive: true, force: true });
+  }
+});
+
+test("normalizeVaultArgv: 全形式をその位置で `--vault <abs>` に揃える / strip は除去", () => {
+  assert.deepEqual(normalizeVaultArgv(["--vault=v", "id"], "/abs", false), ["--vault", "/abs", "id"]);
+  assert.deepEqual(normalizeVaultArgv(["--root", "r", "--vault", "v"], "/abs", false), ["--root", "r", "--vault", "/abs"]);
+  assert.deepEqual(normalizeVaultArgv(["--vault", "v", "out.json"], "/abs", true), ["out.json"]);
+});
+
+test("verb 側の再解析も launcher と同じ vault を見る (show --vault= / vault-import --vault)", () => {
+  const s = setup("direct");
+  try {
+    const show = s.run(["show", "--vault=" + s.vaultB, "file:s:src/a.ts"]);
+    assert.equal(show.status, 0, show.stderr);
+    assert.match(show.stdout, /file:s:src\/a\.ts/);
+    const imp = s.run(["vault-import", "--vault", s.vaultB]);
+    assert.equal(imp.status, 0, imp.stderr);
+    assert.ok(JSON.parse(imp.stdout).nodes.some((n: any) => n.id === "file:s:src/a.ts"));
   } finally {
     rmSync(s.tmp, { recursive: true, force: true });
   }

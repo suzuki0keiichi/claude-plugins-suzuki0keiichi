@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import {
   discoverAndLoadGraphragEnv, loadDotEnvFromCwd, discoverVaultDir, loadHomeGraphragEnv,
-  bindClosestVaultDir, noteVaultDirSource, parseVaultFlag, bindCliVaultDir
+  bindClosestVaultDir, noteVaultDirSource, parseVaultFlag, bindCliVaultDir, normalizeVaultArgv
 } from "./cli-env.ts";
 import { pathToFileURL } from "node:url";
 
@@ -90,16 +90,24 @@ async function dispatchHeadline(verb: HeadlineVerb, argv: string[]) {
   await mod.dispatchHeadline(verb, argv);
 }
 
+// vault (や world) を位置引数で受け、--vault を知らない verb。flag を残すと値が位置引数に
+// 化けるので除き、GRAPHRAG_VAULT_DIR 経由で渡す。
+const POSITIONAL_VAULT_VERBS = new Set(["vault-import", "vault-build", "world-refresh"]);
+
 export async function runCli(argv: string[]) {
   // `--vault` は verb を問わず dispatch 前にここで一度だけ解決し、最優先で焼く
   // (verb ごとの読み漏れで既定 vault へ黙って書く事故 = issue #44 を構造的に塞ぐ)。
-  // argv はそのまま渡すので、自前で --vault を読む verb の挙動は変わらない。
+  // verb へは正規化した `--vault <abs>` だけを渡し、verb 側の再解析と解釈を一致させる。
   const vaultFlag = parseVaultFlag(argv.slice(1));
   if (vaultFlag.error) {
     process.stderr.write(`${vaultFlag.error}\n`);
     process.exit(2);
   }
   const restoreVault = vaultFlag.vaultDir ? bindCliVaultDir(vaultFlag.vaultDir) : null;
+  if (vaultFlag.vaultDir) {
+    const [verb, ...rest] = argv;
+    argv = [verb, ...normalizeVaultArgv(rest, vaultFlag.vaultDir, POSITIONAL_VAULT_VERBS.has(verb))];
+  }
   try {
     await runCliWithEnv(argv);
   } finally {

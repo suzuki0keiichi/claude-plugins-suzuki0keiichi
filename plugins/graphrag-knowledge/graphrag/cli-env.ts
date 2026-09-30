@@ -439,6 +439,27 @@ export function parseVaultFlag(
 }
 
 /**
+ * verb へ渡す argv を解決済みの 1 形式 `--vault <abs>` に正規化する (その位置で置換)。
+ * verb 側の再解析が `--vault=` を読めない・相対 path を別基準 (index は --root) で解く、
+ * といった二重解釈を防ぐ。strip=true は vault を位置引数で受ける verb 用で、flag を除く
+ * (その verb は GRAPHRAG_VAULT_DIR へ fallback する)。
+ */
+export function normalizeVaultArgv(argv: string[], vaultDir: string, strip: boolean): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const isPair = arg === "--vault";
+    if (!isPair && !arg.startsWith("--vault=")) {
+      out.push(arg);
+      continue;
+    }
+    if (isPair) i++;
+    if (!strip) out.push("--vault", vaultDir);
+  }
+  return out;
+}
+
+/**
  * `--vault` を全 verb 共通で最優先 (shell env より上) に焼く。runCli が env 読み込み前に
  * 呼び、戻り値の restore を finally で呼ぶ (同一 process で runCli を再度呼んでも漏れない)。
  */
