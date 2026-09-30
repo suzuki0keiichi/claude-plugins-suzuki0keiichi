@@ -106,8 +106,20 @@ test("ask: 型名で 1 位が変わる question は high を low に上限し、
     assert.equal(out.final_stage, "brief");
     assert.equal(out.type_word_divergence.status, "diverged");
     assert.equal(out.type_word_divergence.stripped_top[0].id, "decision:s:target");
-    assert.match(out.next_action_hint, /ask "retry policy" --types Decision/);
+    assert.match(out.next_action_hint, /ask 'retry policy' --types Decision/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("rerun 案内は shell でそのまま実行しても question が 1 引数・無展開で渡る (backtick / $() / $VAR / 単引用)", async () => {
+  const question = "Decision about `printf CODE_EXECUTED` and $(printf SUBSTITUTED) $HOME it's";
+  const d = await detectTypeWordDivergence({ question, typeNames: TYPES, explicitTypes: [], originalTopId: "wrong", runBrief: briefWith("right") });
+  const expected = "about `printf CODE_EXECUTED` and $(printf SUBSTITUTED) $HOME it's";
+  assert.deepEqual(d.rerun, { question: expected, types: ["Decision"] });
+  const cmd = /(ask '.*' --types Decision)/.exec(d.next_action)![1];
+  // ask を「受け取った引数を 1 行ずつ出す」関数に置き換えて実 shell で評価する
+  const r = spawnSync("/bin/sh", ["-c", `ask() { for a in "$@"; do printf '%s\\n' "$a"; done; }; ${cmd}`], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").slice(0, 3), [expected, "--types", "Decision"]);
 });

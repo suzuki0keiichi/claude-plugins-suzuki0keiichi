@@ -555,6 +555,11 @@ function parseAskTypes(raw: unknown, vaultDir: string): string[] {
  * question が型名を含む時だけ、型名を除いた版の brief と top1 を比べる (issue #36)。
  * 型名が無い / 一致 → null (出力も挙動も従来通り)。不一致 → diverged、比較不能 → unavailable。
  */
+/** POSIX shell の単引用 (内部の ' は '\\'' に)。展開を一切起こさない 1 引数になる。 */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 export async function detectTypeWordDivergence(args: {
   question: string;
   typeNames: readonly string[];
@@ -567,7 +572,10 @@ export async function detectTypeWordDivergence(args: {
   const typeWords = typeWordsIn(args.question, args.typeNames);
   // 明示 types がある時はそれを保つ (上書きを勧めない)。無ければ question に現れた型名を正規名で。
   const suggestedTypes = args.explicitTypes.length > 0 ? args.explicitTypes : typeWords;
-  const rerun = `ask ${JSON.stringify(stripped)} --types ${suggestedTypes.join(",")}`;
+  // 案内をそのまま shell で実行してもクエリ中の `...` / $() / $VAR が展開されないよう、POSIX の
+  // 単引用で囲む (JSON の二重引用は shell 展開を止めない)。構造化した値も rerun に同梱する。
+  const rerun = `ask ${shellQuote(stripped)} --types ${suggestedTypes.join(",")}`;
+  const rerunArgs = { question: stripped, types: suggestedTypes };
   let aux: any;
   try {
     aux = await args.runBrief(stripped);
@@ -576,6 +584,7 @@ export async function detectTypeWordDivergence(args: {
       status: "unavailable",
       reason: error instanceof Error ? error.message : String(error),
       type_words: typeWords,
+      rerun: rerunArgs,
       next_action:
         `The question contains node-type names (${typeWords.join(", ")}) that can distort ranking, and the check against ` +
         `the type-word-free question could not run, so confidence is capped below high. If the type names express a filter, ` +
@@ -590,6 +599,7 @@ export async function detectTypeWordDivergence(args: {
     type_words: typeWords,
     stripped_query: stripped,
     stripped_top: auxMatches.slice(0, 3).map((m) => ({ id: m.node.id, type: m.node.type, title: m.node.title })),
+    rerun: rerunArgs,
     next_action:
       `The top match changes when the node-type names (${typeWords.join(", ")}) are removed from the question, so this ` +
       `result is unstable and confidence is capped below high. Choose by what the question means: if the type names are a ` +
