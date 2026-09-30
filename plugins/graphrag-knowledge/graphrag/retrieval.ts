@@ -1,3 +1,4 @@
+import { nodeAliases, aliasesShapeProblem } from "./schema.ts";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -575,13 +576,22 @@ export function nodeForOutput(node) {
 // 正規化して共有する (旧実装は buildSearchFields 内の正規化と別名判定用の正規化で
 // 同じ alias を二重に正規化していた)。haystack のフィールド順は旧実装の
 // buildSearchFields と同一 (title, summary, path, aliases, tags, display)。
+const warnedMalformedAliases = new Set<string>();
+// 不正形 aliases は検索を落とさずに読むが、黙って吸収もしない (stdout JSON には混ぜない)。
+function warnMalformedAliases(node): void {
+  const problem = aliasesShapeProblem(node.aliases);
+  if (!problem || warnedMalformedAliases.has(node.id)) return;
+  warnedMalformedAliases.add(node.id);
+  process.stderr.write(`[graphrag] WARN: node ${node.id} has invalid aliases (${problem}); read leniently — run fsck and repair via op:update\n`);
+}
+
 export function computeNodeLexical(node): { haystack: string; aliases: string[]; grams: Set<string> } {
-  const rawAliases = node.aliases ?? [];
-  const aliases = rawAliases.map((alias) => normalizeText(alias));
+  warnMalformedAliases(node);
+  const aliases = nodeAliases(node).map((alias) => normalizeText(alias));
   const isText = (value) => typeof value === "string" && value.length > 0;
   const normalizedFields = [
     ...[node.title, node.summary, node.path].filter(isText).map((field) => normalizeText(field)),
-    ...aliases.filter((_, index) => isText(rawAliases[index])),
+    ...aliases,
     ...[...(node.tags ?? []), ...displayTextFields(node.display)]
       .filter(isText)
       .map((field) => normalizeText(field))

@@ -1,4 +1,4 @@
-import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
+import { canonicalType, DEFAULT_SCHEMA, nodeAliases, type SchemaDefinition } from "./schema.ts";
 import { cosineSimilarity, nodeVectorText } from "./vector.ts";
 import { mutationOp } from "./mutation-core.ts";
 
@@ -154,7 +154,7 @@ function lexicalNames(node: any): Set<string> {
   const names = new Set<string>();
   const title = normalizeLexical(node?.title);
   if (title) names.add(title);
-  for (const alias of Array.isArray(node?.aliases) ? node.aliases : []) {
+  for (const alias of nodeAliases(node)) {
     const n = normalizeLexical(alias);
     if (n) names.add(n);
   }

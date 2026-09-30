@@ -41,7 +41,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
-import { canonicalType } from "./schema.ts";
+import { canonicalType, nodeAliases } from "./schema.ts";
 import { KNOWLEDGE_TO_FILE_EDGES, buildCrosscutIndex, structureForPaths, type StructureSummary } from "./crosscut-map.ts";
 import {
   frameCheck,
@@ -333,8 +333,7 @@ export function deltaCheck(
     if (typeof e.from !== "string" || typeof e.to !== "string") continue;
     const fromNode = nodesById.get(e.from);
     if (!fromNode) continue;
-    const aliases = (Array.isArray(fromNode.aliases) ? fromNode.aliases : [])
-      .filter((a: unknown): a is string => typeof a === "string" && isEchoAlias(a));
+    const aliases = nodeAliases(fromNode).filter(isEchoAlias);
     if (aliases.length === 0) continue;
     const toNode = nodesById.get(e.to);
     const derived = e.to.startsWith("file:") ? e.to.split(":").slice(2).join(":") : null;

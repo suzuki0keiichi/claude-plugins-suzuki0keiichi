@@ -1,3 +1,4 @@
+import { nodeAliases } from "./schema.ts";
 import { existsSync, readFileSync } from "node:fs";
 import {
   LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_PROVIDER,
@@ -514,7 +515,7 @@ export function nodeVectorText(node) {
     node.summary_provisional ? undefined : node.summary,
     node.description,
     node.path,
-    ...(node.aliases ?? []),
+    ...nodeAliases(node),
     ...(node.tags ?? []),
     ...displayTextFields(node.display)
   ].filter((value) => typeof value === "string" && value.length > 0).join("\n");

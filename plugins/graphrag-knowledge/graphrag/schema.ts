@@ -198,6 +198,27 @@ export const EDGE_TYPE_RULES: Record<EdgeType, TypeRule[]> = {
   ]
 };
 
+/**
+ * alias を読む全箇所の共通入口 (issue #43)。aliases は string[] が契約だが、CLI 外の書き手が
+ * `aliases: "a,b"` のような文字列を残し得る。読み側は落ちずに扱う: 文字列は単一 alias として
+ * (カンマを含む alias があり得るので分割しない)、配列中の非文字列/空文字は捨てる。
+ * 永続データは変更しない — 不正形は validateGraph (fsck error / 書き込み拒否) が報告する。
+ */
+export function nodeAliases(node: { aliases?: unknown } | null | undefined): string[] {
+  const raw = node?.aliases;
+  if (typeof raw === "string") return raw.length > 0 ? [raw] : [];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((a): a is string => typeof a === "string" && a.length > 0);
+}
+
+/** aliases が契約 (string[]、空配列可) を満たしていなければ理由を返す。未設定/null は可。 */
+export function aliasesShapeProblem(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) return `must be an array of strings, got ${typeof raw}`;
+  const bad = raw.findIndex((a) => typeof a !== "string");
+  return bad >= 0 ? `must be an array of strings, element ${bad} is ${typeof raw[bad]}` : null;
+}
+
 export function validateGraph(graph: GraphLike = {}, schema?: SchemaDefinition): string[] {
   const s = schema ?? DEFAULT_SCHEMA;
   const ids = new Set<string | undefined>();
@@ -229,6 +250,14 @@ export function validateGraph(graph: GraphLike = {}, schema?: SchemaDefinition):
           );
         }
       }
+    }
+
+    const aliasProblem = aliasesShapeProblem(node.aliases);
+    if (aliasProblem) {
+      failures.push(
+        `node ${node.id} has invalid aliases: ${aliasProblem} ` +
+        `(repair with an op:update that sets aliases to a string array)`
+      );
     }
 
     if (node.state !== undefined && node.state !== null) {

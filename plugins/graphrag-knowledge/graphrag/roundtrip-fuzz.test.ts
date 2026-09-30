@@ -218,8 +218,9 @@ function makeAliases(r: Rand): unknown[] {
   for (let i = 0; i < n; i++) {
     const roll = r.float();
     if (roll < 0.15 && out.length > 0) out.push(out[0]); // duplicate-ish
-    else if (roll < 0.25) out.push(r.pick(NUMBERS));
-    else if (roll < 0.3) out.push(null);
+    // aliases は string[] が schema 契約 (issue #43) — 数値は文字列化して「数値っぽい alias」の
+    // 直列化 (quote 要否) を引き続き突く。null / 非文字列は schema-invalid なので生成しない。
+    else if (roll < 0.3) out.push(String(r.pick(NUMBERS)));
     else out.push(hostile(r));
   }
   return out;

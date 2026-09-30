@@ -10,6 +10,7 @@
  * - commit-mutation: apply plan via vault writer (OCC/commit/index)
  * - inspect: env / artifacts status check
  */
+import { nodeAliases } from "./schema.ts";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -279,7 +280,7 @@ export function probeAliasOwnership(
   const warnings: { alias: string; node_id: string; files: number; sample: string[]; message: string }[] = [];
   for (const node of plan.nodes ?? []) {
     if ((node.op ?? "create") !== "create") continue;
-    const aliases = Array.isArray(node.aliases) ? node.aliases : [];
+    const aliases = nodeAliases(node);
     if (aliases.length === 0) continue;
     // この node の家 = plan 内で node → file:... へ張られたエッジの path 群。
     const homes = new Set<string>(
