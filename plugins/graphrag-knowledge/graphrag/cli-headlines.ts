@@ -10,7 +10,7 @@
  * - commit-mutation: apply plan via vault writer (OCC/commit/index)
  * - inspect: env / artifacts status check
  */
-import { nodeAliases } from "./schema.ts";
+import { nodeAliases, canonicalType } from "./schema.ts";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -537,6 +537,19 @@ export function shouldEscalate(stageOutcome: { match_confidence?: string; result
   return true;
 }
 
+function parseAskTypes(raw: unknown, vaultDir: string): string[] {
+  if (raw === undefined) return [];
+  if (typeof raw !== "string" || raw.trim() === "") throw new Error("ask --types requires a comma-separated list of node types");
+  const schema = resolveSchema(vaultDir);
+  return raw.split(",").map((t) => t.trim()).filter(Boolean).map((t) => {
+    const canonical = canonicalType(t, schema);
+    if (!canonical || !schema.nodeTypes.includes(canonical)) {
+      throw new Error(`ask --types: unknown node type "${t}" for schema ${schema.id} (allowed: ${schema.nodeTypes.join(", ")})`);
+    }
+    return canonical;
+  });
+}
+
 export async function runAsk(argv: string[]) {
   const f = parseFlagsArgv(argv);
   // --lexical-only は値を取らない boolean フラグだが、parseFlagsArgv は「次の非フラグ
@@ -579,6 +592,10 @@ export async function runAsk(argv: string[]) {
       "(auto-discovered from an ancestor .graphrag/vault). No state is written without a vault."
     );
   }
+
+  // --types (issue #36): 型の意図は query 文字列に混ぜず構造化 filter で渡す。active schema の
+  // 型名 / 型 alias で検証し、未知型は無言の空振りにせず入力エラーにする。
+  const types = parseAskTypes(f.types, vaultDir);
 
   // --call-number auto-incremented (manual LLM assignment removed → excessive detection runs structurally)
   // ask-state は機械ローカルなので cache/ に置く (E1)。readonly mode の外部 vault では
@@ -643,6 +660,7 @@ export async function runAsk(argv: string[]) {
     queryVector: sharedQueryVector ?? undefined,
     queryVectors: sharedQueryVectors ?? undefined,
     graphRerank,
+    types,
     ...(lexicalOnly ? { useVector: false } : {})
   });
   stages.push({ stage: "brief", output: briefOut });
@@ -682,7 +700,7 @@ export async function runAsk(argv: string[]) {
       vault: vaultDir,
       limit: evidenceLimit,
       neighbors,
-      types: [],
+      types,
       // brief と同じ graph / 索引 / query embedding を共有する (再読込・再 embed しない)。
       graphData,
       lexicalIndex: sharedLexicalIndex,

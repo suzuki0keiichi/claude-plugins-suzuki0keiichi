@@ -88,7 +88,7 @@ Read files surfaced by GraphRAG first; broaden only when `ask` results are insuf
 Search combines lexical + semantic (§Invariants #3), so **query vocabulary determines the hit surface**.
 
 - **Include both natural-language and code-language terms.** Knowledge is distilled in natural language (e.g. "duplicate detection") while code uses English identifiers (e.g. `duplicate_check`). Using only one narrows the surface. Even in a casual Japanese query, adding 1–2 code terms helps both channels (e.g.: `ask "重複ノードを弾く duplicate_check の仕組み"`).
-- **Query formula**: `<topic/phenomenon in natural language> + <1–2 code identifiers>` (+ a node-type word such as Decision / Risk / 制約 when hunting a specific type). Compose one good query from this formula instead of firing several narrow ones.
+- **Query formula**: `<topic/phenomenon in natural language> + <1–2 code identifiers>` (when hunting a specific type, pass it as a structured filter `--types Decision,Risk` — do NOT write type names into the query: they are scored as ordinary words, so nodes whose text merely mentions "Decision" etc. get pushed up). Compose one good query from this formula instead of firing several narrow ones.
 - **Use `--gist "<expected one-liner>"` for multi-query.** When the question alone is hard to hit, add the expected answer as `--gist` — it embeds question and gist separately and matches against both.
   - Example: `ask "なぜ vault を単一正本にした" --gist "graph.json は索引器の中間表現であって正本ではない"`
 - **`--graph-rerank on|off`** (default off; hub-biased net-negative; consider on only for balanced island-structure graphs).

@@ -1,6 +1,6 @@
 {
   "name": "graphrag-knowledge",
-  "version": "1.43.1",
+  "version": "1.43.2",
   "description": "Safely read and write persistent project knowledge stored in an Obsidian Markdown vault.",
   "author": {
     "name": "suzuki0keiichi",

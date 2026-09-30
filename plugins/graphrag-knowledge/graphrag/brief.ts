@@ -77,6 +77,7 @@ export async function buildGraphBrief(options: any = {}) {
         graphRerank: options.graphRerank,
         // 明示 degrade (ask --lexical-only)。既定 undefined = 従来どおり semantic 必須。
         useVector: options.useVector,
+        types: options.types,
         limit: options.limit ?? DEFAULT_LIMIT,
         summaryChars,
         relationLimit: options.relationLimit ?? 8,
@@ -239,6 +240,7 @@ export async function buildQueryBrief(graph, nodesById, options: any = {}) {
   }
   const matches = searchGraph(graph, options.query, {
     limit: options.limit,
+    types: options.types,
     lexicalIndex,
     // R5 graph rerank: 既定 off (実 vault で hub 偏重の net-negative を実測。
     // retrieval.ts の R5 コメント参照)。--graph-rerank on で opt-in。
