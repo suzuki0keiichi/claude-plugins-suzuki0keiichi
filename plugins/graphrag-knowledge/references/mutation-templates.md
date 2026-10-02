@@ -137,6 +137,14 @@ The cascaded edge IDs can be checked in `summary.cascaded_edge_ids` of the `comm
 
 Every node delete is also recorded in the vault's **tombstone ledger** (`.tombstones/YYYY-MM.jsonl`, committed in the same mutation commit): `{id, type, title, deleted_at, reason, successor?, cascaded_edges?}`. The ledger answers "did this id die, when, why, what replaced it" from the living vault, and keeps the cascaded edge tuples as repair material. `xref-check` consults it to classify dangling cross-vault refs as `tombstoned` (301 when a successor exists / 410 when gone) instead of merely `broken`.
 
+Re-creating an id that is in the ledger (re-ingest) is not rejected; the result carries `resurrections: {items: [{id, deleted_at, ledger_title, new_title, acknowledged}], hint?}` and `fsck` reports it as an unacknowledged resurrection (`tombstones` warn). Once you have checked that it is the same concept, acknowledge it with `resurrection_ack` — in the same plan as the create, or as an ack-only plan:
+
+```json
+{ "reason": "re-ingest of the same document", "resurrection_ack": ["decision:s:a"] }
+```
+
+The ack is appended to `.tombstones/acks/resurrections.jsonl` bound to the latest deletion's `deleted_at`, so it never exempts the id permanently: a later delete + re-create warns again. Acking an id that is not alive or has no ledger entry is rejected (`RESURRECTION_ACK_INVALID`).
+
 ## Delete + replace with successor (301) — purge/reconcile writers
 
 When a delete has a known replacement (e.g. document re-ingestion replacing extracted nodes), record the old→new mapping in the same atomic commit via `successors`. Validation requires each `old` to be deleted by this plan and each `new` to exist after the mutation. Note there is no same-id replace: a plan that deletes and creates the *same* id is rejected (plan-duplicate-id + create-exists) — successors are for *different* ids.
@@ -291,7 +299,8 @@ Discipline:
   nodes: Array<MutationNode>,       // op: create / update / delete
   edges: Array<MutationEdge>,       // op: create / delete (update usually unnecessary)
   duplicate_ack?: string[],         // only when acknowledging duplicate gate suspects (existing node ids)
-  successors?: Array<{ old: string, new: string }>  // 301 mapping for deletes replaced in this plan (tombstone ledger)
+  successors?: Array<{ old: string, new: string }>, // 301 mapping for deletes replaced in this plan (tombstone ledger)
+  resurrection_ack?: string[]       // confirm re-created ledger ids (§tombstone ledger); may be the only field
 }
 ```
 

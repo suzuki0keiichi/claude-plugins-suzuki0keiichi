@@ -18,7 +18,9 @@ export function normalizeMutationPlan(plan) {
   const edges = Array.isArray(plan.edges)
     ? plan.edges.map((edge) => normalizeMutationObject(edge, "edge"))
     : [];
-  if (nodes.length === 0 && edges.length === 0) {
+  const resurrection_ack = normalizeResurrectionAck(plan.resurrection_ack);
+  // ack-only plan (既存の復活を確認済みにするだけ) は node/edge 無しでも受理する。
+  if (nodes.length === 0 && edges.length === 0 && resurrection_ack.length === 0) {
     throw new Error("Mutation plan must include at least one node or edge");
   }
   return {
@@ -26,8 +28,19 @@ export function normalizeMutationPlan(plan) {
     nodes,
     edges,
     duplicate_ack: normalizeDuplicateAck(plan.duplicate_ack),
-    successors: normalizeSuccessors(plan.successors)
+    successors: normalizeSuccessors(plan.successors),
+    resurrection_ack
   };
+}
+
+// tombstone 台帳に載る id の復活の明示受理 (issue #46)。形が崩れた ack を黙って落とすと
+// 「受理したつもりが fsck warn のまま」になるので明示エラー。重複は意味が同じなので畳む。
+function normalizeResurrectionAck(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((id) => typeof id !== "string")) {
+    throw new Error("mutation plan resurrection_ack must be an array of node id strings");
+  }
+  return [...new Set(value as string[])];
 }
 
 // 重複ゲートの承認 (既存ノード id 列)。形が崩れた ack を黙って落とすと

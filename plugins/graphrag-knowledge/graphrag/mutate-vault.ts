@@ -33,7 +33,16 @@ import { suggestBindingsForNodes } from "./suggest-policy-edges.ts";
 import { countBindingDebt } from "./binding-debt.ts";
 import { readRecentHitIds, resolveAskStateDir } from "./cli-ask-state.ts";
 import { canonicalType, DEFAULT_SCHEMA, type SchemaDefinition } from "./schema.ts";
-import { appendTombstones, tombstoneShardRel, TOMBSTONES_DIR, type TombstoneEntry } from "./tombstones.ts";
+import {
+  appendResurrectionAcks,
+  appendTombstones,
+  latestTombstones,
+  RESURRECTION_ACKS_REL,
+  tombstoneShardRel,
+  TOMBSTONES_DIR,
+  type ResurrectionAck,
+  type TombstoneEntry,
+} from "./tombstones.ts";
 
 // export はフォールト注入テスト用 (writeVaultDelta の deps.writeFile 既定実装)。
 export function writeFileAtomic(abs: string, content: string): void {
@@ -343,6 +352,7 @@ function snapshotVaultPreimages(vaultDir: string, generatedRelPaths: string[]): 
     for (const e of readdirSync(tombDir)) {
       if (e.endsWith(".jsonl") || e === ".gitattributes") record(path.join(TOMBSTONES_DIR, e));
     }
+    record(RESURRECTION_ACKS_REL);
   }
   return backup;
 }
@@ -430,6 +440,73 @@ export function assertRemovalsExplained(args: {
   err.removed_files = [...args.removed];
   err.lost_node_ids = lost;
   throw err;
+}
+
+/**
+ * 台帳に載る id の復活を報告し、plan.resurrection_ack を検証する (issue #46)。
+ * create は拒否しない (同一内容の再取り込みは正当なワークフロー) — 事実と確認導線を
+ * 返すだけ。ack は「mutation 後に生存し、台帳に削除エントリがある id」に限り、受理時点の
+ * 最新削除世代 (deleted_at) に束縛して記録する。条件を満たさない ack は typo を見逃さない
+ * よう fail-loud。
+ */
+function assessResurrections(args: { vaultDir: string; plan: any; nextGraph: { nodes?: any[] } }): {
+  acks: ResurrectionAck[];
+  report: { items: any[]; hint?: string } | null;
+} {
+  const ackIds: string[] = args.plan.resurrection_ack ?? [];
+  const createdIds = (args.plan.nodes ?? [])
+    .filter((n: any) => (n.op ?? "create") === "create")
+    .map((n: any) => n.id);
+  if (ackIds.length === 0 && createdIds.length === 0) return { acks: [], report: null };
+  const tombs = latestTombstones(args.vaultDir);
+  const nextById = new Map((args.nextGraph.nodes ?? []).map((n: any) => [n.id, n]));
+  const failures: string[] = [];
+  for (const id of ackIds) {
+    if (!nextById.has(id)) failures.push(`resurrection_ack id is not alive after this mutation: ${id}`);
+    else if (!tombs.has(id)) failures.push(`resurrection_ack id has no deletion in the tombstone ledger: ${id}`);
+  }
+  if (failures.length > 0) {
+    const err: any = new Error("Refusing to mutate: invalid resurrection_ack");
+    err.code = "RESURRECTION_ACK_INVALID";
+    err.failures = failures;
+    throw err;
+  }
+  const ackedAt = new Date().toISOString();
+  const reason = typeof args.plan.reason === "string" && args.plan.reason ? args.plan.reason : "graphrag mutation";
+  const acks: ResurrectionAck[] = ackIds.map((id) => ({
+    id,
+    acked_deleted_at: tombs.get(id)!.deleted_at,
+    acked_at: ackedAt,
+    reason,
+  }));
+  const ackSet = new Set(ackIds);
+  const ids = [...new Set([...createdIds.filter((id: string) => tombs.has(id)), ...ackIds])];
+  if (ids.length === 0) return { acks, report: null };
+  const items = ids.map((id) => {
+    const t = tombs.get(id)!;
+    return {
+      id,
+      deleted_at: t.deleted_at,
+      ledger_title: t.title ?? null,
+      new_title: (nextById.get(id) as any)?.title ?? null,
+      acknowledged: ackSet.has(id),
+    };
+  });
+  const unacked = items.filter((i) => !i.acknowledged).map((i) => i.id);
+  return {
+    acks,
+    report: {
+      items,
+      ...(unacked.length > 0
+        ? {
+            hint:
+              "these ids were deleted before and are alive again; fsck reports them as unacknowledged " +
+              "resurrections until confirmed. If this re-ingest is the same concept, commit a plan with " +
+              `"resurrection_ack": ${JSON.stringify(unacked)} (or include it alongside the create next time).`,
+          }
+        : {}),
+    },
+  };
 }
 
 /**
@@ -1104,7 +1181,11 @@ export async function applyMutationToVault(args: {
               "(safe retry). Nothing was written for them.",
           }
         : null;
-    if (effectivePlan.nodes.length === 0 && effectivePlan.edges.length === 0) {
+    if (
+      effectivePlan.nodes.length === 0 &&
+      effectivePlan.edges.length === 0 &&
+      (effectivePlan.resurrection_ack ?? []).length === 0
+    ) {
       let head: string | null = null;
       try {
         head = args.git !== false ? vaultHead(vaultDir) : null;
@@ -1148,6 +1229,9 @@ export async function applyMutationToVault(args: {
       status: (v.attributeWarnings?.length ?? 0) > 0 ? "warn" : "ok",
       warnings: v.attributeWarnings ?? [],
     };
+    // issue #46: 台帳に載る id の復活 (create) を報告し、resurrection_ack を検証する。
+    // 何も書く前に fail-loud するので rollback は不要。
+    const resurrection = assessResurrections({ vaultDir, plan: effectivePlan, nextGraph: v.nextGraph });
 
     // 書き込み時重複ゲート: lexical exact pre-pass + 既存索引との embedding 照合。
     // duplicate_ack で承認されない suspect が居れば all-or-nothing で拒否する。
@@ -1253,9 +1337,11 @@ export async function applyMutationToVault(args: {
     // recordTombstones は触らないので dirty 判定にも journal にも載せない)。
     const predicted = predictVaultDelta(vaultDir, v.nextGraph);
     const hasDeletes = (effectivePlan.nodes ?? []).some((n: any) => (n.op ?? "create") === "delete");
+    const hasAcks = resurrection.acks.length > 0;
     const tombstoneRels: string[] = [];
-    if (hasDeletes) {
-      tombstoneRels.push(tombstoneShardRel(new Date().toISOString()));
+    if (hasDeletes) tombstoneRels.push(tombstoneShardRel(new Date().toISOString()));
+    if (hasAcks) tombstoneRels.push(RESURRECTION_ACKS_REL);
+    if (hasDeletes || hasAcks) {
       if (!existsSync(path.join(vaultDir, TOMBSTONES_DIR, ".gitattributes"))) {
         tombstoneRels.push(path.join(TOMBSTONES_DIR, ".gitattributes"));
       }
@@ -1343,7 +1429,8 @@ export async function applyMutationToVault(args: {
       // node delete を tombstone 台帳へ記録 (mutation と同一コミットで確定する。
       // シャードは delta に積むので、commit 失敗時の巻き戻しは .md と同じ経路で効く)。
       const tombstones = recordTombstones({ vaultDir, plan: effectivePlan, currentGraph: current, cascadedEdges: v.cascadedEdges ?? [], delta });
-      if (hasDeletes) {
+      appendResurrectionAcks(vaultDir, resurrection.acks, delta);
+      if (hasDeletes || hasAcks) {
         // 指摘B: tombstone 系エントリの intended を実書き後の内容で更新する (これ以降の
         // crash では追記済みシャードが内容検証を通り、次の回復で吸収される)。
         const refresh = new Set([...tombstoneRels, ...tombstones.shards].map(toPosixRel));
@@ -1379,6 +1466,8 @@ export async function applyMutationToVault(args: {
         cascaded_edge_ids: v.cascadedEdgeIds,
         // 削除の台帳記録 (issue #18)。recorded=0 (削除なし) なら shards は空。
         tombstones,
+        // 台帳に載る id の復活 (issue #46)。復活も ack も無ければ出さない。
+        ...(resurrection.report ? { resurrections: resurrection.report } : {}),
         // 書き込み後セルフチェックの結果 (ここに到達した = 全削除が説明済み)。
         post_write_check: {
           id: "unexplained-removal",

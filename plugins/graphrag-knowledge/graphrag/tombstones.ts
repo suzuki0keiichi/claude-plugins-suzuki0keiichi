@@ -70,24 +70,30 @@ export function appendTombstones(
     if (!byShard.has(rel)) byShard.set(rel, []);
     byShard.get(rel)!.push(e);
   }
-  const shards: string[] = [];
-  for (const [rel, list] of byShard) {
-    const abs = path.join(vaultDir, rel);
-    mkdirSync(path.dirname(abs), { recursive: true });
-    const existed = existsSync(abs);
-    const prev = existed ? readFileSync(abs, "utf8") : "";
-    const lines = list.map((e) => JSON.stringify(e)).join("\n") + "\n";
-    const next = prev.length > 0 && !prev.endsWith("\n") ? `${prev}\n${lines}` : prev + lines;
-    const tmp = `${abs}.tmp-${process.pid}`;
-    writeFileSync(tmp, next);
-    renameSync(tmp, abs);
-    shards.push(rel);
-    if (sink) {
-      sink.written.push(rel);
-      if (!existed) sink.created.push(rel);
-    }
+  for (const [rel, list] of byShard) appendJsonlLines(vaultDir, rel, list, sink);
+  return [...byShard.keys()];
+}
+
+/** JSONL ファイルへ行を追記する (ファイル全体を tmp+rename で原子書き)。 */
+function appendJsonlLines(
+  vaultDir: string,
+  rel: string,
+  list: unknown[],
+  sink?: { written: string[]; created: string[] }
+): void {
+  const abs = path.join(vaultDir, rel);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  const existed = existsSync(abs);
+  const prev = existed ? readFileSync(abs, "utf8") : "";
+  const lines = list.map((e) => JSON.stringify(e)).join("\n") + "\n";
+  const next = prev.length > 0 && !prev.endsWith("\n") ? `${prev}\n${lines}` : prev + lines;
+  const tmp = `${abs}.tmp-${process.pid}`;
+  writeFileSync(tmp, next);
+  renameSync(tmp, abs);
+  if (sink) {
+    sink.written.push(rel);
+    if (!existed) sink.created.push(rel);
   }
-  return shards;
 }
 
 /**
@@ -97,7 +103,7 @@ export function appendTombstones(
  * 出ず両側の行が残る。台帳の各行は独立した事実なのでこれが常に正しい解決。
  * 初回 append と同じ commit に乗せるため sink (delta) にも積む。
  */
-function ensureUnionMergeAttributes(
+export function ensureUnionMergeAttributes(
   vaultDir: string,
   sink?: { written: string[]; created: string[] }
 ): void {
@@ -155,8 +161,13 @@ export function readTombstones(vaultDir: string): TombstoneReadResult {
  * 倒す。それも同点なら stable sort によりファイル上の後の行が勝つ)。
  */
 export function latestTombstones(vaultDir: string): Map<string, TombstoneEntry> {
-  const entries = [...readTombstones(vaultDir).entries];
-  entries.sort((a, b) =>
+  return latestTombstoneById(readTombstones(vaultDir).entries);
+}
+
+/** latestTombstones の純関数版 (読み済みエントリから id ごとの最新を解決する)。 */
+export function latestTombstoneById(entries: TombstoneEntry[]): Map<string, TombstoneEntry> {
+  const sorted = [...entries];
+  sorted.sort((a, b) =>
     a.deleted_at < b.deleted_at
       ? -1
       : a.deleted_at > b.deleted_at
@@ -164,7 +175,7 @@ export function latestTombstones(vaultDir: string): Map<string, TombstoneEntry> 
         : (a.successor ? 1 : 0) - (b.successor ? 1 : 0)
   );
   const map = new Map<string, TombstoneEntry>();
-  for (const e of entries) map.set(e.id, e);
+  for (const e of sorted) map.set(e.id, e);
   return map;
 }
 
@@ -198,4 +209,72 @@ export function resolveSuccessor(
   }
   const last = chain[chain.length - 1];
   return { final_successor: last === id ? null : last, chain, cycle: false };
+}
+
+// ── resurrection ack (issue #46) ─────────────────────────────────────────────
+//
+// 台帳に載っている id が生き返る (同 id の再取り込み) と fsck は warn を出すが、正当な
+// 再取り込みを確認済みにする手段が無く warn が恒久化していた。plan.resurrection_ack で
+// 明示受理された復活をここに記録し、fsck はその削除世代 (deleted_at 完全一致) だけを
+// 確認済みとして扱う。後続の delete→create は新しい deleted_at を作るので、ack が ID を
+// 永久免除することは無い。
+//
+// 置き場は `.tombstones/acks/` サブディレクトリ: readTombstones は .tombstones 直下の
+// *.jsonl しか読まないため旧版が ack 行を削除エントリと誤読せず、既存の
+// `.tombstones/.gitattributes` (`*.jsonl merge=union`) はサブディレクトリにも効くので
+// 追加設定なしにブランチ並行の追記が自動 merge される。
+
+export const RESURRECTION_ACKS_REL = path.join(TOMBSTONES_DIR, "acks", "resurrections.jsonl");
+
+export type ResurrectionAck = {
+  id: string;
+  /** 受理した削除世代 (受理時点の最新削除エントリの deleted_at) */
+  acked_deleted_at: string;
+  /** ISO 8601 */
+  acked_at: string;
+  reason: string;
+};
+
+export function appendResurrectionAcks(
+  vaultDir: string,
+  acks: ResurrectionAck[],
+  sink?: { written: string[]; created: string[] }
+): void {
+  if (acks.length === 0) return;
+  ensureUnionMergeAttributes(vaultDir, sink);
+  appendJsonlLines(vaultDir, RESURRECTION_ACKS_REL, acks, sink);
+}
+
+export function readResurrectionAcks(vaultDir: string): {
+  entries: ResurrectionAck[];
+  errors: Array<{ file: string; line: number; error: string }>;
+} {
+  const result: ReturnType<typeof readResurrectionAcks> = { entries: [], errors: [] };
+  const abs = path.join(vaultDir, RESURRECTION_ACKS_REL);
+  if (!existsSync(abs)) return result;
+  const lines = readFileSync(abs, "utf8").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    try {
+      const e = JSON.parse(line);
+      if (
+        typeof e?.id !== "string" ||
+        typeof e?.acked_deleted_at !== "string" ||
+        typeof e?.acked_at !== "string" ||
+        typeof e?.reason !== "string"
+      ) {
+        result.errors.push({
+          file: RESURRECTION_ACKS_REL,
+          line: i + 1,
+          error: "missing required field (id / acked_deleted_at / acked_at / reason)",
+        });
+        continue;
+      }
+      result.entries.push(e);
+    } catch (err) {
+      result.errors.push({ file: RESURRECTION_ACKS_REL, line: i + 1, error: String(err instanceof Error ? err.message : err) });
+    }
+  }
+  return result;
 }

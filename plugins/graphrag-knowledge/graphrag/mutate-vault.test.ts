@@ -1995,3 +1995,72 @@ test("suggestions: suggestDeps.embedMany で binding 埋め込みを 1 バッチ
   assert.equal(manyBatches[0].length, 2, "Decision 2 件が同一バッチ");
   assert.ok(res.suggestions.binding.suggestions.length >= 1, "binding 提案自体は従来どおり返る");
 });
+
+// ── issue #46: 同一 id の再取り込み (resurrection) の報告と明示 ack ──────────
+
+import { fsckVault } from "./fsck.ts";
+import { readResurrectionAcks } from "./tombstones.ts";
+
+test("applyMutationToVault: 台帳 id の再作成は resurrections で報告され、resurrection_ack で fsck warn が消える (削除世代に束縛)", async () => {
+  const { repo, vault, stateDir } = gitInitVault();
+  const run = (plan: any) => applyMutationToVault({ plan, vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  const tomb = () => fsckVault({ vaultDir: vault }).checks.find((c: any) => c.id === "tombstones") as any;
+  const del = { reason: "purge a", nodes: [{ op: "delete", id: "decision:s:a" }] };
+
+  await run(decisionPlan("a", "add a"));
+  await run(del);
+  // 再取り込み (ack なし): 拒否せず報告だけ
+  const re = await run(decisionPlan("a", "re-ingest a"));
+  assert.equal(re.applied, true);
+  assert.equal(re.resurrections.items.length, 1);
+  assert.equal(re.resurrections.items[0].id, "decision:s:a");
+  assert.equal(re.resurrections.items[0].acknowledged, false);
+  assert.match(re.resurrections.hint, /resurrection_ack/);
+  let c = tomb();
+  assert.equal(c.status, "warn", "title が一致していても未 ack は warn のまま");
+  assert.deepEqual(c.detail.unacknowledged, ["decision:s:a"]);
+  assert.equal(c.detail.resurrections[0].metadata_match, "same");
+
+  // ack-only plan (node/edge なし) で確認済みにする
+  const head0 = vaultHead(vault);
+  const ack = await run({ reason: "ack re-ingest of a", resurrection_ack: ["decision:s:a"] });
+  assert.equal(ack.applied, true);
+  assert.notEqual(vaultHead(vault), head0, "ack 行は commit される");
+  assert.equal(ack.resurrections.items[0].acknowledged, true);
+  assert.equal(ack.resurrections.hint, undefined);
+  const porcelain = execFileSync("git", ["-C", repo, "status", "--porcelain", "--", "vault"], { encoding: "utf8" }).trim();
+  assert.equal(porcelain, "", "ack 台帳も同一 commit に乗る");
+  c = tomb();
+  assert.equal(c.status, "ok");
+  assert.deepEqual(c.detail.resurrected, ["decision:s:a"], "resurrected は全復活 id として互換維持");
+  assert.deepEqual(c.detail.acknowledged, ["decision:s:a"]);
+
+  // 再び削除→再作成 (ack なし): 新しい削除世代なので旧 ack は効かない
+  await run(del);
+  await run(decisionPlan("a", "re-ingest a again"));
+  assert.equal(tomb().status, "warn", "ack は ID を永久免除しない");
+
+  // create と同じ plan での ack
+  await run(del);
+  const withAck = await run({ ...decisionPlan("a", "re-ingest a with ack"), resurrection_ack: ["decision:s:a"] });
+  assert.equal(withAck.resurrections.items[0].acknowledged, true);
+  assert.equal(tomb().status, "ok");
+  assert.equal(readResurrectionAcks(vault).entries.length, 2);
+});
+
+test("applyMutationToVault: 不正な resurrection_ack (非生存 / 削除履歴なし) は reject され何も書かれない", async () => {
+  const { vault, stateDir } = gitInitVault();
+  await applyMutationToVault({ plan: decisionPlan("a", "add a"), vaultDir: vault, stateDir, git: true, buildIndex: noopIndex });
+  const head0 = vaultHead(vault);
+  for (const id of ["decision:s:missing", "decision:s:a"]) {
+    await assert.rejects(
+      applyMutationToVault({
+        plan: { reason: "bad ack", resurrection_ack: [id] },
+        vaultDir: vault, stateDir, git: true, buildIndex: noopIndex,
+      }),
+      (err: any) => err.code === "RESURRECTION_ACK_INVALID"
+    );
+  }
+  assert.equal(vaultHead(vault), head0);
+  assert.equal(readResurrectionAcks(vault).entries.length, 0);
+});

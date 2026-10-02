@@ -18,7 +18,8 @@
  *   - round-trip            : import → 再構築 → ディスクと byte 比較。差分 = 非 canonical
  *                             直列化 (WARN — 破損ではなく、次の書き込みが書き直す漂流)
  *   - tombstones            : 削除台帳 (.tombstones/*.jsonl) がパースできる (不能行 = ERROR)。
- *                             台帳掲載 id の生存 (蘇生) は advisory WARN
+ *                             台帳掲載 id の生存 (蘇生) は、resurrection_ack で確認済みでなければ
+ *                             advisory WARN (ack 台帳 .tombstones/acks/ の不能行も ERROR)
  *   - git-uncommitted       : vault 配下の未 commit 変更 (torn write の兆候) = ERROR + 復旧ヒント
  *
  * exit code: ok/warn → 0, error → 1。
@@ -36,7 +37,7 @@ import { buildVaultFiles } from "./build-vault.ts";
 import { validateGraph, type SchemaDefinition } from "./schema.ts";
 import { unbackedDistilledNodes } from "./mutation-core.ts";
 import { resolveSchema } from "./schema-registry.ts";
-import { readTombstones } from "./tombstones.ts";
+import { latestTombstoneById, readResurrectionAcks, readTombstones } from "./tombstones.ts";
 import { parseCrossVaultRef } from "./xref-resolver.ts";
 
 export type FsckStatus = "ok" | "warn" | "error";
@@ -298,30 +299,69 @@ export function fsckVault(options: {
   // parse 不能行・必須フィールド欠落は error (台帳が読めないと 301 解決が黙って
   // 素通りする)。台帳に載っている id の生存は error にしない — 同一内容の復活
   // (content-hash 採番では正しい蘇生) がありうるため、advisory の warn に留める。
+  // issue #46: plan.resurrection_ack で受理された復活は、受理した削除世代 (deleted_at
+  // 完全一致) に限り確認済みとして warn から外す。title/type の一致は同概念の証明に
+  // ならないので自動では外さない (metadata_match は判別材料として出すだけ)。
   {
     const tombs = readTombstones(vaultDir);
-    const liveIds = new Set(nodes.map((n: any) => n.id));
-    const resurrected = [...new Set(tombs.entries.filter((e) => liveIds.has(e.id)).map((e) => e.id))];
+    const acks = readResurrectionAcks(vaultDir);
+    const liveById = new Map(nodes.map((n: any) => [n.id, n]));
+    const latest = latestTombstoneById(tombs.entries);
+    const ackKeys = new Set(acks.entries.map((a) => `${a.id}\0${a.acked_deleted_at}`));
+    const resurrected = [...new Set(tombs.entries.filter((e) => liveById.has(e.id)).map((e) => e.id))];
+    const details = resurrected.map((id) => {
+      const t = latest.get(id)!;
+      const live: any = liveById.get(id);
+      const metadata_match =
+        t.type === undefined || t.title === undefined
+          ? "unknown"
+          : t.type === live.type && t.title === live.title
+            ? "same"
+            : "different";
+      return {
+        id,
+        deleted_at: t.deleted_at,
+        reason: t.reason,
+        ledger_type: t.type ?? null,
+        ledger_title: t.title ?? null,
+        live_type: live.type ?? null,
+        live_title: live.title ?? null,
+        metadata_match,
+        acknowledged: ackKeys.has(`${id}\0${t.deleted_at}`),
+      };
+    });
+    const acknowledged = details.filter((d) => d.acknowledged).map((d) => d.id);
+    const unacknowledged = details.filter((d) => !d.acknowledged).map((d) => d.id);
+    const hasErrors = tombs.errors.length > 0 || acks.errors.length > 0;
     checks.push({
       id: "tombstones",
-      status: tombs.errors.length > 0 ? "error" : resurrected.length > 0 ? "warn" : "ok",
-      detail: { entries: tombs.entries.length, parse_errors: tombs.errors, resurrected },
-      ...(tombs.errors.length > 0
+      status: hasErrors ? "error" : unacknowledged.length > 0 ? "warn" : "ok",
+      detail: {
+        entries: tombs.entries.length,
+        parse_errors: [...tombs.errors, ...acks.errors],
+        resurrected,
+        acknowledged,
+        unacknowledged,
+        resurrections: details,
+      },
+      ...(hasErrors
         ? {
             hint:
               "tombstone ledger lines that cannot be parsed make deleted-node lookups (xref-check 301 " +
-              "resolution) silently incomplete. If the offending lines are git conflict markers " +
-              "(<<<<<<< etc.), resolve by KEEPING BOTH SIDES' JSONL lines and deleting only the marker " +
+              "resolution) and resurrection acks silently incomplete. If the offending lines are git conflict " +
+              "markers (<<<<<<< etc.), resolve by KEEPING BOTH SIDES' JSONL lines and deleting only the marker " +
               "lines — every entry is an independent fact and line order does not matter (resolution is " +
               "by deleted_at). Normally this never happens: .tombstones/.gitattributes (merge=union) " +
               "makes git keep both sides automatically. Otherwise fix or remove the offending lines.",
           }
-        : resurrected.length > 0
+        : unacknowledged.length > 0
           ? {
               hint:
-                "these node ids appear in the deletion ledger but are alive again. Legitimate when the same " +
-                "content was re-ingested (resurrection); if unexpected, check whether an old id was reused " +
-                "for a different concept.",
+                "these node ids (unacknowledged) appear in the deletion ledger but are alive again. Compare " +
+                "ledger_title/ledger_type with live_title/live_type in resurrections (metadata_match is a hint, " +
+                "not proof of the same concept). If it was a legitimate re-ingest of the same concept, commit a " +
+                `plan with "resurrection_ack": ${JSON.stringify(unacknowledged)} to acknowledge this deletion ` +
+                "generation; if an old id was reused for a different concept, give the new node its own id.",
             }
           : {}),
     });

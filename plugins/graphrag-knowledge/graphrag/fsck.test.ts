@@ -418,3 +418,13 @@ test("fsck: 台帳の parse 不能行は tombstones ERROR、蘇生 id は adviso
 import { appendTombstones } from "./tombstones.ts";
 import { appendFileSync } from "node:fs";
 import { importVault } from "./import-vault.ts";
+
+test("fsck: ack 台帳の parse 不能行は tombstones ERROR (issue #46)", () => {
+  const { repo, vault } = gitVault();
+  mkdirSync(path.join(vault, ".tombstones", "acks"), { recursive: true });
+  writeFileSync(path.join(vault, ".tombstones", "acks", "resurrections.jsonl"), '{"id":"x"}\n');
+  commitAll(repo, "broken ack");
+  const c = check(fsckVault({ vaultDir: vault }), "tombstones");
+  assert.equal(c.status, "error");
+  assert.equal(c.detail.parse_errors.length, 1);
+});

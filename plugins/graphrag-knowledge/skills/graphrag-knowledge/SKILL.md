@@ -202,12 +202,14 @@ The `schema` field in the vault's VAULT.md frontmatter decides the preset. **Run
   nodes: Array<{ op: "create"|"update"|"delete", id, type?, title?, summary?, description?, raw_content?, updates? }>,
   edges: Array<{ op: "create"|"delete", id, type, from, to }>,
   duplicate_ack?: string[],         // only when acknowledging duplicate gate suspects (existing node ids)
-  successors?: Array<{ old, new }>  // 301: map deleted node ids to their replacements (tombstone ledger)
+  successors?: Array<{ old, new }>, // 301: map deleted node ids to their replacements (tombstone ledger)
+  resurrection_ack?: string[]       // confirm re-created ids that are in the tombstone ledger (may be the only field)
 }
 ```
 
 - Passing `null` as an `updates` value **deletes that field** (e.g. `{ "state": null }` to withdraw state).
 - Every node delete is recorded in the vault's **tombstone ledger** (`.tombstones/YYYY-MM.jsonl`, same commit): `{id, type, title, deleted_at, reason, successor?, cascaded_edges?}` — "did this id die / when / why / what replaced it" stays answerable from the living vault, and cascaded edge tuples are kept as repair material. Deleting and creating the **same id in one plan is rejected** (no replace semantics); `successors` maps old→**different** new ids and is validated (old must be deleted by the plan, new must exist after it). Template: `$REF/mutation-templates.md` §Delete + replace.
+- Re-creating an id that is in the ledger (re-ingest) is allowed and reported as `resurrections` in the result; `fsck` keeps it as an unacknowledged `tombstones` warn until you confirm it is the same concept with `resurrection_ack: [ids]` (alongside the create, or as an ack-only plan). An ack covers only the deletion it confirmed — a later delete + re-create warns again.
 - `op: "update"` refreshes the node's `generated_at` to now (= "re-verified as of now"; `staleness-check` converges) unless the plan sets `generated_at` explicitly.
 - `summary` = one-line headline (stays in frontmatter, primary search carrier).
 - `description` = distilled prose about the node (appears in vault body `## 説明` with round-trip marker, also enters embedding). **Write for every node in principle.** Guidelines:

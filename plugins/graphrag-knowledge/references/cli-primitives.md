@@ -282,6 +282,7 @@ Fast read-only integrity sweep over the resolved vault (the detection instrument
 - `edge-endpoints` — every edge endpoint resolves to an existing node; `vault:` cross-vault refs are validated shape-only (`vault:<slug>/<nodeId>` — actual resolution is `xref-check`'s job).
 - `schema-validate` — validateGraph (schema-level) passes.
 - `round-trip` — import → rebuild in memory → byte-compare against disk (EOL-insensitive, same as the write path). Any differing file = non-canonical serialization, WARN only: drift (hand edits / legacy formatting the next write rewrites), not corruption.
+- `tombstones` — the deletion ledger (`.tombstones/*.jsonl`) and resurrection acks (`.tombstones/acks/resurrections.jsonl`) parse (bad line = error). Ledger ids that are alive again are listed in `resurrected`; each gets a `resurrections` detail (ledger vs live type/title, `metadata_match: same|different|unknown` — a hint, not proof of the same concept). Those not confirmed via plan `resurrection_ack` for their latest deletion are `unacknowledged` = WARN.
 - `git-uncommitted` — uncommitted changes under the vault = ERROR with a recovery hint: this is the signature of a torn write (a mutation wrote its delta but died before its git commit). Non-git vaults get a WARN (torn-write detection unavailable).
 
 Distinguishes corruption (error) from drift (warn): `error` means the vault needs repair before the next mutation can be trusted; `warn` is self-healing on the next write. Vault via `--vault` or `GRAPHRAG_VAULT_DIR`.
