@@ -34,6 +34,11 @@ new message arrives or the configured timeout elapses (long polling). The
 agent (you) spends zero tokens while waiting because the Bash tool simply
 hasn't returned yet.
 
+In Claude Code, run `wait` / `say` with `run_in_background: true`: a
+foreground Bash call is killed at 2 minutes by default (10 minutes max),
+while a background one runs to completion and re-invokes the agent when it
+exits.
+
 ## Subcommands in detail
 
 ### `$CCHAT name <handle>`
