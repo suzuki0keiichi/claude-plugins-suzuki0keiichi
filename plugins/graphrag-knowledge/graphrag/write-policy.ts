@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -27,6 +27,11 @@ export const WRITE_POLICY_ASK_INLINE_MAX_CHARS = 600;
 // parseVaultParent / parseVaultSlugAliases) は frontmatter 行を trim してから `key:` を照合する。
 // ブロック内にこれらの形の行があると他パーサが誤読するので、ブロック側を不正として扱う。
 const FOREIGN_KEY_RE = /^(name|schema|kind|vault_slug|vault_slug_aliases|parent)\s*:/;
+// 正規の宣言 (字下げなし・引用なし) と、宣言らしき行の全般 (引用キー・字下げキー)。後者に当たって
+// 前者に当たらない行は「方針なし」ではなく不正として止める。
+const STRICT_KEY_RE = /^write_policy\s*:/;
+const LOOSE_KEY_RE = /^\s*["']?write_policy["']?\s*:/;
+const LOOSE_KEY_RE_M = /^\s*["']?write_policy["']?\s*:/m;
 
 export type WritePolicyField =
   | { present: false }
@@ -38,20 +43,59 @@ export type WritePolicy =
   | { status: "ok"; path: string; text: string; hash: string; chars: number; over_recommended: boolean }
   | { status: "invalid"; path: string; reason: string };
 
+function pathEntryExists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** VAULT.md の置き場所。world.ts vaultProfilePath と同じ規則 (vault dir の兄弟)。 */
 export function writePolicyProfilePath(vaultDir: string): string {
   return path.join(path.dirname(path.resolve(vaultDir)), "VAULT.md");
 }
 
-function unquote(raw: string): { ok: true; text: string } | { ok: false; reason: string } {
+/**
+ * 引用符つき値を先頭から走査して閉じ引用符を探す (末尾一致だと「エスケープされた引用符で終わる値」を閉じたと誤認する)。
+ * 二重引用符は \\ / \" のエスケープ、単一引用符は '' のエスケープを解く。
+ * 閉じ引用符の後に許すのは空 or 空白+コメントだけ。それ以外は不正。
+ */
+function scanQuoted(raw: string): { ok: true; text: string } | { ok: false; reason: string } {
   const q = raw[0];
-  if (raw.length < 2 || raw[raw.length - 1] !== q) {
+  let text = "";
+  let k = 1;
+  for (; k < raw.length; k++) {
+    const ch = raw[k];
+    if (q === '"' && ch === "\\") {
+      const next = raw[k + 1];
+      if (next === undefined) {
+        k = raw.length; // 末尾の \ は閉じ引用符をエスケープしている — 未終端
+        break;
+      }
+      text += next === '"' || next === "\\" ? next : ch + next;
+      k++;
+      continue;
+    }
+    if (ch === q) {
+      if (q === "'" && raw[k + 1] === "'") {
+        text += "'";
+        k++;
+        continue;
+      }
+      break;
+    }
+    text += ch;
+  }
+  if (k >= raw.length) {
     return { ok: false, reason: `unterminated ${q === '"' ? "double" : "single"}-quoted value` };
   }
-  const inner = raw.slice(1, -1);
-  return q === '"'
-    ? { ok: true, text: inner.replace(/\\(["\\])/g, "$1") }
-    : { ok: true, text: inner.replace(/''/g, "'") };
+  const tail = raw.slice(k + 1);
+  if (tail !== "" && !/^\s+#/.test(tail)) {
+    return { ok: false, reason: `unexpected text after the closing quote ("${tail.trim()}")` };
+  }
+  return { ok: true, text };
 }
 
 function dedent(lines: string[]): string[] {
@@ -81,7 +125,8 @@ function fold(lines: string[]): string {
 export function parseWritePolicyField(content: string): WritePolicyField {
   const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
   const outside = fm ? content.slice(fm[0].length) : content;
-  if (/^write_policy\s*:/m.test(outside)) {
+  // 宣言らしき行は形を問わず検出する (引用キー・字下げキーを「方針なし」として素通しさせない)。
+  if (LOOSE_KEY_RE_M.test(outside)) {
     return {
       present: true,
       ok: false,
@@ -93,12 +138,21 @@ export function parseWritePolicyField(content: string): WritePolicyField {
   if (!fm) return { present: false };
 
   const lines = fm[1].split(/\r?\n/);
-  const keyIdx = lines.flatMap((l, i) => (/^write_policy\s*:/.test(l) ? [i] : []));
-  if (keyIdx.length === 0) return { present: false };
-  if (keyIdx.length > 1) return { present: true, ok: false, reason: "write_policy is declared more than once" };
+  const looseIdx = lines.flatMap((l, i) => (LOOSE_KEY_RE.test(l) ? [i] : []));
+  if (looseIdx.length === 0) return { present: false };
+  const odd = looseIdx.find((i) => !STRICT_KEY_RE.test(lines[i]));
+  if (odd !== undefined) {
+    return {
+      present: true,
+      ok: false,
+      reason: `unsupported write_policy declaration "${lines[odd].trim()}" (write it as an unquoted, unindented top-level key: write_policy: ...)`
+    };
+  }
+  if (looseIdx.length > 1) return { present: true, ok: false, reason: "write_policy is declared more than once" };
 
-  const i = keyIdx[0];
-  const rest = lines[i].replace(/^write_policy\s*:/, "").trim();
+  const i = looseIdx[0];
+  let rest = lines[i].replace(STRICT_KEY_RE, "").trim();
+  if (rest.startsWith("#")) rest = ""; // 値の代わりのコメント (`write_policy: # memo` + 字下げリスト)
 
   const collectBlock = (allowDashAtCol0: boolean): string[] => {
     const block: string[] = [];
@@ -110,6 +164,11 @@ export function parseWritePolicyField(content: string): WritePolicyField {
     while (block.length && !block[block.length - 1].trim()) block.pop();
     return block;
   };
+  // 1 行値の後に字下げ行が続く = 複数行の plain/quoted scalar。部分だけ届けると除外が欠けるので不正。
+  const continuation = () =>
+    collectBlock(false).length > 0
+      ? { present: true as const, ok: false as const, reason: "the value continues on the following lines — use a block (write_policy: |) for multi-line policies" }
+      : null;
 
   let text: string;
   let blockLines: string[] = [];
@@ -124,12 +183,18 @@ export function parseWritePolicyField(content: string): WritePolicyField {
     blockLines = collectBlock(true);
     text = dedent(blockLines).join("\n");
   } else if (rest.startsWith('"') || rest.startsWith("'")) {
-    const u = unquote(rest);
+    const u = scanQuoted(rest);
     if (!u.ok) return { present: true, ok: false, reason: u.reason };
+    const cont = continuation();
+    if (cont) return cont;
     text = u.text;
   } else if (rest.startsWith("[") || rest.startsWith("{")) {
     return { present: true, ok: false, reason: "flow collections ([...] / {...}) are not supported; use a block (|) or an indented list" };
+  } else if (/^[&*!%@`?]/.test(rest) || /^-(\s|$)/.test(rest)) {
+    return { present: true, ok: false, reason: `unsupported YAML syntax in write_policy value ("${rest}") — use plain text, quotes, or a block (|)` };
   } else {
+    const cont = continuation();
+    if (cont) return cont;
     text = rest.replace(/\s+#.*$/, "");
   }
 
@@ -152,12 +217,21 @@ export function parseWritePolicyField(content: string): WritePolicyField {
 /** vault の write_policy を解決する。VAULT.md 不在 / キー不在は absent。読み取り失敗は invalid。 */
 export function readWritePolicy(vaultDir: string): WritePolicy {
   const profilePath = writePolicyProfilePath(vaultDir);
-  if (!existsSync(profilePath)) return { status: "absent" };
+  // existsSync は EACCES 等でも false を返すので使わない。真の不在 (ENOENT かつ
+  // パス自体も無い) だけを absent にし、それ以外の読み取り失敗はすべて invalid にする。
   let content: string;
   try {
     content = readFileSync(profilePath, "utf8");
   } catch (error) {
-    return { status: "invalid", path: profilePath, reason: `VAULT.md unreadable: ${error instanceof Error ? error.message : String(error)}` };
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT" && !pathEntryExists(profilePath)) return { status: "absent" };
+    return {
+      status: "invalid",
+      path: profilePath,
+      reason: code === "ENOENT"
+        ? "VAULT.md is a dangling symlink"
+        : `VAULT.md unreadable: ${error instanceof Error ? error.message : String(error)}`
+    };
   }
   const field = parseWritePolicyField(content);
   if (!field.present) return { status: "absent" };

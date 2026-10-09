@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -91,6 +91,77 @@ test("不正: 本文側 / 閉じない frontmatter に write_policy がある", 
 test("不正: ブロック行が他パーサのキーに見える (schema: 等) と誤読されるので拒否", () => {
   const r = parseWritePolicyField(fm("write_policy: |\n  schema: 顧客のスキーマ名は書かない"));
   assert.equal(r.present && !r.ok, true);
+});
+
+// --- 部分だけ ok にしない / 宣言を見落とさない / 過剰拒否しない (レビュー指摘の回帰) ----------
+
+const invalid = (body: string) => {
+  const r = parseWritePolicyField(fm(body));
+  assert.equal(r.present && !r.ok, true, `expected invalid for: ${JSON.stringify(body)} → ${JSON.stringify(r)}`);
+};
+
+test("値の代わりのコメント + 字下げリストは、コメントでなくリストを方針として読む", () => {
+  assert.deepEqual(parseWritePolicyField(fm("write_policy: # public\n  - 顧客名\n  - 社内ホスト名")), {
+    present: true, ok: true, text: "- 顧客名\n- 社内ホスト名"
+  });
+});
+
+test("1 行値の次行に字下げ継続があれば、先頭行だけ ok にせず不正", () => {
+  invalid("write_policy: 顧客名\n  と社内ホスト名は書かない");
+  invalid('write_policy: "顧客名"\n  - 社内ホスト名');
+});
+
+test("引用キー・字下げキー・本文側の字下げキーは『方針なし』でなく不正", () => {
+  invalid('"write_policy": "顧客名は書かない"');
+  invalid("'write_policy': 顧客名は書かない");
+  invalid("  write_policy: 顧客名は書かない");
+  const outside = parseWritePolicyField("---\nname: demo\n---\n  write_policy: 顧客名\n");
+  assert.equal(outside.present && !outside.ok, true);
+});
+
+test("引用値の後の行末コメントは受理し、閉じ引用符の誤認はしない", () => {
+  assert.deepEqual(parseWritePolicyField(fm('write_policy: "顧客名を記録しない" # public')), {
+    present: true, ok: true, text: "顧客名を記録しない"
+  });
+  assert.deepEqual(parseWritePolicyField(fm("write_policy: '顧客名' # public")), { present: true, ok: true, text: "顧客名" });
+  invalid('write_policy: "顧客名\\"'); // 末尾の \" はエスケープ — 未終端
+  invalid('write_policy: "顧客名\\'); // 末尾の \ — 未終端
+  invalid('write_policy: "顧客名" と URL'); // 閉じ引用符の後にコメント以外
+});
+
+test("YAML の未対応構文 (anchor / tag / 同一行の - ) は不正", () => {
+  invalid("write_policy: &a 顧客名");
+  invalid("write_policy: !!str 顧客名");
+  invalid("write_policy: - 顧客名");
+});
+
+test("VAULT.md が読めない (アクセス不能 / dangling symlink) は absent でなく invalid → 書き込み拒否", (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root は EACCES を再現できない");
+    return;
+  }
+  const root = mkdtempSync(path.join(tmpdir(), "write-policy-perm-"));
+  const locked = path.join(root, "locked");
+  try {
+    const vaultDir = path.join(root, "vault");
+    mkdirSync(vaultDir);
+    mkdirSync(locked);
+    writeFileSync(path.join(locked, "VAULT.md"), fm("write_policy: 顧客名は書かない"));
+    symlinkSync(path.join(locked, "VAULT.md"), path.join(root, "VAULT.md"));
+    chmodSync(locked, 0o000);
+    const p = readWritePolicy(vaultDir);
+    assert.equal(p.status, "invalid");
+    assert.throws(() => assertWritePolicyReadable(vaultDir), /Refusing to write/);
+    chmodSync(locked, 0o700);
+
+    rmSync(path.join(root, "VAULT.md"));
+    symlinkSync(path.join(root, "missing.md"), path.join(root, "VAULT.md"));
+    const dangling = readWritePolicy(vaultDir);
+    assert.equal(dangling.status, "invalid");
+  } finally {
+    chmodSync(locked, 0o700);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // --- 置き場所・world-cache 非対象 -------------------------------------------------
