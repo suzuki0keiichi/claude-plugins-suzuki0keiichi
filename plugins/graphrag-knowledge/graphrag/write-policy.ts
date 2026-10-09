@@ -158,6 +158,8 @@ export function parseWritePolicyField(content: string): WritePolicyField {
     const block: string[] = [];
     for (let j = i + 1; j < lines.length; j++) {
       const l = lines[j];
+      // 0 桁のコメント行は要素の区切りではない — 飛ばして後続を読む (ここで切ると後半が黙って消える)。
+      if (/^#/.test(l)) continue;
       if (!l.trim() || /^\s/.test(l) || (allowDashAtCol0 && /^-(\s|$)/.test(l))) block.push(l);
       else break;
     }

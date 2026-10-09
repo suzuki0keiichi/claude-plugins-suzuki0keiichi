@@ -106,6 +106,18 @@ test("値の代わりのコメント + 字下げリストは、コメントで�
   });
 });
 
+test("リスト / ブロックの途中にある 0 桁コメント行で後半を落とさない", () => {
+  const content = "---\nwrite_policy:\n  - 顧客名\n# URLにも注意\n  - 社内URL\n---\n";
+  assert.deepEqual(parseWritePolicyField(content), { present: true, ok: true, text: "- 顧客名\n- 社内URL" });
+  assert.deepEqual(parseWritePolicyField(fm("write_policy:\n- 顧客名\n# URLにも注意\n- 社内URL\nschema: system")), {
+    present: true, ok: true, text: "- 顧客名\n- 社内URL"
+  });
+  assert.deepEqual(parseWritePolicyField(fm("write_policy: |\n  顧客名\n# memo\n  社内URL")), {
+    present: true, ok: true, text: "顧客名\n社内URL"
+  });
+  invalid("write_policy: 顧客名\n# memo\n  社内URL"); // コメントを挟んだ継続も継続として不正
+});
+
 test("1 行値の次行に字下げ継続があれば、先頭行だけ ok にせず不正", () => {
   invalid("write_policy: 顧客名\n  と社内ホスト名は書かない");
   invalid('write_policy: "顧客名"\n  - 社内ホスト名');
