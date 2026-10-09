@@ -140,7 +140,7 @@ Node `aliases: string[]` is wired to embedding and lexical **aliasExact** (exact
 - **Retries are safe (idempotent replay).** Re-sending an op:create with identical content (e.g. after a timeout) is absorbed as a successful no-op (`idempotent_replay` in the output) — do NOT diagnose "node already exists" after a timeout; that error now only fires when the content actually differs (then use op:update). `index_status.ok:false` also does NOT mean the write failed — the mutation is committed; the index self-heals on the next ask/mutation. **Never retry an add because of index_status.**
 - Registering aliases on an authority node triggers the **alias ownership probe**: if an identifier-shaped alias already appears widely in the repo outside the node's evidence home, the output carries `alias_probe` warnings — that fingerprint would echo on every legitimate use (crying wolf). Keep aliases to vocabulary the node OWNS.
 - project/principal-preset typed-adds: `add-stakeholder` / `add-resource` / `add-milestone` / `add-assumption` / `add-agreement` / `add-task` / `add-source` / `add-theme` — same shape, project-vault node types ($REF/schema-quickref-project.md). On a principal vault, `add-task` / `add-milestone` refuse with a routing hint (time-bounded types are subtracted there).
-- `inspect` — status of env + artifacts as single JSON (vault / graph.json / vector-index / world, plus `vault_dir_source`, `state_dir`, `ask_state`, `indexed_graph`)
+- `inspect` — status of env + artifacts as single JSON (vault / graph.json / vector-index / world, plus `vault_dir_source`, `state_dir`, `ask_state`, `indexed_graph`, and the full `write_policy` — the fetch point for write paths that skip `ask`)
 - `checkpoint-mark --investigation <id> [--session-dir <dir>]` — one-shot "restore me after /clear" intent for the SessionStart restore hook, written into the reserved `__checkpoint__` key of `ask-state.json` (no new file; consumed once, 60-min expiry). `--session-dir` declares the session's primary working directory (from your system prompt, not the Bash cwd) and is the most precise identity the hook matches on. Fired as the final step of the `graphrag-checkpoint` skill — not needed in ordinary write flows.
 
 ## Primitive verbs (per-stage, fine-grained control)
@@ -215,7 +215,7 @@ The `schema` field in the vault's VAULT.md frontmatter decides the preset. **Run
 - `description` = distilled prose about the node (appears in vault body `## 説明` with round-trip marker, also enters embedding). **Write for every node in principle.** Guidelines:
   - **Aggregate types (especially Concern)**: not a list of constituents, but **what the collection means as a whole** — the meaning that emerges only at the aggregate level.
   - **Judgment types (Decision/Risk/Constraint/RejectedOption/OperationalKnowledge)**: **why it was decided that way**.
-- `raw_content` = raw primary information (conversation logs, how it was decided, Slack URLs, etc.). **Do not discard even for judgment types**: low volume, becomes the primary source for tracing "why" later. Subject to §Content hygiene — never verbatim abuse or personal information; sanitize while distilling.
+- `raw_content` = raw primary information (conversation logs, how it was decided, Slack URLs, etc.). **Do not discard even for judgment types**: low volume, becomes the primary source for tracing "why" later. Subject to §Content hygiene and §Vault write policy — never verbatim abuse or personal information, never vault-excluded content; sanitize while distilling.
 
 `commit-mutation` (and typed-add) enforce `validateGraph` passage (rejects unknown types, disallowed pairs, missing evidence, duplicate ids, state vocabulary violations).
 
@@ -235,6 +235,7 @@ Only persist conclusions, constraints, risks, and operational knowledge that wil
 ### Proactive Persistence
 
 Do not wait for the user to say "remember this." Write via `add-*` immediately when the following language markers **or actions** appear. Always run duplicate check (`ask` / `brief`) **first** (§Anti-patterns).
+Content excluded by the vault's `write_policy` is exempt from every trigger below (§Vault write policy).
 
 - **Implementation/fix/improvement/refactor reached a milestone (action trigger)**: just before committing or after finishing changes and reporting to user. Write back the underlying adoption decision, rejected alternatives, risks encountered, operational gotchas. **This is a silent action — actively watch for it** (easier to miss than verbal markers).
   → `add-decision` / `add-rejected-option` / `add-risk` / `add-ok` (whichever applies)
@@ -294,6 +295,16 @@ The vault is a durable artifact that outlives the session and travels with the r
 - **Never record personal information beyond what the work itself needs**: no home/postal addresses, phone numbers, private email addresses, credentials/tokens/secrets, health or private-life details. Refer to people by role, or by an identity already public in the repo (e.g. Git author name), and only when the knowledge genuinely requires attribution.
 - "Do not discard raw information" (§Mutation Plan, `raw_content`) means do not discard **substance** — it is not a license for verbatim transcripts. Sanitizing while distilling is part of writing, not a fidelity loss; if a quote must be kept for meaning, keep the sanitized paraphrase and note that it is paraphrased.
 - **No opt-out exists today.** If the user explicitly asks to record such content verbatim, say the vault has no unsafe/verbatim mode and write the sanitized form instead (a per-vault opt-in mode is a possible future extension, deliberately not implemented).
+
+### Vault write policy (per-vault exclusion boundary)
+
+Some vaults also declare what *this* vault must never hold, based on who can read it (e.g. "public repo: no customer names, unreleased plans, internal hostnames"). The project writes it as the `write_policy` key in VAULT.md frontmatter; the plugin only carries it — it adds to §Content hygiene and never relaxes it.
+
+- **Where you see it**: `ask` output carries `write_policy` (text + hash) whenever the vault has one, so your pre-write `ask` already delivers it. When `text_omitted` is set, or on a write path that skips `ask` (checkpoint rescue, initial `carve`, `branch-merge` application, bulk import), read `write_policy` from `$CLI inspect` **before distilling anything to write**. No `write_policy` field = no vault-specific policy; §Content hygiene still applies.
+- **Scope**: every field (id / title / summary / description / aliases / path / URL / raw_content / edges / reason). If anonymizing still leaks the substance, drop the candidate. Do not move excluded content to another vault on your own.
+- **Precedence**: the policy overrides §Proactive Persistence, "do not discard raw information" (`raw_content`), and the checkpoint rescue pass — excluded content is not something you owe the vault. Keep a decision only if its generalized substance is not itself in an excluded category; do not leave "omitted per policy" traces by default (the trace itself can leak).
+- **Invalid policy**: if VAULT.md declares `write_policy` but it cannot be interpreted, `ask` shows `status: "invalid"` and every write verb refuses. Report it to the user; do not work around it.
+- **Authoring**: categories only — never put a real secret in the policy as an example (VAULT.md travels with the repo too). One line or a block (`|` / `>` / indented `- ` list); about 300 chars recommended (longer is warned, never truncated).
 
 ## Topology Gap Review
 

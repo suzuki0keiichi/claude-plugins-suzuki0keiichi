@@ -69,6 +69,20 @@ export function formatAskMarkdown(payload: any): string {
   if (query?.repeat?.message) headline.push(`- repeat: ${query.repeat.message}`);
   out.push(headline.join("\n"));
 
+  // write_policy は書き込み前に読ませたいので、マッチより前に置く (方針なしの vault では出ない)。
+  const wp = payload.write_policy;
+  if (wp) {
+    const body = wp.status === "invalid"
+      ? `**INVALID** — ${wp.reason} (${wp.path})`
+      : wp.text_omitted
+      ? `(${wp.chars} chars, hash ${wp.hash} — text omitted; read it via \`inspect\`)`
+      : `${wp.text}\n(hash ${wp.hash})`;
+    out.push(
+      `## write_policy\n${body}\n${wp.note ?? ""}` +
+      (wp.length_warning ? `\n${wp.length_warning}` : "")
+    );
+  }
+
   const matches = query?.matches ?? [];
   if (matches.length > 0) {
     out.push(`## matches (${matches.length})`);

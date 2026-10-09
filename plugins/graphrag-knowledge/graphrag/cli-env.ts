@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
+import { assertWritePolicyReadable } from "./write-policy.ts";
 
 /**
  * .env 形式テキストを Record<string,string> にパース。
@@ -353,6 +354,7 @@ export function detectVaultIsolation(cwd: string = process.cwd(), vaultDirOverri
  * typed-add / commit-mutation / vault-build 等、vault を書き換える verb の入口で呼ぶ。
  *   - GRAPHRAG_VAULT_MODE=readonly → 常に拒否
  *   - 外部 vault なのにローカル mode 未設定 (inherited 含む) → 拒否 (worktree ごとの意思決定を要求)
+ *   - VAULT.md に write_policy キーがあるのに解釈できない → 拒否 (fail-closed。write-policy.ts)
  * 通れば isolation を返す (出力への同梱用)。unit テストはコア関数
  * (applyMutationToVault / buildVaultFiles 等) を直接呼べばこのゲートを踏まない。
  */
@@ -379,6 +381,8 @@ export function assertVaultWriteAllowed(
       `  GRAPHRAG_VAULT_MODE=direct     — write to the shared vault as-is`
     );
   }
+  const policyVaultDir = opts.vaultDir ?? process.env.GRAPHRAG_VAULT_DIR;
+  if (policyVaultDir) assertWritePolicyReadable(policyVaultDir);
   return isolation;
 }
 

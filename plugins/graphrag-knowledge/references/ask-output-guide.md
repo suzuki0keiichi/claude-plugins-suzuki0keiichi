@@ -23,6 +23,10 @@ Rides along on **every** ask (computed from the hit set: matched Files + Files l
 - `note` — how to read the map. Empty `crosscuts` means none was reached from this search scope, not that the whole change has no structure. Missing/old summaries are not a clean bill of health: compare the actual change with the registered intent, and distinguish unverified scope from conformance.
 - Placement rules of thumb: new code that belongs to a listed frame goes inside it (wire via `evidenced_by`); a genuinely new concept deserves its own registration instead of squatting. Per-path claimant lookup and paste-ready wiring fragments: `frame-check`.
 
+## `write_policy` (only when VAULT.md declares one)
+
+The vault's exclusion boundary — what must never be written into this vault (authority: SKILL.md §Vault write policy). `{status:"ok", hash, text, note}`: apply `text` to anything you are about to write, in every field; it overrides persistence instructions. `text_omitted: true` (long policy): read the full text from `inspect` before writing. `length_warning`: relay to the user that the policy should be shortened. `status:"invalid"` (+ `reason`): the declared policy cannot be interpreted and every write verb refuses — tell the user. Absent key = no vault-specific policy.
+
 ## `enforcement_debt` (only when > 0, system vaults)
 
 Migration rail for vaults written before the enforcement contract: when the vault holds Constraints with neither an `enforced_by` edge nor an `enforcement:"none"` declaration, every ask carries `{unguarded_constraints, constraints_total, hint}`. **Relay this to the user once per session** — those constraints enforce nothing until wired. The prescription lives in `constraint-check` (per-constraint next_step + paste-ready plan_fragment). Absent key = no debt.

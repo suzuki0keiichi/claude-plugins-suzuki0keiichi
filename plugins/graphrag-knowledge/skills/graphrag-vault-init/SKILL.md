@@ -49,6 +49,8 @@ vault_slug: <slug>
 ---
 ```
 
+**Write policy (optional, any vault type)**: ask the user once — "Who can read this vault (e.g. a public repo), and is there anything it must never hold?" If they name categories, write them as a `write_policy` frontmatter key — e.g. `write_policy: "Public repo: no customer names, unreleased plans, internal hostnames/URLs"` (one line, or a `|` block / indented `- ` list; about 300 chars). Categories only, never a real example of the secret itself. If they have none, omit the key and move on — no policy means the common Content hygiene alone. Semantics and precedence: parent skill §Vault write policy.
+
 **Close the initial build by presenting the plugin's operating conditions** (`$DOCS/operating-conditions.md`) — the runbook of what the project must keep doing for the tool to stay effective (wire knowledge to files, write enforcers, register "later", commission periodic audits…), each tied to which feature dies without it. A vault that is built once and never wired decays into a diary.
 
 **The rest of this document covers project vault setup only.** For system vault schema, read `$REF/schema-quickref-system.md`.
@@ -96,6 +98,7 @@ vault_slug: <slug>
 - `vault_slug`: Cross-vault ref namespace. Short kebab-case. **Immutable once set.**
 
 **Optional fields:**
+- `write_policy`: the vault's exclusion boundary (see "Write policy" in the System Vault Path above — same question, same rules).
 - `parent`: vault_slug of the single parent program/project this sub-project is contained by. Same-schema, single-parent, *genuine structural* containment only (not a business/marketing grouping under a product name) — see Decision Criteria → "the `parent` field".
 
 ### Step 3: Gather Information & Populate — Model Division Strategy

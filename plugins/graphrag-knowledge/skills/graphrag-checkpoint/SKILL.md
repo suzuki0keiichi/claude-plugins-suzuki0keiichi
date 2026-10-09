@@ -20,7 +20,7 @@ Fire manually when context is filling up (just before compact, or before a delib
 ## Procedure
 
 ### 0. preset judgment
-Run `$CLI inspect` to check the vault type → read only the matching system / project quickref (§Schema quick-ref in the parent skill). The rescue-destination vocabulary differs.
+Run `$CLI inspect` to check the vault type → read only the matching system / project quickref (§Schema quick-ref in the parent skill). The rescue-destination vocabulary differs. The same `inspect` output carries `write_policy` (the vault's exclusion boundary, parent skill §Vault write policy): apply it to both A and B — excluded content is not flushed or rescued, even into `raw_content` / ConversationChunk. If its `status` is `invalid`, stop and tell the user (writes are refused).
 
 ### A. Flush (work-state → active Investigation + ConversationChunk)
 

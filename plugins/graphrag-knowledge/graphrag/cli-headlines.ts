@@ -45,6 +45,7 @@ import {
 import { buildGraphBrief } from "./brief.ts";
 import { buildEvidencePacket } from "./evidence-packet.ts";
 import { formatAskMarkdown } from "./ask-format.ts";
+import { readWritePolicy, writePolicyForAsk, writePolicyForInspect } from "./write-policy.ts";
 import { evidenceStaleNoteForNode, readEvidenceChangesByPath, refuteEvidenceChangeViaGit } from "./lane-log.ts";
 import { isEchoAlias } from "./delta-check.ts";
 import { bumpCallCount, recordAskHits, resolveAskStateDir } from "./cli-ask-state.ts";
@@ -939,10 +940,21 @@ export async function runAsk(argv: string[]) {
     // 鮮度注記は同乗情報 — 失敗で ask 本体を落とさない
   }
 
+  // vault 固有の収録境界 (write_policy): 書き込み前の重複チェックで ask は必ず通るので、
+  // ここに本文を同乗させる (別 verb を呼ぶ手順を増やさない)。方針なしの vault では何も載せない。
+  // 長文はポインタに縮退し、本文は inspect から取る。hook の rail / brief resume には載せない。
+  let writePolicyOut: Record<string, unknown> | undefined;
+  try {
+    writePolicyOut = vaultDir ? writePolicyForAsk(readWritePolicy(vaultDir)) : undefined;
+  } catch {
+    writePolicyOut = undefined; // 同乗情報の失敗で ask 本体を落とさない (書き込み側は fail-closed)
+  }
+
   const payload = {
     question,
     call_number: callNumber,
     final_stage: finalStage,
+    ...(writePolicyOut !== undefined ? { write_policy: writePolicyOut } : {}),
     // 明示 degrade の焼き込み (issue #24): --lexical-only の結果は「semantic 検索を
     // 通っていない」ことを読み手が見落とせない形で出力に刻む (無言 fallback の禁止と両立)。
     ...(lexicalOnly
@@ -1229,7 +1241,9 @@ async function runInspect(_argv: string[]) {
     },
     vault_isolation: detectVaultIsolation(),
     binding_debt: bindingDebt,
-    enforcement_debt: enforcementDebtInfo
+    enforcement_debt: enforcementDebtInfo,
+    // ask を経ない書き込み経路 (checkpoint rescue / carve / branch-merge 適用 / import) の取得口。常に全文。
+    write_policy: vaultDir ? writePolicyForInspect(readWritePolicy(vaultDir)) : { status: "absent" }
   }, null, 2) + "\n");
 }
 
