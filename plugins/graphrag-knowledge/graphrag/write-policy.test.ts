@@ -157,6 +157,7 @@ test("writePolicyForAsk / Inspect: invalid は理由と書き込み拒否の旨�
 });
 
 // --- fail-closed ---------------------------------------------------------------
+// graphrag:enforces constraint:graphrag-skill-dev:write-policy-invalid-fails-closed
 
 test("assertWritePolicyReadable / assertVaultWriteAllowed: 不正なら書き込みを拒否、absent / ok は通す", () => {
   withVault(null, (v) => assert.doesNotThrow(() => assertWritePolicyReadable(v)));
