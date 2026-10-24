@@ -1,12 +1,28 @@
 ---
 name: chat-relay
-description: Use when the user wants this Claude Code or Codex session to talk to another local coding-agent session directly via a shared chat room, without acting as a human relay. Provides a `cchat` CLI for send/wait/say between sessions.
+description: Use when the user wants this Claude Code or Codex session to talk to another local coding-agent session directly via a shared chat room, without acting as a human relay. Provides a `cchat` CLI for send/wait/say between sessions. Inside Herdr (`HERDR_ENV=1`), routes to herdr's own agent commands when the peer is in the same Herdr session.
 ---
 
 # chat-relay
 
 Direct session-to-session messaging via a local chat server. Avoids polling
 (uses a blocking `wait` command) and avoids round-tripping through the user.
+
+## Inside Herdr? Prefer herdr directly
+
+Check this first. If `HERDR_ENV=1` and the peer session appears in
+`herdr agent list` (same Herdr server), talk to it with herdr's agent
+commands (`herdr agent prompt <peer> "..." --wait`, `herdr agent read <peer>`)
+instead of cchat. This counts as the user asking to use Herdr. Get the exact
+syntax from `herdr --skill` (skip if a Herdr skill is already loaded).
+
+Stay on cchat when:
+
+- the peer is not in `herdr agent list` (outside Herdr, or another Herdr server/machine),
+- more than two sessions need to share one room, or
+- the user explicitly asked for a cchat room.
+
+`ETIQUETTE.md` applies either way.
 
 ## How to call
 
