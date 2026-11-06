@@ -99,16 +99,23 @@ export const ENFORCES_MARKER_RE = /graphrag:enforces\s+(constraint:[a-z0-9._-]+:
 // skip 検出は言語別ベストエフォート (同居する無関係テストの skip も拾い得る — だから warn 止まり)。
 // 「検査が本当にその不変条件を見ているか」の意味ドリフトは機械では捕まらない: それは
 // marker-missing / レビューの守備範囲。
+// 行単位の字句一致なので実行条件・到達性は評価しない: コメント/文字列内の一致も拾う (既知の限界)、
+// 複数行・alias/分割代入・呼び出しを挟むチェーン (test.each(...).skip) は拾えない。
+// JS の skip は呼び出しに限らず参照も拾う (issue #47: `cond ? describe.skip : describe` のような
+// 条件付き skip)。receiver をテスト API 名に限るのは audit.skip() / obj.skipIf() を拾わないため。
+const JS_TEST_RECEIVER = String.raw`\b(?:it|test|describe|suite|context)(?:\.\w+)*`;
 const SKIP_PATTERNS: { re: RegExp; label: string }[] = [
-  { re: /\b(?:it|test|describe)\.skip\s*\(/, label: "it/test/describe.skip" },
+  { re: new RegExp(String.raw`${JS_TEST_RECEIVER}\.skip\b`), label: "it/test/describe.skip" },
+  { re: new RegExp(String.raw`${JS_TEST_RECEIVER}\.(?:skipIf|runIf)\s*\(`), label: "skipIf/runIf (conditional)" },
   { re: /\bx(?:it|describe|test)\s*\(/, label: "xit/xdescribe/xtest" },
   { re: /\btest\.todo\s*\(/, label: "test.todo" },
   { re: /@Disabled\b/, label: "@Disabled (JUnit5)" },
   { re: /@Ignore\b/, label: "@Ignore (JUnit4)" },
   { re: /#\[ignore/, label: "#[ignore] (Rust)" },
   { re: /@pytest\.mark\.skip/, label: "@pytest.mark.skip" },
+  { re: /\bpytest\.skip\s*\(/, label: "pytest.skip()" },
   { re: /@unittest\.skip/, label: "@unittest.skip" },
-  { re: /\bt\.Skip\(/, label: "t.Skip (Go)" }
+  { re: /\bt\.Skip(?:f|Now)?\s*\(/, label: "t.Skip/Skipf/SkipNow (Go)" }
 ];
 
 function defaultFileExists(root: string, relPath: string): boolean {

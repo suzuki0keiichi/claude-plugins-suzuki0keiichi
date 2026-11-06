@@ -132,6 +132,55 @@ test("enforcer-skipped: skip マーカー (it.skip / @Disabled 等) は warn + �
   assert.match(f!.next_step, /un-skip|unrelated/i);
 });
 
+function skippedFinding(body: string) {
+  const vault = writeVaultFromGraph(baseGraph());
+  const res = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": `${MARKER}\n${body}\n` })
+  );
+  return res.findings.find((x) => x.kind === "enforcer-skipped");
+}
+
+test("enforcer-skipped: 条件付き skip (三項演算子の参照 / チェーン / skipIf・runIf) も拾う (issue #47)", () => {
+  const cases: [string, RegExp][] = [
+    [`const describeX = cond ? describe.skip : describe;`, /it\/test\/describe\.skip/],
+    [`(cond ? describe.skip : describe)("x", () => {});`, /it\/test\/describe\.skip/],
+    [`it.skip.each([1, 2])("x %i", () => {});`, /it\/test\/describe\.skip/],
+    [`test.concurrent.skip("x", () => {});`, /it\/test\/describe\.skip/],
+    [`describe.skipIf(cond)("x", () => {});`, /skipIf\/runIf/],
+    [`it.skipIf(cond)("x", () => {});`, /skipIf\/runIf/],
+    [`describe.runIf(!cond)("x", () => {});`, /skipIf\/runIf/],
+    [`  t.Skipf("needs %s", os)`, /Skipf\/SkipNow \(Go\)/],
+    [`  t.SkipNow()`, /Skipf\/SkipNow \(Go\)/],
+    [`    pytest.skip("windows only")`, /pytest\.skip\(\)/]
+  ];
+  for (const [body, label] of cases) {
+    const f = skippedFinding(body);
+    assert.ok(f, `should detect: ${body}`);
+    assert.equal(f!.line, 2, body);
+    assert.match(f!.detail, label, body);
+  }
+});
+
+test("enforcer-skipped: テスト API 以外の .skip / .skipIf は拾わない", () => {
+  for (const body of [
+    `audit.skip();`,
+    `obj.skipIf(cond);`,
+    `reader.runIf(ready);`,
+    `const opts = { skipEmpty: true };`,
+    `describe("skipping rules", () => {});`
+  ]) {
+    assert.equal(skippedFinding(body), undefined, `should not detect: ${body}`);
+  }
+});
+
+// 既知の限界の characterization: 行単位の字句一致なのでコメント/文字列内も拾う。
+// 字句除去を入れたらこのテストを「拾わない」側へ更新する。
+test("enforcer-skipped: コメント/文字列内の skip も拾う (既知の限界)", () => {
+  assert.ok(skippedFinding(`// describe.skip is not allowed here`));
+  assert.ok(skippedFinding(`const doc = "use it.skipIf(cond) for platform tests";`));
+});
+
 test("marker-missing: enforcer は実在するがマーカーが無ければ warn (追記すべき行を明示)", () => {
   const vault = writeVaultFromGraph(baseGraph());
   const res = constraintCheck(
