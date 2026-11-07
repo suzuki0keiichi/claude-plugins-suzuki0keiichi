@@ -149,7 +149,7 @@ test("YAML の未対応構文 (anchor / tag / 同一行の - ) は不正", () =>
 
 test("VAULT.md が読めない (アクセス不能 / dangling symlink) は absent でなく invalid → 書き込み拒否", (t) => {
   if (process.getuid?.() === 0) {
-    t.skip("root は EACCES を再現できない");
+    t.skip("root は EACCES を再現できない"); // graphrag:skip-unrelated b618e40f root 実行時だけの環境条件。Constraint を守るのは marker 直下の fail-closed テスト
     return;
   }
   const root = mkdtempSync(path.join(tmpdir(), "write-policy-perm-"));

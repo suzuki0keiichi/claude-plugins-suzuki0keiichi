@@ -5,7 +5,13 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildVaultFiles } from "./build-vault.ts";
-import { constraintCheck, ENFORCES_MARKER_RE, type ConstraintCheckDeps, type MarkerHit } from "./constraint-check.ts";
+import {
+  constraintCheck,
+  ENFORCES_MARKER_RE,
+  skipLineFingerprint,
+  type ConstraintCheckDeps,
+  type MarkerHit
+} from "./constraint-check.ts";
 
 // 合成 graph → 本物の vault ファイルに書いてから読む (staleness-check.test と同じ経路忠実主義)。
 function writeVaultFromGraph(graph: Record<string, unknown>): string {
@@ -152,7 +158,16 @@ test("enforcer-skipped: 条件付き skip (三項演算子の参照 / チェー�
     [`describe.runIf(!cond)("x", () => {});`, /skipIf\/runIf/],
     [`  t.Skipf("needs %s", os)`, /Skipf\/SkipNow \(Go\)/],
     [`  t.SkipNow()`, /Skipf\/SkipNow \(Go\)/],
-    [`    pytest.skip("windows only")`, /pytest\.skip\(\)/]
+    [`    pytest.skip("windows only")`, /pytest\.skip\(\)/],
+    // issue #48
+    [`    t.skip("root cannot reproduce EACCES");`, /t\.skip\/t\.todo \(node:test\)/],
+    [`  t.todo("later");`, /t\.skip\/t\.todo \(node:test\)/],
+    [`  context.todo("later");`, /test\.todo/],
+    [`@DisabledOnOs(OS.WINDOWS)`, /conditional \(JUnit5\)/],
+    [`@EnabledIfEnvironmentVariable(named = "CI", matches = "true")`, /conditional \(JUnit5\)/],
+    [`#[cfg_attr(windows, ignore)]`, /cfg_attr\(\.\.\., ignore\)/],
+    [`#[cfg_attr(windows, ignore = "flaky on windows")]`, /cfg_attr\(\.\.\., ignore\)/],
+    [`describe.only("focus", () => {});`, /\.only \(exclusive selection/]
   ];
   for (const [body, label] of cases) {
     const f = skippedFinding(body);
@@ -168,10 +183,79 @@ test("enforcer-skipped: テスト API 以外の .skip / .skipIf は拾わない"
     `obj.skipIf(cond);`,
     `reader.runIf(ready);`,
     `const opts = { skipEmpty: true };`,
-    `describe("skipping rules", () => {});`
+    `describe("skipping rules", () => {});`,
+    // { skip: cond } options は行単位で本体内オブジェクトと区別できないので拾わない (issue #48 で見送り)
+    `test("x", { skip: process.platform === "win32" }, () => {});`,
+    `test("x", () => { const config = { skip: true }; });`,
+    `#[cfg_attr(feature = "ignore", allow(dead_code))]`,
+    `#[cfg_attr(any(unix, ignore), allow(dead_code))]`,
+    `@EnabledFeature("x")`,
+    `const rows = query.only(1);`
   ]) {
     assert.equal(skippedFinding(body), undefined, `should not detect: ${body}`);
   }
+});
+
+const ackLine = (code: string, reason = "root 実行時だけの環境条件") =>
+  `${code} // graphrag:skip-unrelated ${skipLineFingerprint(code)} ${reason}`;
+
+test("enforcer-skipped: 同じ行の graphrag:skip-unrelated <fingerprint> <理由> で確認済み — 新しい skip 行は再び warn (issue #48)", () => {
+  const acked = ackLine(`  t.skip("root only");`);
+  const vault = writeVaultFromGraph(baseGraph());
+  const res = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": `${MARKER}\n${acked}\n` })
+  );
+  assert.equal(res.findings.find((x) => x.kind === "enforcer-skipped"), undefined);
+  assert.deepEqual(res.acknowledged_skips, [
+    { path: "test/pay-io.test.ts", line: 2, label: "t.skip/t.todo (node:test)", reason: "root 実行時だけの環境条件" }
+  ]);
+
+  const f = skippedFinding(`${acked}\nit.skip("new skip", () => {});`);
+  assert.ok(f);
+  assert.equal(f!.line, 3);
+  assert.doesNotMatch(f!.detail, /root only/);
+  assert.match(f!.detail, /1 other skip line\(s\) are acknowledged/);
+  const fp = skipLineFingerprint(`it.skip("new skip", () => {});`);
+  assert.match(f!.next_step, new RegExp(`L3 \`graphrag:skip-unrelated ${fp} <reason>\``));
+});
+
+test("enforcer-skipped: 確認後に同じ行の条件を書き換えたり skip を足したりすると stale として再び warn", () => {
+  const acked = ackLine(`it.skipIf(isWindows)("x", () => {});`);
+  const changed = acked.replace("isWindows", "isLinux");
+  const f = skippedFinding(changed);
+  assert.ok(f);
+  assert.match(f!.detail, /stale graphrag:skip-unrelated/);
+  assert.ok(skippedFinding(acked.replace(`it.skipIf`, `it.skip("y"); it.skipIf`)));
+});
+
+test("enforcer-skipped: 理由の無い印・文字列内の印・別の行の印では確認済みにならない", () => {
+  const code = `  t.skip("x");`;
+  const fp = skipLineFingerprint(code);
+  assert.ok(skippedFinding(`${code} // graphrag:skip-unrelated ${fp}`));
+  assert.ok(skippedFinding(`  t.skip("graphrag:skip-unrelated ${fp} hidden in a string");`));
+  assert.ok(skippedFinding(`// graphrag:skip-unrelated ${fp} reason on the previous line\n${code}`));
+});
+
+test("enforcer-skipped: ブロックコメントの印は無効 — 印の後ろに足した skip が fingerprint から漏れない", () => {
+  const code = `t.skip("unrelated");`;
+  const blockAck = `${code} /* graphrag:skip-unrelated ${skipLineFingerprint(code)} unrelated */`;
+  assert.ok(skippedFinding(blockAck));
+  const f = skippedFinding(`${blockAck} it.skip("actual invariant", () => {});`);
+  assert.ok(f);
+  assert.match(f!.detail, /actual invariant/);
+  // 印が行コメント記号の直後でない (/* note 印 …) なら、引用符でコメント末尾を隠しても受理しない
+  const tricky = `t.skip("unrelated"); /* note graphrag:skip-unrelated ${skipLineFingerprint(`t.skip("unrelated"); /* note `)} "reason */ it.skip('actual invariant', () => {}); //"`;
+  assert.ok(skippedFinding(tricky));
+  // コメント記号の無い印も受理しない
+  assert.ok(skippedFinding(`${code} graphrag:skip-unrelated ${skipLineFingerprint(code)} unrelated`));
+});
+
+test("enforcer-skipped: .only は確認済みにできない (その行のテスト自身は走り、別の enforcer を止め得る)", () => {
+  const f = skippedFinding(ackLine(`describe.only("focus", () => {});`, "無関係"));
+  assert.ok(f);
+  assert.match(f!.detail, /\.only/);
+  assert.match(f!.next_step, /\.only cannot be acknowledged/);
 });
 
 // 既知の限界の characterization: 行単位の字句一致なのでコメント/文字列内も拾う。

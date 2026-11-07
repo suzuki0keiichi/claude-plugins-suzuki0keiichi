@@ -21,7 +21,8 @@
  * finding kinds (stable id):
  *   - enforcer-missing        : enforced_by の宛先 path がディスクに無い (= 強制の約束が実行不能) = ERROR
  *   - enforcer-skipped        : enforcer ファイルに skip マーカー (it.skip / @Disabled / #[ignore] 等、
- *                               言語別ベストエフォート) = WARN
+ *                               言語別ベストエフォート) = WARN。同じ行に `graphrag:skip-unrelated <理由>`
+ *                               がある skip は確認済みとして数えない
  *   - marker-missing          : enforcer ファイルに `graphrag:enforces <id>` コメントが無い
  *                               (検査を消す/骨抜きにする人への現場警告が無い) = WARN
  *   - unguarded               : enforced_by も enforcement:"none" 宣言も無い Constraint = WARN
@@ -42,6 +43,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { importVault } from "./import-vault.ts";
@@ -75,6 +77,8 @@ export interface ConstraintCheckResult {
   constraints: { total: number; enforced: number; unenforceable: number; unguarded: number };
   findings: ConstraintCheckFinding[];
   counts: { errors: number; warnings: number; markers_scanned: number };
+  /** graphrag:skip-unrelated で確認済みにされ warn から外れた skip 行 (免除の監査用に必ず可視化)。 */
+  acknowledged_skips: { path: string; line: number; label: string; reason: string }[];
   note: string;
 }
 
@@ -104,19 +108,59 @@ export const ENFORCES_MARKER_RE = /graphrag:enforces\s+(constraint:[a-z0-9._-]+:
 // JS の skip は呼び出しに限らず参照も拾う (issue #47: `cond ? describe.skip : describe` のような
 // 条件付き skip)。receiver をテスト API 名に限るのは audit.skip() / obj.skipIf() を拾わないため。
 const JS_TEST_RECEIVER = String.raw`\b(?:it|test|describe|suite|context)(?:\.\w+)*`;
-const SKIP_PATTERNS: { re: RegExp; label: string }[] = [
+// ackable:false = graphrag:skip-unrelated で確認済みにできない。.only はその行のテスト自身は走り、
+// 別の場所の enforcer を止め得るので「この行は無関係」が免除の根拠にならない。
+const SKIP_PATTERNS: { re: RegExp; label: string; ackable?: false; refine?: (line: string) => boolean }[] = [
   { re: new RegExp(String.raw`${JS_TEST_RECEIVER}\.skip\b`), label: "it/test/describe.skip" },
   { re: new RegExp(String.raw`${JS_TEST_RECEIVER}\.(?:skipIf|runIf)\s*\(`), label: "skipIf/runIf (conditional)" },
+  { re: new RegExp(String.raw`${JS_TEST_RECEIVER}\.todo\s*\(`), label: "test.todo" },
+  {
+    re: new RegExp(String.raw`${JS_TEST_RECEIVER}\.only\b`),
+    label: ".only (exclusive selection — may exclude other tests)",
+    ackable: false
+  },
   { re: /\bx(?:it|describe|test)\s*\(/, label: "xit/xdescribe/xtest" },
-  { re: /\btest\.todo\s*\(/, label: "test.todo" },
+  // node:test: context の変数名が t の時だけ拾う (任意名は字句では追えない)。t.skip() は関数を止めない
+  // (以降も実行される) ので「skip の兆候」として扱う。{ skip: cond } options は拾わない: 行単位では
+  // テスト本体内のオブジェクトや `false || cond` と区別できない (issue #48 で見送り)。
+  { re: /\bt\.(?:skip|todo)\s*\(/, label: "t.skip/t.todo (node:test)" },
   { re: /@Disabled\b/, label: "@Disabled (JUnit5)" },
+  {
+    re: /@(?:Disabled|Enabled)(?:OnOs|OnJre|ForJreRange|If|IfSystemPropert(?:y|ies)|IfEnvironmentVariables?|InNativeImage)\b/,
+    label: "conditional (JUnit5)"
+  },
   { re: /@Ignore\b/, label: "@Ignore (JUnit4)" },
   { re: /#\[ignore/, label: "#[ignore] (Rust)" },
+  // ignore を predicate 側 (feature = "ignore" / any(unix, ignore)) でなく attribute 側に限る — 最上位の引数を数える。
+  { re: /#\[cfg_attr\(/, label: "#[cfg_attr(..., ignore)] (Rust)", refine: rustCfgAttrIgnores },
   { re: /@pytest\.mark\.skip/, label: "@pytest.mark.skip" },
   { re: /\bpytest\.skip\s*\(/, label: "pytest.skip()" },
   { re: /@unittest\.skip/, label: "@unittest.skip" },
   { re: /\bt\.Skip(?:f|Now)?\s*\(/, label: "t.Skip/Skipf/SkipNow (Go)" }
 ];
+
+/** `#[cfg_attr(<predicate>, <attr>, ...)]` の最上位引数を分け、2番目以降 (attribute 側) に ignore があるか。1行で閉じない属性は拾えない (既知の限界)。 */
+function rustCfgAttrIgnores(line: string): boolean {
+  const code = stripQuotedInLine(line);
+  const open = code.indexOf("#[cfg_attr(");
+  if (open < 0) return false;
+  const args: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of code.slice(open + "#[cfg_attr(".length)) {
+    if (ch === ")" && depth === 0) {
+      args.push(cur);
+      return args.slice(1).some((a) => /^\s*ignore\b/.test(a));
+    }
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      args.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  return false;
+}
 
 function defaultFileExists(root: string, relPath: string): boolean {
   return existsSync(path.join(root, relPath));
@@ -162,14 +206,62 @@ function defaultGrepMarkers(root: string): MarkerHit[] {
   return hits;
 }
 
-function scanSkipMarkers(content: string): { line: number; label: string; text: string }[] {
-  const found: { line: number; label: string; text: string }[] = [];
+/**
+ * 同居する無関係な skip の確認済み印: skip と同じ行のコメントに
+ * `graphrag:skip-unrelated <fingerprint> <理由>`。意味は「このファイルが enforcer として守る
+ * **全ての** Constraint と無関係」(強い宣言 — 一部の Constraint だけに無関係な skip には使わない)。
+ * fingerprint は印を除いた行の sha256 先頭 8 桁で、行内の条件・skip API の変更や同じ行への skip 追加で
+ * 一致しなくなり再び warn になる (#46 の resurrection_ack を削除世代に束縛したのと同じ考え方 —
+ * ソース上の永久免除にしない)。別の行にある条件の変更は追えない (既知の限界)。理由の無い印は無効。
+ * 印は行コメント記号 (// # --) の直後に置いた時だけ有効 (禁止パターンの列挙でなく、行コメントの開始位置を
+ * 特定できた時だけ受理する)。その位置で fingerprint を切るので、印の後ろはコメントであってコードではない。
+ * 印より後ろ (生の行) にブロックコメントの閉じ記号があれば無効 — ブロックコメントの中では印の後ろにコードを続けられ、そのコードが
+ * fingerprint から漏れるため。文字列リテラル内の印も数えない。
+ * 正しい fingerprint は warn の next_step にそのまま貼れる形で出す。
+ */
+const SKIP_ACK_TOKEN = "graphrag:skip-unrelated";
+const SKIP_ACK_RE = /^graphrag:skip-unrelated\s+([0-9a-f]{8})\s+(\S.*)$/;
+const LINE_COMMENT_OPENER_RE = /(?:\/\/|#|--)\s*$/;
+
+export function skipLineFingerprint(line: string): string {
+  const at = line.lastIndexOf(SKIP_ACK_TOKEN);
+  const code = (at >= 0 ? line.slice(0, at) : line).replace(LINE_COMMENT_OPENER_RE, "").trim();
+  return createHash("sha256").update(code).digest("hex").slice(0, 8);
+}
+
+/** 行コメント記号の直後にある、文字列外の印だけを解析する。判別できなければ null (= ack しない)。 */
+function parseSkipAck(line: string): { fingerprint: string; reason: string } | null {
+  if (!stripQuotedInLine(line).includes(SKIP_ACK_TOKEN)) return null;
+  const at = line.lastIndexOf(SKIP_ACK_TOKEN);
+  if (!LINE_COMMENT_OPENER_RE.test(line.slice(0, at))) return null;
+  const rest = line.slice(at);
+  if (rest.includes("*/")) return null;
+  const m = rest.match(SKIP_ACK_RE);
+  return m ? { fingerprint: m[1], reason: m[2].trim() } : null;
+}
+
+type SkipHit = {
+  line: number;
+  label: string;
+  text: string;
+  fingerprint: string;
+  ack: { state: "valid" | "stale"; reason: string } | null;
+};
+
+function scanSkipMarkers(content: string): SkipHit[] {
+  const found: SkipHit[] = [];
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    for (const p of SKIP_PATTERNS) {
-      if (p.re.test(lines[i])) {
-        found.push({ line: i + 1, label: p.label, text: lines[i].trim() });
-      }
+    const hits = SKIP_PATTERNS.filter((p) => p.re.test(lines[i]) && (p.refine?.(lines[i]) ?? true));
+    if (hits.length === 0) continue;
+    const fingerprint = skipLineFingerprint(lines[i]);
+    const parsed = parseSkipAck(lines[i]);
+    for (const p of hits) {
+      const ack =
+        parsed && p.ackable !== false
+          ? { state: parsed.fingerprint === fingerprint ? ("valid" as const) : ("stale" as const), reason: parsed.reason }
+          : null;
+      found.push({ line: i + 1, label: p.label, text: lines[i].trim(), fingerprint, ack });
     }
   }
   return found;
@@ -204,6 +296,7 @@ export function constraintCheck(
       constraints: { total: 0, enforced: 0, unenforceable: 0, unguarded: 0 },
       findings: [],
       counts: { errors: 0, warnings: 0, markers_scanned: 0 },
+      acknowledged_skips: [],
       note:
         "project vault — enforcement wiring is a system-vault concept (no File nodes; constraints here are " +
         "external conditions by nature). Nothing to check."
@@ -235,6 +328,7 @@ export function constraintCheck(
   }
 
   const findings: ConstraintCheckFinding[] = [];
+  const acknowledgedSkips = new Map<string, ConstraintCheckResult["acknowledged_skips"][number]>();
 
   // ── グラフ → コード: 各 Constraint の配線を検査 ─────────────────────────────
   let enforcedCount = 0;
@@ -356,7 +450,14 @@ export function constraintCheck(
         });
         continue;
       }
-      const skips = scanSkipMarkers(content);
+      const allSkips = scanSkipMarkers(content);
+      const skips = allSkips.filter((s) => s.ack?.state !== "valid");
+      for (const s of allSkips) {
+        if (s.ack?.state === "valid") acknowledgedSkips.set(`${enf.filePath}:${s.line}:${s.label}`, {
+          path: enf.filePath, line: s.line, label: s.label, reason: s.ack.reason
+        });
+      }
+      const ackedCount = allSkips.length - skips.length;
       if (skips.length > 0) {
         findings.push({
           kind: "enforcer-skipped",
@@ -366,11 +467,18 @@ export function constraintCheck(
           line: skips[0].line,
           detail:
             `enforcer ${enf.filePath} contains skip marker(s): ` +
-            skips.map((s) => `L${s.line} ${s.label} (${s.text})`).join("; ") +
-            ". A skipped check enforces nothing (best-effort detection — a skip of an unrelated test in the same file is possible).",
+            skips.map((s) => `L${s.line} ${s.label} (${s.text})${s.ack?.state === "stale" ? " [stale graphrag:skip-unrelated — the line changed since it was acknowledged]" : ""}`).join("; ") +
+            ". A skipped check enforces nothing (best-effort detection — a skip of an unrelated test in the same file is possible)." +
+            (ackedCount > 0 ? ` ${ackedCount} other skip line(s) are acknowledged as unrelated (graphrag:skip-unrelated).` : ""),
           next_step:
             "Open the file and check whether the skipped test is the one guarding this constraint. If yes: un-skip it " +
-            "or fix whatever made it get skipped — the constraint is currently unenforced. If the skip is unrelated, no action."
+            "or fix whatever made it get skipped — the constraint is currently unenforced. If the skip is " +
+            "unrelated to EVERY constraint this file enforces, acknowledge it with a comment on that same line: " +
+            skips
+              .filter((s) => SKIP_PATTERNS.find((p) => p.label === s.label)?.ackable !== false)
+              .map((s) => `L${s.line} \`${SKIP_ACK_TOKEN} ${s.fingerprint} <reason>\``)
+              .join("; ") +
+            " (the fingerprint binds it to the current line; editing the line warns again). .only cannot be acknowledged."
         });
       }
       const markerIds = new Set(
@@ -491,6 +599,7 @@ export function constraintCheck(
     constraints: { total: constraints.length, enforced: enforcedCount, unenforceable: unenforceableCount, unguarded: unguardedCount },
     findings,
     counts: { errors, warnings, markers_scanned: markers.length },
+    acknowledged_skips: [...acknowledgedSkips.values()],
     note:
       "Read-only wiring check. Running the enforcers themselves is CI / pre-commit / the graphrag-pr-review " +
       "mechanical pass's job — this verb only detects rot in the wiring, in both directions (graph→code and " +
