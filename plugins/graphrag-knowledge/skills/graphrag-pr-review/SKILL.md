@@ -26,7 +26,10 @@ M. **Mechanical enforcement pass (deterministic — runs BEFORE any LLM matching
    skipped; marker orphaned; enforcer unregistered). Carry into the findings: **every `error`** (top of the ACK
    band — the graph promises enforcement that can no longer run), plus every `warn` whose `constraint_id` or
    `file_path` intersects the diff (e.g. the diff deletes or skips an enforcer, or adds a check whose
-   `graphrag:enforces` marker is unregistered — surface its ready-made `plan_fragment` as the resolution). Unguarded
+   `graphrag:enforces` marker is unregistered — surface its ready-made `plan_fragment` as the resolution). Also carry
+   every `covered_skips` entry whose `path`, any `covered_by` path, or `constraint_id` intersects the diff (advisory
+   band): that skip does not warn only because another enforcer of the constraint looks skip-free — confirm `covered_by`
+   really checks the same constraint and runs (a diff that weakens the alternative itself shows up only via `covered_by`). Unguarded
    constraints outside the diff go to the accounting (§4), not the findings. The LLM interrogation of
    Constraints in step 5 starts FROM this output, not instead of it.
    Then run `$CLI frame-check --diff <base>...<head> --root <repo>` (placement pass, same determinism): carry

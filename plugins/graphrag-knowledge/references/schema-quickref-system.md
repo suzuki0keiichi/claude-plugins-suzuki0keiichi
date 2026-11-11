@@ -26,7 +26,7 @@ Canonical source: `graphrag/schema.ts`. This file covers the **system** preset (
 
 - `documented_by`: Decision|RejectedOption|Risk|OK|Investigation|Deliverable|Goal → File (Goal → File is the "deferred work lives HERE" wiring: a `state: planned` Goal wired to the files where the debt sits gets resurfaced by `delta-check` the moment a commit touches them. `add-goal --evidence file:<s>:<path>` — optional, unlike other typed-adds)
 - `evidenced_by`: Layer|Concern|Component → File
-- `enforced_by`: Constraint → File (**mechanical consumer** — the executable check (test / lint config / type definition) that FAILS when the constraint is violated. Put a comment marker `graphrag:enforces constraint:<system>:<slug>` inside that file; `constraint-check` cross-verifies both directions and hands back ready-made plan fragments for unregistered markers.)
+- `enforced_by`: Constraint → File (**mechanical consumer** — the executable check (test / lint config / type definition) that FAILS when the constraint is violated. Put a comment marker `graphrag:enforces constraint:<system>:<slug>` inside that file; `constraint-check` cross-verifies both directions and hands back ready-made plan fragments for unregistered markers. Several `enforced_by` on one Constraint mean each check enforces it **on its own**; if they only enforce it together, split the Constraint.)
 - `targets`: Goal → Deliverable
 - `derived_from`: Decision|RejectedOption|Risk|OK|Goal|Investigation → ConversationChunk|Investigation (**provenance** — "where did this knowledge come from". Unlike `has_premise` which is logical dependency.)
 - `discussed_in`: ConversationChunk → Investigation

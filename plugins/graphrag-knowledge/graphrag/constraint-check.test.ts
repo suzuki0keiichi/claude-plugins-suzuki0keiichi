@@ -255,7 +255,234 @@ test("enforcer-skipped: .only は確認済みにできない (その行のテス
   const f = skippedFinding(ackLine(`describe.only("focus", () => {});`, "無関係"));
   assert.ok(f);
   assert.match(f!.detail, /\.only/);
-  assert.match(f!.next_step, /\.only cannot be acknowledged/);
+  assert.match(f!.next_step, /Remove the \.only \(L2\).*neither acknowledged nor covered/);
+  // .only だけの finding に確認済みの印や代替の登記は案内しない (自己矛盾した処方にしない)
+  assert.doesNotMatch(f!.next_step, /graphrag:skip-unrelated|register another enforcer/);
+});
+
+test("enforcer-skipped: CRLF の行でも graphrag:skip-unrelated が LF と同じに読まれ、行の変更で stale になる (issue #49)", () => {
+  const code = `  t.skip("root only");`;
+  const acked = ackLine(code);
+  const crlfVault = writeVaultFromGraph(baseGraph());
+  const run = (content: string) =>
+    constraintCheck({ vaultDir: crlfVault, root: "/repo" }, fakeRepo({ "test/pay-io.test.ts": content }));
+  const lf = run(`${MARKER}\n${acked}\n`);
+  const crlf = run(`${MARKER}\r\n${acked}\r\n`);
+  const acked2 = ackLine(`  t.skip("non-root only");`);
+  const mixed = run(`${MARKER}\n${acked}\r\n${acked2}\n`);
+  assert.equal(lf.status, "ok");
+  assert.equal(crlf.status, "ok");
+  assert.deepEqual(crlf.acknowledged_skips, lf.acknowledged_skips);
+  assert.equal(mixed.status, "ok");
+  assert.deepEqual(mixed.acknowledged_skips.map((s) => s.line), [2, 3]);
+  // 印として無効な形は CRLF でも無効のまま (理由なし・文字列内・ブロックコメント)
+  const fp = skipLineFingerprint(code);
+  for (const bad of [
+    `${code} // graphrag:skip-unrelated ${fp}`,
+    `  t.skip("graphrag:skip-unrelated ${fp} hidden in a string");`,
+    `${code} /* graphrag:skip-unrelated ${fp} unrelated */`
+  ]) {
+    assert.ok(run(`${MARKER}\r\n${bad}\r\n`).findings.some((x) => x.kind === "enforcer-skipped"), bad);
+  }
+  const stale = run(`${MARKER}\r\n${acked.replace("root only", "root-only")}\r\n`);
+  assert.match(stale.findings.find((x) => x.kind === "enforcer-skipped")!.detail, /stale graphrag:skip-unrelated/);
+  // .only は CRLF でも免除できない
+  assert.ok(run(`${MARKER}\r\n${ackLine(`describe.only("focus", () => {});`, "無関係")}\r\n`).findings.some((x) => x.kind === "enforcer-skipped"));
+});
+
+// 判定単位は Constraint (issue #49): 同じ制約に enforcer を 2 本 (pay-io = skip あり, pay-alt = 代替) 登記する。
+function twoEnforcerGraph(altNodes: any[] = []) {
+  return baseGraph(
+    [{ id: "file:sys:test/pay-alt.test.ts", type: "File", title: "pay-alt.test", path: "test/pay-alt.test.ts", summary: "代替検査" }, ...altNodes],
+    [{ id: "e-e2", type: "enforced_by", from: "constraint:sys:no-sync-io", to: "file:sys:test/pay-alt.test.ts" }]
+  );
+}
+const SKIPPED = `${MARKER}\nit.skipIf(isWindows)("sync io guard", () => {});\n`;
+const CLEAN_ALT = `${MARKER}\nit("sync io guard (injected)", () => {});\n`;
+
+test("enforcer-skipped: 未確認 skip の無い代替 enforcer が登記されていれば warn にせず covered_skips に出す (issue #49)", () => {
+  const res = constraintCheck(
+    { vaultDir: writeVaultFromGraph(twoEnforcerGraph()), root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": SKIPPED, "test/pay-alt.test.ts": CLEAN_ALT })
+  );
+  assert.equal(res.status, "ok");
+  assert.deepEqual(res.covered_skips, [
+    {
+      constraint_id: "constraint:sys:no-sync-io",
+      path: "test/pay-io.test.ts",
+      line: 2,
+      label: "skipIf/runIf (conditional)",
+      covered_by: ["test/pay-alt.test.ts"]
+    }
+  ]);
+  assert.deepEqual(res.acknowledged_skips, []);
+});
+
+test("enforcer-skipped: 守り手の全てに skip があれば各ファイルで warn し、next_step で代替の登記を案内する", () => {
+  const res = constraintCheck(
+    { vaultDir: writeVaultFromGraph(twoEnforcerGraph()), root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": SKIPPED, "test/pay-alt.test.ts": `${MARKER}\nit.skipIf(isLinux)("x", () => {});\n` })
+  );
+  const skipped = res.findings.filter((x) => x.kind === "enforcer-skipped");
+  assert.deepEqual(skipped.map((x) => x.file_path).sort(), ["test/pay-alt.test.ts", "test/pay-io.test.ts"]);
+  assert.match(skipped[0].next_step, /register another enforcer that checks this constraint without a skip/);
+  assert.deepEqual(res.covered_skips, []);
+});
+
+test("enforcer-skipped: マーカーの無い / ディスクに無い / 読めない代替は数えず、その診断も消さない", () => {
+  const vault = writeVaultFromGraph(twoEnforcerGraph());
+  const noMarker = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": SKIPPED, "test/pay-alt.test.ts": `it("x", () => {});\n` })
+  );
+  assert.ok(noMarker.findings.some((x) => x.kind === "enforcer-skipped" && x.file_path === "test/pay-io.test.ts"));
+  assert.ok(noMarker.findings.some((x) => x.kind === "marker-missing" && x.file_path === "test/pay-alt.test.ts"));
+
+  const missing = constraintCheck({ vaultDir: vault, root: "/repo" }, fakeRepo({ "test/pay-io.test.ts": SKIPPED }));
+  assert.ok(missing.findings.some((x) => x.kind === "enforcer-skipped"));
+  assert.ok(missing.findings.some((x) => x.kind === "enforcer-missing" && x.file_path === "test/pay-alt.test.ts"));
+
+  const unreadable = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    { ...fakeRepo({ "test/pay-io.test.ts": SKIPPED }), fileExists: () => true }
+  );
+  assert.ok(unreadable.findings.some((x) => x.kind === "enforcer-skipped"));
+  assert.ok(unreadable.findings.some((x) => x.kind === "enforcer-missing" && /cannot be read/.test(x.detail)));
+  for (const res of [noMarker, missing, unreadable]) assert.deepEqual(res.covered_skips, []);
+});
+
+test("enforcer-skipped: .only を持つ制約では代替があっても何も covered にしない (別ファイルの代替ごと止め得る)", () => {
+  const vault = writeVaultFromGraph(twoEnforcerGraph());
+  const sameFile = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({
+      "test/pay-io.test.ts": `${MARKER}\ndescribe.only("focus", () => {});\nit.skipIf(isWindows)("x", () => {});\n`,
+      "test/pay-alt.test.ts": CLEAN_ALT
+    })
+  );
+  const f = sameFile.findings.find((x) => x.kind === "enforcer-skipped");
+  assert.ok(f);
+  assert.match(f!.detail, /L2 \.only.*L3 skipIf/);
+  assert.match(f!.next_step, /Remove the \.only \(L2\)/);
+  assert.match(f!.next_step, /L3 `graphrag:skip-unrelated [0-9a-f]{8} <reason>`/);
+  assert.deepEqual(sameFile.covered_skips, []);
+
+  // 代替側に .only: 代替は clean でなく、skip した側も warn のまま
+  const inAlt = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": SKIPPED, "test/pay-alt.test.ts": `${MARKER}\ndescribe.only("focus", () => {});\n` })
+  );
+  assert.deepEqual(inAlt.findings.filter((x) => x.kind === "enforcer-skipped").map((x) => x.file_path).sort(), [
+    "test/pay-alt.test.ts",
+    "test/pay-io.test.ts"
+  ]);
+  assert.deepEqual(inAlt.covered_skips, []);
+
+  // 3 本目の enforcer に .only: clean な代替があっても covered にしない
+  const graph = twoEnforcerGraph([
+    { id: "file:sys:test/pay-third.test.ts", type: "File", title: "pay-third.test", path: "test/pay-third.test.ts", summary: "検査" }
+  ]);
+  graph.edges.push({ id: "e-e4", type: "enforced_by", from: "constraint:sys:no-sync-io", to: "file:sys:test/pay-third.test.ts" });
+  const third = constraintCheck(
+    { vaultDir: writeVaultFromGraph(graph), root: "/repo" },
+    fakeRepo({
+      "test/pay-io.test.ts": SKIPPED,
+      "test/pay-alt.test.ts": CLEAN_ALT,
+      "test/pay-third.test.ts": `${MARKER}\nit.only("focus", () => {});\n`
+    })
+  );
+  const ioF = third.findings.find((x) => x.kind === "enforcer-skipped" && x.file_path === "test/pay-io.test.ts");
+  assert.ok(ioF);
+  // 別ファイルの .only が残る間は代替の登記で解消しないので、先に .only を案内し、代替の登記は案内しない
+  assert.match(ioF!.next_step, /Another enforcer of this constraint has \.only \(test\/pay-third\.test\.ts L2\)/);
+  assert.doesNotMatch(ioF!.next_step, /register another enforcer/);
+  assert.deepEqual(third.covered_skips, []);
+});
+
+test("enforcer-skipped: stale な印の代替は clean でなく、確認済みだけの代替は clean (acknowledged と covered は混ざらない)", () => {
+  const vault = writeVaultFromGraph(twoEnforcerGraph());
+  const staleAlt = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({
+      "test/pay-io.test.ts": SKIPPED,
+      "test/pay-alt.test.ts": `${MARKER}\n${ackLine(`it.skip("x", () => {});`).replace(`"x"`, `"y"`)}\n`
+    })
+  );
+  const staleSkipped = staleAlt.findings.filter((x) => x.kind === "enforcer-skipped");
+  assert.deepEqual(staleSkipped.map((x) => x.file_path).sort(), ["test/pay-alt.test.ts", "test/pay-io.test.ts"]);
+  assert.match(staleSkipped.find((x) => x.file_path === "test/pay-alt.test.ts")!.detail, /stale graphrag:skip-unrelated/);
+  assert.deepEqual(staleAlt.covered_skips, []);
+
+  const ackedAlt = constraintCheck(
+    { vaultDir: vault, root: "/repo" },
+    fakeRepo({
+      "test/pay-io.test.ts": `${MARKER}\n${ackLine(`t.skip("root only");`)}\nit.skipIf(isWindows)("x", () => {});\n`,
+      "test/pay-alt.test.ts": `${MARKER}\n${ackLine(`t.skip("root only");`)}\nit("x", () => {});\n`
+    })
+  );
+  assert.equal(ackedAlt.status, "ok");
+  assert.equal(ackedAlt.counts.covered_skips, 1);
+  assert.deepEqual(ackedAlt.covered_skips.map((s) => [s.path, s.line, s.covered_by]), [
+    ["test/pay-io.test.ts", 3, ["test/pay-alt.test.ts"]]
+  ]);
+  assert.deepEqual(ackedAlt.acknowledged_skips.map((s) => [s.path, s.line]).sort(), [
+    ["test/pay-alt.test.ts", 2],
+    ["test/pay-io.test.ts", 2]
+  ]);
+});
+
+test("enforcer-skipped: stale な印の行は代替があっても covered にせず warn のまま (行の書き換えの信号を消さない)", () => {
+  const res = constraintCheck(
+    { vaultDir: writeVaultFromGraph(twoEnforcerGraph()), root: "/repo" },
+    fakeRepo({
+      "test/pay-io.test.ts": `${MARKER}\n${ackLine(`it.skipIf(isWindows)("x", () => {});`).replace("isWindows", "isLinux")}\nit.skip("y", () => {});\n`,
+      "test/pay-alt.test.ts": CLEAN_ALT
+    })
+  );
+  const f = res.findings.find((x) => x.kind === "enforcer-skipped");
+  assert.ok(f);
+  assert.equal(f!.line, 2);
+  assert.match(f!.detail, /stale graphrag:skip-unrelated/);
+  assert.match(f!.detail, /1 other skip line\(s\) are recorded in covered_skips/);
+  // 代替が既にあるので「代替を登記せよ」は案内しない
+  assert.doesNotMatch(f!.next_step, /register another enforcer/);
+  assert.deepEqual(res.covered_skips.map((s) => s.line), [3]);
+});
+
+test("enforcer-skipped: 代替が無くても stale な印の行だけなら「代替を登記」を案内しない (stale は covered にならない)", () => {
+  const f = skippedFinding(ackLine(`it.skipIf(isWindows)("x", () => {});`).replace("isWindows", "isLinux"));
+  assert.ok(f);
+  assert.match(f!.detail, /stale graphrag:skip-unrelated/);
+  assert.doesNotMatch(f!.next_step, /register another enforcer/);
+  assert.match(f!.next_step, /graphrag:skip-unrelated [0-9a-f]{8} <reason>/);
+});
+
+test("enforcer-skipped: CRLF の代替でも確認済みの行は clean とみなされ、他の enforcer の skip を covered にする", () => {
+  const res = constraintCheck(
+    { vaultDir: writeVaultFromGraph(twoEnforcerGraph()), root: "/repo" },
+    fakeRepo({
+      "test/pay-io.test.ts": SKIPPED,
+      "test/pay-alt.test.ts": `${MARKER}\r\n${ackLine(`t.skip("root only");`)}\r\nit("x", () => {});\r\n`
+    })
+  );
+  assert.equal(res.status, "ok");
+  assert.deepEqual(res.covered_skips.map((s) => s.path), ["test/pay-io.test.ts"]);
+});
+
+test("enforcer-skipped: 同じファイルが守る複数の Constraint は cid ごとに独立に判定する", () => {
+  const OTHER = "constraint:sys:no-net";
+  const graph = twoEnforcerGraph();
+  graph.nodes.push({ id: OTHER, type: "Constraint", title: "決済経路でネットワーク禁止", summary: "要約" });
+  graph.edges.push({ id: "e-e3", type: "enforced_by", from: OTHER, to: "file:sys:test/pay-io.test.ts" });
+  const res = constraintCheck(
+    { vaultDir: writeVaultFromGraph(graph), root: "/repo" },
+    fakeRepo({ "test/pay-io.test.ts": `${MARKER}\n${marker(OTHER)}\n${SKIPPED}`, "test/pay-alt.test.ts": CLEAN_ALT })
+  );
+  const skipped = res.findings.filter((x) => x.kind === "enforcer-skipped");
+  assert.deepEqual(skipped.map((x) => x.constraint_id), [OTHER]);
+  assert.deepEqual(res.covered_skips.map((s) => [s.constraint_id, s.covered_by]), [
+    ["constraint:sys:no-sync-io", ["test/pay-alt.test.ts"]]
+  ]);
 });
 
 // 既知の限界の characterization: 行単位の字句一致なのでコメント/文字列内も拾う。
